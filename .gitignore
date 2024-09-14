@@ -1,0 +1,7 @@
+data/
+dataset/
+# virtual environments
+.venv/
+venv_lapi/
+.gitignore
+
