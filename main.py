@@ -24,30 +24,30 @@ def main():
     seed = 42
     set_seed(seed)
 
-    # parser = ArgumentParser()
-    # # # in cmd: python main.py --model_name LightGCN --dataset_name ml-20m --config_file_name ml-20_config.yaml --users_top_percent 0.01 --users_dec_perc_drop 0.70 --community_dropout_strength 0.5 --do_power_nodes_from_community True
-    # parser.add_argument("--model_name", type=str, required=True, default='LightGCN')
-    # parser.add_argument("--dataset_name", type=str, default='ml-20m')
-    # parser.add_argument("--config_file_name", type=str, default=f'ml-20_config.yaml')
-    # parser.add_argument("--users_top_percent", type=float, default=0.01)
-    # parser.add_argument("--items_top_percent", type=float, default=0)
-    # parser.add_argument("--users_dec_perc_drop", type=float, default=0.70)
-    # parser.add_argument("--item_dec_perc_drop", type=float, default=0)
-    # parser.add_argument("--community_dropout_strength", type=float, default=0.)
-    # parser.add_argument("--do_power_nodes_from_community", type=bool, default=False)
-    #
-    # args = parser.parse_args()
+    parser = ArgumentParser()
+    # # in cmd: python main.py --model_name LightGCN --dataset_name ml-20m --config_file_name ml-20_config.yaml --users_top_percent 0.01 --users_dec_perc_drop 0.70 --community_dropout_strength 0.5 --do_power_nodes_from_community True
+    parser.add_argument("--model_name", type=str, default='LightGCN')
+    parser.add_argument("--dataset_name", type=str, default='ml-20m')
+    parser.add_argument("--config_file_name", type=str, default=f'ml-20_config.yaml')
+    parser.add_argument("--users_top_percent", type=float, default=0.01)
+    parser.add_argument("--items_top_percent", type=float, default=0.0)
+    parser.add_argument("--users_dec_perc_drop", type=float, default=0.70)
+    parser.add_argument("--items_dec_perc_drop", type=float, default=0.0)
+    parser.add_argument("--community_dropout_strength", type=float, default=0.0)
+    parser.add_argument("--do_power_nodes_from_community", type=bool, default=False)
+
+    args = parser.parse_args()
 
     # debugging args dict:
-    args = {'model_name': 'LightGCN', 'dataset_name': 'ml-100k', 'users_top_percent': 0.01, 'users_dec_perc_drop': 0.70, 'community_dropout_strength': 0.5, 'do_power_nodes_from_community': True, 'items_top_percent': 0, 'items_dec_perc_drop': 0}
-    model_name = args['model_name']
-    dataset_name = args['dataset_name']
-    users_top_percent = args['users_top_percent']
-    items_top_percent = args['items_top_percent']
-    users_dec_perc_drop = args['users_dec_perc_drop']
-    items_dec_perc_drop = args['items_dec_perc_drop']
-    do_power_nodes_from_community = args['do_power_nodes_from_community']
-    community_dropout_strength = args['community_dropout_strength']
+    # args = {'model_name': 'LightGCN', 'dataset_name': 'yoochoose', 'users_top_percent': 0.01, 'users_dec_perc_drop': 0.70, 'community_dropout_strength': 0.5, 'do_power_nodes_from_community': True, 'items_top_percent': 0, 'items_dec_perc_drop': 0}
+    model_name = args.model_name
+    dataset_name = args.dataset_name
+    users_top_percent = args.users_top_percent
+    items_top_percent = args.items_top_percent
+    users_dec_perc_drop = args.users_dec_perc_drop
+    items_dec_perc_drop = args.items_dec_perc_drop
+    do_power_nodes_from_community = args.do_power_nodes_from_community
+    community_dropout_strength = args.community_dropout_strength
 
     with open(f'{dataset_name}_config.yaml', 'r') as file:
         config_file = yaml.safe_load(file)
@@ -66,6 +66,8 @@ def main():
     logger.addHandler(c_handler)
     logger.info(config)
 
+    # set torch default device, check if this is already done in recbole.config
+    torch.set_default_device('cuda') if torch.cuda.is_available() else torch.set_default_device('cpu')
     dataset = create_dataset(config)  # object of shape (n, (user, item, rating))
 
     # preprocessing dataset
@@ -99,29 +101,40 @@ def main():
 
     train_data_coo = copy.deepcopy(train_data.dataset).inter_matrix()
     # combine row and col into torch.tensor of shape (n, 2) converting the data to numpy arrays and concatenating them
-    indices = np.array((train_data_coo.row, train_data_coo.col), dtype=np.int32).T
-    values = np.expand_dims(np.array(train_data_coo.data, dtype=np.int32), axis=0).T
-    adj_np = np.concatenate((indices, values), axis=1)
+    indices = torch.tensor((train_data_coo.row, train_data_coo.col), dtype=torch.int32).T
+    values = torch.unsqueeze(torch.tensor(train_data_coo.data, dtype=torch.int32), dim=0).T
+    adj_np = np.array(torch.cat((indices, values), dim=1), dtype=np.int64)
     del train_data_coo, indices, values
 
     if f'labels_uniq_undir_nonbip_Leiden.csv' not in os.listdir(f'dataset/{dataset_name}'):
         config.variable_config_dict['train_com_labels'] = torch.tensor(get_community_labels(adj_np=adj_np,
                                                           save_path=f'dataset/{dataset_name}',
-                                                          get_probs=True), dtype=torch.int32)
+                                                          get_probs=True), dtype=torch.int64)
     else:
-        config.variable_config_dict['train_com_labels'] = torch.tensor(np.loadtxt(f'dataset/{dataset_name}/labels_uniq_undir_nonbip_Leiden.csv'), dtype=torch.int32)
+        config.variable_config_dict['train_com_labels'] = torch.tensor(np.loadtxt(f'dataset/{dataset_name}/labels_uniq_undir_nonbip_Leiden.csv'), dtype=torch.int64)
 
-    # get torch.tensor of train_data.dataset
-
-    if f'power_nodes_ids.csv' not in os.listdir(f'dataset/{dataset_name}'):
+    if f'power_nodes_ids_com_wise_{do_power_nodes_from_community}.csv' not in os.listdir(f'dataset/{dataset_name}'):
         config.variable_config_dict['power_nodes_ids'] = torch.tensor(get_power_users_items(adj_tens=adj_np,
                                             community_labels=np.array(config.variable_config_dict['train_com_labels']),
                                             users_top_percent=users_top_percent,
                                             items_top_percent=items_dec_perc_drop,
                                             do_power_nodes_from_community=do_power_nodes_from_community,
-                                            save_path=f'dataset/{dataset_name}'), dtype=torch.int32)
+                                            save_path=f'dataset/{dataset_name}'), dtype=torch.int64)
     else:
-        config.variable_config_dict['power_nodes_ids'] = torch.tensor(np.loadtxt(f'dataset/{dataset_name}/power_nodes_ids.csv'), dtype=torch.int32)
+        config.variable_config_dict['power_nodes_ids'] = torch.tensor(np.loadtxt(f'dataset/{dataset_name}/power_nodes_ids_com_wise_{do_power_nodes_from_community}.csv'), dtype=torch.int64)
+
+    # adding average degree of each userid and itemid to config.variable_config_dict
+    adj_tens = torch.tensor(adj_np)
+    for user in torch.unique(adj_tens[:, 0]):
+        com_label_user = config.variable_config_dict['train_com_labels'][user]
+        nr_nodes_in_com = torch.count_nonzero(config.variable_config_dict['train_com_labels'] == com_label_user)
+        nr_edges_in_com = torch.sum(config.variable_config_dict['train_com_labels'][adj_tens[:, 0]] == com_label_user)
+        avg_degree_com_label = nr_edges_in_com / nr_nodes_in_com
+        power_users_avg_dec_degrees = avg_degree_com_label / nr_nodes_in_com
+    config.variable_config_dict['power_users_avg_dec_degrees'] = power_users_avg_dec_degrees
+
+    # TODO: add user community labels to config.variable_config_dict
+    # TODO: add as many things as possible to avoid repeated calculations inside the PowerDropoutTrainer
 
     if model_name == 'LightGCN':
         model = LightGCN(config, train_data.dataset).to(config['device'])

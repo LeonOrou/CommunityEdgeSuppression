@@ -21,13 +21,13 @@ def set_seed(seed):
     # pandas.util.testing.rng = np.random.RandomState(seed)
 
 
-def power_node_edge_dropout(adj_tens, community_labels, power_users_idx, power_items=[], users_dec_perc_drop=0.7, items_dec_perc_drop=0.0, community_dropout_strength=0):
+def power_node_edge_dropout(adj_tens, community_labels, power_users_idx, power_users_avg_dec_degrees, power_items=[], users_dec_perc_drop=0.7, items_dec_perc_drop=0.0, community_dropout_strength=0):
     """
     Drop edges of users and items that are above the threshold in their degree distribution.
     All in torch tensor format.
     :param adj_tens: torch.tensor, format (n, 3) with (user, item, rating)
     :param community_labels: torch.tensor, community labels for each node id community_labels[user_id] = community_label
-    :param power_users: torch.tensor, node ids of power users
+    :param power_users_idx: torch.tensor, node ids of power users
     :param power_items: torch.tensor, node ids of power items
     :param user_perc_drop: float, decimal percentage of power users' edges to drop (1 is average degree inside community)
     :param item_perc_drop: float, decimal percentage of power items' edges to drop (1 is average degree inside community)
@@ -46,14 +46,16 @@ def power_node_edge_dropout(adj_tens, community_labels, power_users_idx, power_i
             # perc_edges_in_community = np.sum(community_labels[user] == community_labels[user_edges]) / len(user_edges)
             # 0 in_community_strength ... make normal random dropout
             # 1 in_community_strength ... drop first only in community until in_community avg degree is reached, then out of community
-            nr_to_drop = int(len(user_edges_idx) * users_dec_perc_drop)
-            com_label_user = community_labels[user]
-            nr_users_in_com = torch.count_nonzero(community_labels == com_label_user)
-            nr_edges_in_com = torch.sum(community_labels[adj_tens[:, 0]] == com_label_user)
-            avg_degree_com_label = nr_edges_in_com / nr_users_in_com
-            decimal_percent_until_avg_degree = avg_degree_com_label / nr_users_in_com
 
-            idx_user_edges_com = torch.randint(0, len(user_edges_com), (int(len(user_edges_com) * ((users_dec_perc_drop + community_dropout_strength * (1-users_dec_perc_drop)) * (1-decimal_percent_until_avg_degree))),))
+            # # done in main and accessible in config.variable_config_dict['power_users_avg_dec_degrees']
+            # com_label_user = community_labels[user]
+            # nr_users_in_com = torch.count_nonzero(community_labels == com_label_user)
+            # nr_edges_in_com = torch.sum(community_labels[adj_tens[:, 0]] == com_label_user)
+            # avg_degree_com_label = nr_edges_in_com / nr_users_in_com
+            # power_users_avg_dec_degrees = avg_degree_com_label / nr_users_in_com
+
+            idx_user_edges_com = torch.randint(0, len(user_edges_com), (int(len(user_edges_com) * ((users_dec_perc_drop + community_dropout_strength * (1-users_dec_perc_drop)) * (1-power_users_avg_dec_degrees))),))
+            nr_to_drop = int(len(user_edges_idx) * users_dec_perc_drop)
             nr_to_drop_in_com = len(idx_user_edges_com)
             idx_user_edges_out = torch.randint(0, len(user_edges_out), (nr_to_drop - nr_to_drop_in_com,))
 
@@ -73,10 +75,12 @@ def power_node_edge_dropout(adj_tens, community_labels, power_users_idx, power_i
             # perc_edges_in_community = np.sum(community_labels[item] == community_labels[item_edges]) / len(item_edges)
             # 0 in_community_strength ... make normal random dropout
             # 1 in_community_strength ... drop only in community
-            nr_to_drop = int(len(item_edges_idx) * items_dec_perc_drop)
+
             avg_degree_in_com = np.sum(community_labels[item] == community_labels[adj_tens[item_edges_idx, 0]]) / len(item_edges_idx)
             decimal_percent_until_avg_degree = avg_degree_in_com / len(item_edges_idx)
+
             idx_item_edges_com = torch.randint(0, len(item_edges_com), (int(len(item_edges_com) * ((items_dec_perc_drop + community_dropout_strength * (1-items_dec_perc_drop)) * (1-decimal_percent_until_avg_degree))),))
+            nr_to_drop = int(len(item_edges_idx) * items_dec_perc_drop)
             nr_to_drop_in_com = len(idx_item_edges_com)
             idx_item_edges_out = torch.randint(0, len(item_edges_out), (nr_to_drop - nr_to_drop_in_com,))
 
@@ -192,6 +196,8 @@ def get_power_users_items(adj_tens, community_labels, users_top_percent=0.01, it
         power_users_ids = np.array([])
         power_items_ids = np.array([])
         # get top communities
+        # TODO: check if only first half of community_labels is needed as they are undir (2x len adj_tens)
+        # TODO: --> Not needed, would be ambigous later! Make separate users_power_nodes and items_power_nodes!
         unique_labels, count = np.unique(community_labels, return_counts=True)
         sort_index = np.argsort(count)[::-1]
         # unique_labels = unique_labels[sort_index]

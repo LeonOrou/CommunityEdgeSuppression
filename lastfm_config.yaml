@@ -40,4 +40,3 @@ topk: 20  # try 20, 50, 100
 valid_metric: averagepopularity@20  # for early stopping
 metric_decimal_place: 4
 repeatable: True
-
