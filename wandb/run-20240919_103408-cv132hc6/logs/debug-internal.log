@@ -1,0 +1,18 @@
+{"time":"2024-09-19T10:34:08.5763686+02:00","level":"INFO","msg":"using version","core version":"0.18.0"}
+{"time":"2024-09-19T10:34:08.5764273+02:00","level":"INFO","msg":"created symlink","path":"C:\\Users\\Leon_\\OneDrive - Johannes Kepler Universität Linz\\JKU\\Bachelorarbeit\\CommunityPowerNodeDrop\\wandb\\run-20240919_103408-cv132hc6\\logs\\debug-core.log"}
+{"time":"2024-09-19T10:34:08.5782767+02:00","level":"INFO","msg":"using version","core version":"0.18.0"}
+{"time":"2024-09-19T10:34:08.5782767+02:00","level":"INFO","msg":"created symlink","path":"C:\\Users\\Leon_\\OneDrive - Johannes Kepler Universität Linz\\JKU\\Bachelorarbeit\\CommunityPowerNodeDrop\\wandb\\run-20240919_103408-cv132hc6\\logs\\debug-core.log"}
+{"time":"2024-09-19T10:34:08.593123+02:00","level":"INFO","msg":"created new stream","id":"cv132hc6"}
+{"time":"2024-09-19T10:34:08.593123+02:00","level":"INFO","msg":"stream: started","id":"cv132hc6"}
+{"time":"2024-09-19T10:34:08.593123+02:00","level":"INFO","msg":"sender: started","stream_id":{"value":"cv132hc6"}}
+{"time":"2024-09-19T10:34:08.593123+02:00","level":"INFO","msg":"handler: started","stream_id":{"value":"cv132hc6"}}
+{"time":"2024-09-19T10:34:08.593123+02:00","level":"INFO","msg":"writer: Do: started","stream_id":{"value":"cv132hc6"}}
+{"time":"2024-09-19T10:34:09.4811231+02:00","level":"INFO","msg":"wandb-core","!BADKEY":null}
+{"time":"2024-09-19T10:34:09.4864308+02:00","level":"INFO","msg":"Starting system monitor"}
+{"time":"2024-09-19T10:34:43.8205109+02:00","level":"INFO","msg":"stream: closing","id":"cv132hc6"}
+{"time":"2024-09-19T10:34:43.8205109+02:00","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2024-09-19T10:34:43.8205109+02:00","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2024-09-19T10:34:45.0651871+02:00","level":"INFO","msg":"handler: closed","stream_id":{"value":"cv132hc6"}}
+{"time":"2024-09-19T10:34:45.0651871+02:00","level":"INFO","msg":"writer: Close: closed","stream_id":{"value":"cv132hc6"}}
+{"time":"2024-09-19T10:34:45.0651871+02:00","level":"INFO","msg":"sender: closed","stream_id":{"value":"cv132hc6"}}
+{"time":"2024-09-19T10:34:45.0657456+02:00","level":"INFO","msg":"stream: closed","id":"cv132hc6"}

@@ -1,0 +1,27 @@
+2024-09-18 17:24:13,569 INFO    MainThread:16212 [wandb_setup.py:_flush():77] Current SDK version is 0.18.0
+2024-09-18 17:24:13,569 INFO    MainThread:16212 [wandb_setup.py:_flush():77] Configure stats pid to 16212
+2024-09-18 17:24:13,569 INFO    MainThread:16212 [wandb_setup.py:_flush():77] Loading settings from C:\Users\Leon_\.config\wandb\settings
+2024-09-18 17:24:13,569 INFO    MainThread:16212 [wandb_setup.py:_flush():77] Loading settings from C:\Users\Leon_\OneDrive - Johannes Kepler Universität Linz\JKU\Bachelorarbeit\CommunityPowerNodeDrop\wandb\settings
+2024-09-18 17:24:13,569 INFO    MainThread:16212 [wandb_setup.py:_flush():77] Loading settings from environment variables: {}
+2024-09-18 17:24:13,570 INFO    MainThread:16212 [wandb_setup.py:_flush():77] Inferring run settings from compute environment: {'program_relpath': 'main.py', 'program_abspath': 'C:\\Users\\Leon_\\OneDrive - Johannes Kepler Universität Linz\\JKU\\Bachelorarbeit\\CommunityPowerNodeDrop\\main.py', 'program': 'C:\\Users\\Leon_\\OneDrive - Johannes Kepler Universität Linz\\JKU\\Bachelorarbeit\\CommunityPowerNodeDrop\\main.py'}
+2024-09-18 17:24:13,572 INFO    MainThread:16212 [wandb_setup.py:_flush():77] Applying login settings: {'api_key': '***REDACTED***'}
+2024-09-18 17:24:13,572 INFO    MainThread:16212 [wandb_setup.py:_flush():77] Applying login settings: {'api_key': '***REDACTED***'}
+2024-09-18 17:24:13,572 INFO    MainThread:16212 [wandb_setup.py:_flush():77] Applying login settings: {}
+2024-09-18 17:24:13,573 INFO    MainThread:16212 [wandb_init.py:_log_setup():525] Logging user logs to C:\Users\Leon_\OneDrive - Johannes Kepler Universität Linz\JKU\Bachelorarbeit\CommunityPowerNodeDrop\wandb\run-20240918_172413-8zkbk94f\logs\debug.log
+2024-09-18 17:24:13,573 INFO    MainThread:16212 [wandb_init.py:_log_setup():526] Logging internal logs to C:\Users\Leon_\OneDrive - Johannes Kepler Universität Linz\JKU\Bachelorarbeit\CommunityPowerNodeDrop\wandb\run-20240918_172413-8zkbk94f\logs\debug-internal.log
+2024-09-18 17:24:13,573 INFO    MainThread:16212 [wandb_init.py:init():609] calling init triggers
+2024-09-18 17:24:13,574 INFO    MainThread:16212 [wandb_init.py:init():616] wandb.init called with sweep_config: {}
+config: {'epochs': 2, 'dataset': 'ml-100k', 'model': 'LightGCN', 'users_top_percent': 0.01, 'items_top_percent': 0.0, 'users_dec_perc_drop': 0.7, 'items_dec_perc_drop': 0.0, 'community_dropout_strength': 0.5, 'do_power_nodes_from_community': True, 'batch_size': 4096, 'TopK': 20}
+2024-09-18 17:24:13,574 INFO    MainThread:16212 [wandb_init.py:init():659] starting backend
+2024-09-18 17:24:13,574 INFO    MainThread:16212 [wandb_init.py:init():663] setting up manager
+2024-09-18 17:24:13,580 INFO    MainThread:16212 [backend.py:_multiprocessing_setup():105] multiprocessing start_methods=spawn, using: spawn
+2024-09-18 17:24:13,589 INFO    MainThread:16212 [wandb_init.py:init():671] backend started and connected
+2024-09-18 17:24:13,602 INFO    MainThread:16212 [wandb_init.py:init():766] updated telemetry
+2024-09-18 17:24:13,997 INFO    MainThread:16212 [wandb_init.py:init():799] communicating run to backend with 90.0 second timeout
+2024-09-18 17:24:14,372 INFO    MainThread:16212 [wandb_init.py:init():850] starting run threads in backend
+2024-09-18 17:24:14,792 INFO    MainThread:16212 [wandb_run.py:_console_start():2466] atexit reg
+2024-09-18 17:24:14,792 INFO    MainThread:16212 [wandb_run.py:_redirect():2312] redirect: wrap_raw
+2024-09-18 17:24:14,792 INFO    MainThread:16212 [wandb_run.py:_redirect():2377] Wrapping output streams.
+2024-09-18 17:24:14,793 INFO    MainThread:16212 [wandb_run.py:_redirect():2402] Redirects installed.
+2024-09-18 17:24:14,801 INFO    MainThread:16212 [wandb_init.py:init():893] run started, returning control to user process
+2024-09-18 17:30:26,728 WARNING MsgRouterThr:16212 [router.py:message_loop():77] message_loop has been closed

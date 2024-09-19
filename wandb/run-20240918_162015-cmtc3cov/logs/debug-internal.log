@@ -1,0 +1,18 @@
+{"time":"2024-09-18T16:20:15.5220112+02:00","level":"INFO","msg":"using version","core version":"0.18.0"}
+{"time":"2024-09-18T16:20:15.5225153+02:00","level":"INFO","msg":"created symlink","path":"C:\\Users\\Leon_\\OneDrive - Johannes Kepler Universität Linz\\JKU\\Bachelorarbeit\\CommunityPowerNodeDrop\\wandb\\run-20240918_162015-cmtc3cov\\logs\\debug-core.log"}
+{"time":"2024-09-18T16:20:15.5232563+02:00","level":"INFO","msg":"using version","core version":"0.18.0"}
+{"time":"2024-09-18T16:20:15.5232563+02:00","level":"INFO","msg":"created symlink","path":"C:\\Users\\Leon_\\OneDrive - Johannes Kepler Universität Linz\\JKU\\Bachelorarbeit\\CommunityPowerNodeDrop\\wandb\\run-20240918_162015-cmtc3cov\\logs\\debug-core.log"}
+{"time":"2024-09-18T16:20:15.5298453+02:00","level":"INFO","msg":"created new stream","id":"cmtc3cov"}
+{"time":"2024-09-18T16:20:15.5298453+02:00","level":"INFO","msg":"stream: started","id":"cmtc3cov"}
+{"time":"2024-09-18T16:20:15.5298453+02:00","level":"INFO","msg":"sender: started","stream_id":{"value":"cmtc3cov"}}
+{"time":"2024-09-18T16:20:15.5298453+02:00","level":"INFO","msg":"handler: started","stream_id":{"value":"cmtc3cov"}}
+{"time":"2024-09-18T16:20:15.5298453+02:00","level":"INFO","msg":"writer: Do: started","stream_id":{"value":"cmtc3cov"}}
+{"time":"2024-09-18T16:20:16.0848615+02:00","level":"INFO","msg":"wandb-core","!BADKEY":null}
+{"time":"2024-09-18T16:20:16.0886311+02:00","level":"INFO","msg":"Starting system monitor"}
+{"time":"2024-09-18T16:20:16.8472702+02:00","level":"INFO","msg":"stream: closing","id":"cmtc3cov"}
+{"time":"2024-09-18T16:20:16.8472702+02:00","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2024-09-18T16:20:16.8472702+02:00","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2024-09-18T16:20:17.8545213+02:00","level":"INFO","msg":"handler: closed","stream_id":{"value":"cmtc3cov"}}
+{"time":"2024-09-18T16:20:17.8545213+02:00","level":"INFO","msg":"writer: Close: closed","stream_id":{"value":"cmtc3cov"}}
+{"time":"2024-09-18T16:20:17.8545213+02:00","level":"INFO","msg":"sender: closed","stream_id":{"value":"cmtc3cov"}}
+{"time":"2024-09-18T16:20:17.8546958+02:00","level":"INFO","msg":"stream: closed","id":"cmtc3cov"}

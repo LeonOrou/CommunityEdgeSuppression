@@ -1,0 +1,14 @@
+C:\Users\Leon_\OneDrive - Johannes Kepler Universität Linz\JKU\Bachelorarbeit\CommunityPowerNodeDrop\venv_lapi\Lib\site-packages\torch\utils\_device.py:62: UserWarning:
+
+Creating a tensor from a list of numpy.ndarrays is extremely slow. Please consider converting the list to a single numpy.ndarray with numpy.array() before converting to a tensor. (Triggered internally at ..\torch\csrc\utils\tensor_new.cpp:248.)
+
+Traceback (most recent call last):
+  File "C:\Users\Leon_\OneDrive - Johannes Kepler Universität Linz\JKU\Bachelorarbeit\CommunityPowerNodeDrop\main.py", line 166, in <module>
+    main()
+  File "C:\Users\Leon_\OneDrive - Johannes Kepler Universität Linz\JKU\Bachelorarbeit\CommunityPowerNodeDrop\main.py", line 117, in main
+    config.variable_config_dict['power_nodes_ids'] = torch.tensor(get_power_users_items(adj_tens=torch.tensor(adj_np),
+                                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Leon_\OneDrive - Johannes Kepler Universität Linz\JKU\Bachelorarbeit\CommunityPowerNodeDrop\utils.py", line 277, in get_power_users_items
+    top_1_perc_user_labels_idx = torch.where(count >= 0.01 * len(user_labels))[0]
+                                 ^^^^^
+KeyboardInterrupt

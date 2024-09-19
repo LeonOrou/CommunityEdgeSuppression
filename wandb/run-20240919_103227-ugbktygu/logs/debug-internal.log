@@ -1,0 +1,18 @@
+{"time":"2024-09-19T10:32:27.3199929+02:00","level":"INFO","msg":"using version","core version":"0.18.0"}
+{"time":"2024-09-19T10:32:27.3199929+02:00","level":"INFO","msg":"created symlink","path":"C:\\Users\\Leon_\\OneDrive - Johannes Kepler Universität Linz\\JKU\\Bachelorarbeit\\CommunityPowerNodeDrop\\wandb\\run-20240919_103227-ugbktygu\\logs\\debug-core.log"}
+{"time":"2024-09-19T10:32:27.3230425+02:00","level":"INFO","msg":"using version","core version":"0.18.0"}
+{"time":"2024-09-19T10:32:27.3230425+02:00","level":"INFO","msg":"created symlink","path":"C:\\Users\\Leon_\\OneDrive - Johannes Kepler Universität Linz\\JKU\\Bachelorarbeit\\CommunityPowerNodeDrop\\wandb\\run-20240919_103227-ugbktygu\\logs\\debug-core.log"}
+{"time":"2024-09-19T10:32:27.3542821+02:00","level":"INFO","msg":"created new stream","id":"ugbktygu"}
+{"time":"2024-09-19T10:32:27.3554652+02:00","level":"INFO","msg":"stream: started","id":"ugbktygu"}
+{"time":"2024-09-19T10:32:27.3554652+02:00","level":"INFO","msg":"writer: Do: started","stream_id":{"value":"ugbktygu"}}
+{"time":"2024-09-19T10:32:27.3555903+02:00","level":"INFO","msg":"handler: started","stream_id":{"value":"ugbktygu"}}
+{"time":"2024-09-19T10:32:27.3561022+02:00","level":"INFO","msg":"sender: started","stream_id":{"value":"ugbktygu"}}
+{"time":"2024-09-19T10:32:28.2448371+02:00","level":"INFO","msg":"wandb-core","!BADKEY":null}
+{"time":"2024-09-19T10:32:28.2718614+02:00","level":"INFO","msg":"Starting system monitor"}
+{"time":"2024-09-19T10:33:49.8926817+02:00","level":"INFO","msg":"stream: closing","id":"ugbktygu"}
+{"time":"2024-09-19T10:33:49.895357+02:00","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2024-09-19T10:33:49.896958+02:00","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2024-09-19T10:33:51.29457+02:00","level":"INFO","msg":"handler: closed","stream_id":{"value":"ugbktygu"}}
+{"time":"2024-09-19T10:33:51.2950954+02:00","level":"INFO","msg":"writer: Close: closed","stream_id":{"value":"ugbktygu"}}
+{"time":"2024-09-19T10:33:51.2950954+02:00","level":"INFO","msg":"sender: closed","stream_id":{"value":"ugbktygu"}}
+{"time":"2024-09-19T10:33:51.2958801+02:00","level":"INFO","msg":"stream: closed","id":"ugbktygu"}

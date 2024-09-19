@@ -1,0 +1,18 @@
+C:\Users\Leon_\OneDrive - Johannes Kepler Universität Linz\JKU\Bachelorarbeit\CommunityPowerNodeDrop\venv_lapi\Lib\site-packages\torch\utils\_device.py:62: UserWarning:
+
+Creating a tensor from a list of numpy.ndarrays is extremely slow. Please consider converting the list to a single numpy.ndarray with numpy.array() before converting to a tensor. (Triggered internally at ..\torch\csrc\utils\tensor_new.cpp:248.)
+
+C:\Users\Leon_\OneDrive - Johannes Kepler Universität Linz\JKU\Bachelorarbeit\CommunityPowerNodeDrop\venv_lapi\Lib\site-packages\torch\utils\_device.py:62: UserWarning:
+
+To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+
+Traceback (most recent call last):
+  File "C:\Users\Leon_\OneDrive - Johannes Kepler Universität Linz\JKU\Bachelorarbeit\CommunityPowerNodeDrop\main.py", line 166, in <module>
+    main()
+  File "C:\Users\Leon_\OneDrive - Johannes Kepler Universität Linz\JKU\Bachelorarbeit\CommunityPowerNodeDrop\main.py", line 117, in main
+    config.variable_config_dict['power_nodes_ids'] = torch.tensor(get_power_users_items(adj_tens=torch.tensor(adj_np),
+                                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Leon_\OneDrive - Johannes Kepler Universität Linz\JKU\Bachelorarbeit\CommunityPowerNodeDrop\utils.py", line 262, in get_power_users_items
+    community_labels = community_labels.to(device)
+                       ^^^^^^^^^^^^^^^^
+KeyboardInterrupt

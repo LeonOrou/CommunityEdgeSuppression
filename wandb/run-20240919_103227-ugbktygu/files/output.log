@@ -1,0 +1,17 @@
+C:\Users\Leon_\OneDrive - Johannes Kepler Universität Linz\JKU\Bachelorarbeit\CommunityPowerNodeDrop\venv_lapi\Lib\site-packages\torch\utils\_device.py:62: UserWarning:
+
+Creating a tensor from a list of numpy.ndarrays is extremely slow. Please consider converting the list to a single numpy.ndarray with numpy.array() before converting to a tensor. (Triggered internally at ..\torch\csrc\utils\tensor_new.cpp:248.)
+Aggregation: 1  Clusters: 9  Increase: 0.24407854676246643
+Aggregation: 2  Clusters: 6  Increase: 0.0073526534251868725
+Aggregation: 3  Clusters: 6  Increase: 0.0
+
+Traceback (most recent call last):
+  File "C:\Users\Leon_\OneDrive - Johannes Kepler Universität Linz\JKU\Bachelorarbeit\CommunityPowerNodeDrop\main.py", line 167, in <module>
+    main()
+  File "C:\Users\Leon_\OneDrive - Johannes Kepler Universität Linz\JKU\Bachelorarbeit\CommunityPowerNodeDrop\main.py", line 111, in main
+    config.variable_config_dict['train_com_labels'] = torch.tensor(get_community_labels(adj_np=adj_np,
+                                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Leon_\OneDrive - Johannes Kepler Universität Linz\JKU\Bachelorarbeit\CommunityPowerNodeDrop\utils.py", line 153, in get_community_labels
+    if min_itemId > 0:
+       ^^^^^^^^^^
+KeyboardInterrupt

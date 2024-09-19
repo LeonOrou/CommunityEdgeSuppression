@@ -1,0 +1,18 @@
+{"time":"2024-09-19T10:23:49.0102778+02:00","level":"INFO","msg":"using version","core version":"0.18.0"}
+{"time":"2024-09-19T10:23:49.0102778+02:00","level":"INFO","msg":"created symlink","path":"C:\\Users\\Leon_\\OneDrive - Johannes Kepler Universität Linz\\JKU\\Bachelorarbeit\\CommunityPowerNodeDrop\\wandb\\run-20240919_102348-782o3rby\\logs\\debug-core.log"}
+{"time":"2024-09-19T10:23:49.0112785+02:00","level":"INFO","msg":"using version","core version":"0.18.0"}
+{"time":"2024-09-19T10:23:49.0112785+02:00","level":"INFO","msg":"created symlink","path":"C:\\Users\\Leon_\\OneDrive - Johannes Kepler Universität Linz\\JKU\\Bachelorarbeit\\CommunityPowerNodeDrop\\wandb\\run-20240919_102348-782o3rby\\logs\\debug-core.log"}
+{"time":"2024-09-19T10:23:49.0302743+02:00","level":"INFO","msg":"created new stream","id":"782o3rby"}
+{"time":"2024-09-19T10:23:49.0312819+02:00","level":"INFO","msg":"stream: started","id":"782o3rby"}
+{"time":"2024-09-19T10:23:49.0312819+02:00","level":"INFO","msg":"writer: Do: started","stream_id":{"value":"782o3rby"}}
+{"time":"2024-09-19T10:23:49.0312819+02:00","level":"INFO","msg":"handler: started","stream_id":{"value":"782o3rby"}}
+{"time":"2024-09-19T10:23:49.0312819+02:00","level":"INFO","msg":"sender: started","stream_id":{"value":"782o3rby"}}
+{"time":"2024-09-19T10:23:49.9047946+02:00","level":"INFO","msg":"wandb-core","!BADKEY":null}
+{"time":"2024-09-19T10:23:49.9298397+02:00","level":"INFO","msg":"Starting system monitor"}
+{"time":"2024-09-19T10:24:36.5620729+02:00","level":"INFO","msg":"stream: closing","id":"782o3rby"}
+{"time":"2024-09-19T10:24:36.5638454+02:00","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2024-09-19T10:24:36.5638454+02:00","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2024-09-19T10:24:37.5379481+02:00","level":"INFO","msg":"handler: closed","stream_id":{"value":"782o3rby"}}
+{"time":"2024-09-19T10:24:37.5379481+02:00","level":"INFO","msg":"sender: closed","stream_id":{"value":"782o3rby"}}
+{"time":"2024-09-19T10:24:37.5379481+02:00","level":"INFO","msg":"writer: Close: closed","stream_id":{"value":"782o3rby"}}
+{"time":"2024-09-19T10:24:37.5386606+02:00","level":"INFO","msg":"stream: closed","id":"782o3rby"}

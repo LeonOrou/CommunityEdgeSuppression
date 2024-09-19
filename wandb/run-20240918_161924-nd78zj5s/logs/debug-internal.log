@@ -1,0 +1,18 @@
+{"time":"2024-09-18T16:19:25.0056385+02:00","level":"INFO","msg":"using version","core version":"0.18.0"}
+{"time":"2024-09-18T16:19:25.0056385+02:00","level":"INFO","msg":"created symlink","path":"C:\\Users\\Leon_\\OneDrive - Johannes Kepler Universität Linz\\JKU\\Bachelorarbeit\\CommunityPowerNodeDrop\\wandb\\run-20240918_161924-nd78zj5s\\logs\\debug-core.log"}
+{"time":"2024-09-18T16:19:25.0076502+02:00","level":"INFO","msg":"using version","core version":"0.18.0"}
+{"time":"2024-09-18T16:19:25.0076502+02:00","level":"INFO","msg":"created symlink","path":"C:\\Users\\Leon_\\OneDrive - Johannes Kepler Universität Linz\\JKU\\Bachelorarbeit\\CommunityPowerNodeDrop\\wandb\\run-20240918_161924-nd78zj5s\\logs\\debug-core.log"}
+{"time":"2024-09-18T16:19:25.0213406+02:00","level":"INFO","msg":"created new stream","id":"nd78zj5s"}
+{"time":"2024-09-18T16:19:25.0213406+02:00","level":"INFO","msg":"handler: started","stream_id":{"value":"nd78zj5s"}}
+{"time":"2024-09-18T16:19:25.0213406+02:00","level":"INFO","msg":"writer: Do: started","stream_id":{"value":"nd78zj5s"}}
+{"time":"2024-09-18T16:19:25.0213406+02:00","level":"INFO","msg":"stream: started","id":"nd78zj5s"}
+{"time":"2024-09-18T16:19:25.0213406+02:00","level":"INFO","msg":"sender: started","stream_id":{"value":"nd78zj5s"}}
+{"time":"2024-09-18T16:19:25.7194372+02:00","level":"INFO","msg":"wandb-core","!BADKEY":null}
+{"time":"2024-09-18T16:19:25.7295504+02:00","level":"INFO","msg":"Starting system monitor"}
+{"time":"2024-09-18T16:19:26.6504119+02:00","level":"INFO","msg":"stream: closing","id":"nd78zj5s"}
+{"time":"2024-09-18T16:19:26.6504119+02:00","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2024-09-18T16:19:26.6504119+02:00","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2024-09-18T16:19:29.8511546+02:00","level":"INFO","msg":"handler: closed","stream_id":{"value":"nd78zj5s"}}
+{"time":"2024-09-18T16:19:29.8511546+02:00","level":"INFO","msg":"sender: closed","stream_id":{"value":"nd78zj5s"}}
+{"time":"2024-09-18T16:19:29.8511546+02:00","level":"INFO","msg":"writer: Close: closed","stream_id":{"value":"nd78zj5s"}}
+{"time":"2024-09-18T16:19:29.8517557+02:00","level":"INFO","msg":"stream: closed","id":"nd78zj5s"}

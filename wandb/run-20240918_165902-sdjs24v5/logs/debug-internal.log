@@ -1,0 +1,18 @@
+{"time":"2024-09-18T16:59:02.9635299+02:00","level":"INFO","msg":"using version","core version":"0.18.0"}
+{"time":"2024-09-18T16:59:02.9635299+02:00","level":"INFO","msg":"created symlink","path":"C:\\Users\\Leon_\\OneDrive - Johannes Kepler Universität Linz\\JKU\\Bachelorarbeit\\CommunityPowerNodeDrop\\wandb\\run-20240918_165902-sdjs24v5\\logs\\debug-core.log"}
+{"time":"2024-09-18T16:59:02.9650734+02:00","level":"INFO","msg":"using version","core version":"0.18.0"}
+{"time":"2024-09-18T16:59:02.9650734+02:00","level":"INFO","msg":"created symlink","path":"C:\\Users\\Leon_\\OneDrive - Johannes Kepler Universität Linz\\JKU\\Bachelorarbeit\\CommunityPowerNodeDrop\\wandb\\run-20240918_165902-sdjs24v5\\logs\\debug-core.log"}
+{"time":"2024-09-18T16:59:02.9729059+02:00","level":"INFO","msg":"created new stream","id":"sdjs24v5"}
+{"time":"2024-09-18T16:59:02.9729059+02:00","level":"INFO","msg":"stream: started","id":"sdjs24v5"}
+{"time":"2024-09-18T16:59:02.9729059+02:00","level":"INFO","msg":"handler: started","stream_id":{"value":"sdjs24v5"}}
+{"time":"2024-09-18T16:59:02.9729059+02:00","level":"INFO","msg":"writer: Do: started","stream_id":{"value":"sdjs24v5"}}
+{"time":"2024-09-18T16:59:02.9729059+02:00","level":"INFO","msg":"sender: started","stream_id":{"value":"sdjs24v5"}}
+{"time":"2024-09-18T16:59:03.5182074+02:00","level":"INFO","msg":"wandb-core","!BADKEY":null}
+{"time":"2024-09-18T16:59:03.5208211+02:00","level":"INFO","msg":"Starting system monitor"}
+{"time":"2024-09-18T17:01:32.9229739+02:00","level":"INFO","msg":"stream: closing","id":"sdjs24v5"}
+{"time":"2024-09-18T17:01:32.9229739+02:00","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2024-09-18T17:01:32.9229739+02:00","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2024-09-18T17:01:33.9379994+02:00","level":"INFO","msg":"handler: closed","stream_id":{"value":"sdjs24v5"}}
+{"time":"2024-09-18T17:01:33.9379994+02:00","level":"INFO","msg":"sender: closed","stream_id":{"value":"sdjs24v5"}}
+{"time":"2024-09-18T17:01:33.9379994+02:00","level":"INFO","msg":"writer: Close: closed","stream_id":{"value":"sdjs24v5"}}
+{"time":"2024-09-18T17:01:33.9385118+02:00","level":"INFO","msg":"stream: closed","id":"sdjs24v5"}
