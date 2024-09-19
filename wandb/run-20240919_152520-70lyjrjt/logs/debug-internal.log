@@ -1,0 +1,18 @@
+{"time":"2024-09-19T15:25:20.7230852+02:00","level":"INFO","msg":"using version","core version":"0.18.0"}
+{"time":"2024-09-19T15:25:20.7230852+02:00","level":"INFO","msg":"created symlink","path":"C:\\Users\\Leon_\\OneDrive - Johannes Kepler Universität Linz\\JKU\\Bachelorarbeit\\CommunityPowerNodeDrop\\wandb\\run-20240919_152520-70lyjrjt\\logs\\debug-core.log"}
+{"time":"2024-09-19T15:25:20.7265242+02:00","level":"INFO","msg":"using version","core version":"0.18.0"}
+{"time":"2024-09-19T15:25:20.7265242+02:00","level":"INFO","msg":"created symlink","path":"C:\\Users\\Leon_\\OneDrive - Johannes Kepler Universität Linz\\JKU\\Bachelorarbeit\\CommunityPowerNodeDrop\\wandb\\run-20240919_152520-70lyjrjt\\logs\\debug-core.log"}
+{"time":"2024-09-19T15:25:20.7341353+02:00","level":"INFO","msg":"created new stream","id":"70lyjrjt"}
+{"time":"2024-09-19T15:25:20.7341353+02:00","level":"INFO","msg":"stream: started","id":"70lyjrjt"}
+{"time":"2024-09-19T15:25:20.7341353+02:00","level":"INFO","msg":"writer: Do: started","stream_id":{"value":"70lyjrjt"}}
+{"time":"2024-09-19T15:25:20.7341353+02:00","level":"INFO","msg":"sender: started","stream_id":{"value":"70lyjrjt"}}
+{"time":"2024-09-19T15:25:20.7341353+02:00","level":"INFO","msg":"handler: started","stream_id":{"value":"70lyjrjt"}}
+{"time":"2024-09-19T15:25:21.2424445+02:00","level":"INFO","msg":"wandb-core","!BADKEY":null}
+{"time":"2024-09-19T15:25:21.2450268+02:00","level":"INFO","msg":"Starting system monitor"}
+{"time":"2024-09-19T15:29:36.203312+02:00","level":"INFO","msg":"stream: closing","id":"70lyjrjt"}
+{"time":"2024-09-19T15:29:36.203312+02:00","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2024-09-19T15:29:36.2051874+02:00","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2024-09-19T15:29:37.4773596+02:00","level":"INFO","msg":"handler: closed","stream_id":{"value":"70lyjrjt"}}
+{"time":"2024-09-19T15:29:37.4773596+02:00","level":"INFO","msg":"sender: closed","stream_id":{"value":"70lyjrjt"}}
+{"time":"2024-09-19T15:29:37.4773596+02:00","level":"INFO","msg":"writer: Close: closed","stream_id":{"value":"70lyjrjt"}}
+{"time":"2024-09-19T15:29:37.4778675+02:00","level":"INFO","msg":"stream: closed","id":"70lyjrjt"}

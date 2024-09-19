@@ -1,0 +1,1 @@
+{"best_valid_score":74.447,"best_valid_result":{"precision@20":0.011,"itemcoverage@20":0.9988,"hit@20":0.1849,"shannonentropy@20":0.0079,"tailpercentage@20":0.0694,"ndcg@20":0.0255,"mrr@20":0.0352,"averagepopularity@20":74.447,"giniindex@20":0.3453,"recall@20":0.0447},"_timestamp":1.726767928239245e+09,"_runtime":199.5098963,"_step":0,"_wandb":{"runtime":200}}

@@ -1,0 +1,18 @@
+{"time":"2024-09-19T15:18:55.3840417+02:00","level":"INFO","msg":"using version","core version":"0.18.0"}
+{"time":"2024-09-19T15:18:55.3840417+02:00","level":"INFO","msg":"created symlink","path":"C:\\Users\\Leon_\\OneDrive - Johannes Kepler Universität Linz\\JKU\\Bachelorarbeit\\CommunityPowerNodeDrop\\wandb\\run-20240919_151855-jt611rn5\\logs\\debug-core.log"}
+{"time":"2024-09-19T15:18:55.3856816+02:00","level":"INFO","msg":"using version","core version":"0.18.0"}
+{"time":"2024-09-19T15:18:55.3856816+02:00","level":"INFO","msg":"created symlink","path":"C:\\Users\\Leon_\\OneDrive - Johannes Kepler Universität Linz\\JKU\\Bachelorarbeit\\CommunityPowerNodeDrop\\wandb\\run-20240919_151855-jt611rn5\\logs\\debug-core.log"}
+{"time":"2024-09-19T15:18:55.3931289+02:00","level":"INFO","msg":"created new stream","id":"jt611rn5"}
+{"time":"2024-09-19T15:18:55.3931289+02:00","level":"INFO","msg":"stream: started","id":"jt611rn5"}
+{"time":"2024-09-19T15:18:55.3931289+02:00","level":"INFO","msg":"handler: started","stream_id":{"value":"jt611rn5"}}
+{"time":"2024-09-19T15:18:55.3931289+02:00","level":"INFO","msg":"writer: Do: started","stream_id":{"value":"jt611rn5"}}
+{"time":"2024-09-19T15:18:55.3931289+02:00","level":"INFO","msg":"sender: started","stream_id":{"value":"jt611rn5"}}
+{"time":"2024-09-19T15:18:55.9435977+02:00","level":"INFO","msg":"wandb-core","!BADKEY":null}
+{"time":"2024-09-19T15:18:55.949215+02:00","level":"INFO","msg":"Starting system monitor"}
+{"time":"2024-09-19T15:18:56.5783035+02:00","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2024-09-19T15:18:56.5783035+02:00","level":"INFO","msg":"stream: closing","id":"jt611rn5"}
+{"time":"2024-09-19T15:18:56.578811+02:00","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2024-09-19T15:18:57.8556722+02:00","level":"INFO","msg":"handler: closed","stream_id":{"value":"jt611rn5"}}
+{"time":"2024-09-19T15:18:57.8556722+02:00","level":"INFO","msg":"writer: Close: closed","stream_id":{"value":"jt611rn5"}}
+{"time":"2024-09-19T15:18:57.8556722+02:00","level":"INFO","msg":"sender: closed","stream_id":{"value":"jt611rn5"}}
+{"time":"2024-09-19T15:18:57.856189+02:00","level":"INFO","msg":"stream: closed","id":"jt611rn5"}

@@ -1,0 +1,18 @@
+{"time":"2024-09-19T16:08:20.8786129+02:00","level":"INFO","msg":"using version","core version":"0.18.0"}
+{"time":"2024-09-19T16:08:20.8787505+02:00","level":"INFO","msg":"created symlink","path":"C:\\Users\\Leon_\\OneDrive - Johannes Kepler Universität Linz\\JKU\\Bachelorarbeit\\CommunityPowerNodeDrop\\wandb\\run-20240919_160820-p6collxj\\logs\\debug-core.log"}
+{"time":"2024-09-19T16:08:20.880618+02:00","level":"INFO","msg":"using version","core version":"0.18.0"}
+{"time":"2024-09-19T16:08:20.880618+02:00","level":"INFO","msg":"created symlink","path":"C:\\Users\\Leon_\\OneDrive - Johannes Kepler Universität Linz\\JKU\\Bachelorarbeit\\CommunityPowerNodeDrop\\wandb\\run-20240919_160820-p6collxj\\logs\\debug-core.log"}
+{"time":"2024-09-19T16:08:20.8905687+02:00","level":"INFO","msg":"created new stream","id":"p6collxj"}
+{"time":"2024-09-19T16:08:20.8905687+02:00","level":"INFO","msg":"stream: started","id":"p6collxj"}
+{"time":"2024-09-19T16:08:20.8905687+02:00","level":"INFO","msg":"handler: started","stream_id":{"value":"p6collxj"}}
+{"time":"2024-09-19T16:08:20.8910771+02:00","level":"INFO","msg":"writer: Do: started","stream_id":{"value":"p6collxj"}}
+{"time":"2024-09-19T16:08:20.8910771+02:00","level":"INFO","msg":"sender: started","stream_id":{"value":"p6collxj"}}
+{"time":"2024-09-19T16:08:21.483782+02:00","level":"INFO","msg":"wandb-core","!BADKEY":null}
+{"time":"2024-09-19T16:08:21.4872571+02:00","level":"INFO","msg":"Starting system monitor"}
+{"time":"2024-09-19T16:09:34.1866797+02:00","level":"INFO","msg":"stream: closing","id":"p6collxj"}
+{"time":"2024-09-19T16:09:34.1866797+02:00","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2024-09-19T16:09:34.1866797+02:00","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2024-09-19T16:09:35.3136165+02:00","level":"INFO","msg":"handler: closed","stream_id":{"value":"p6collxj"}}
+{"time":"2024-09-19T16:09:35.3136165+02:00","level":"INFO","msg":"writer: Close: closed","stream_id":{"value":"p6collxj"}}
+{"time":"2024-09-19T16:09:35.3141537+02:00","level":"INFO","msg":"sender: closed","stream_id":{"value":"p6collxj"}}
+{"time":"2024-09-19T16:09:35.3148118+02:00","level":"INFO","msg":"stream: closed","id":"p6collxj"}

@@ -1,0 +1,44 @@
+C:\Users\Leon_\OneDrive - Johannes Kepler Universität Linz\JKU\Bachelorarbeit\CommunityPowerNodeDrop\venv_lapi\Lib\site-packages\torch\utils\_device.py:62: UserWarning:
+
+Creating a tensor from a list of numpy.ndarrays is extremely slow. Please consider converting the list to a single numpy.ndarray with numpy.array() before converting to a tensor. (Triggered internally at ..\torch\csrc\utils\tensor_new.cpp:248.)
+
+C:\Users\Leon_\OneDrive - Johannes Kepler Universität Linz\JKU\Bachelorarbeit\CommunityPowerNodeDrop\venv_lapi\Lib\site-packages\torch\utils\_device.py:62: UserWarning:
+
+To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+
+19 Sep 15:39    INFO  LightGCN(
+  (user_embedding): Embedding(888, 64)
+  (item_embedding): Embedding(823, 64)
+  (mf_loss): BPRLoss()
+  (reg_loss): EmbLoss()
+)[1;34m
+Trainable parameters[0m: 109504[0m
+LightGCN(
+  (user_embedding): Embedding(888, 64)
+  (item_embedding): Embedding(823, 64)
+  (mf_loss): BPRLoss()
+  (reg_loss): EmbLoss()
+)
+Trainable parameters: 109504
+C:\Users\Leon_\OneDrive - Johannes Kepler Universität Linz\JKU\Bachelorarbeit\CommunityPowerNodeDrop\venv_lapi\Lib\site-packages\torch\utils\_device.py:62: UserWarning:
+
+To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+
+Traceback (most recent call last):
+  File "C:\Program Files\JetBrains\PyCharm 2024.1.4\plugins\python-ce\helpers\pydev\pydevd.py", line 1557, in _exec
+    pydev_imports.execfile(file, globals, locals)  # execute the script
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\JetBrains\PyCharm 2024.1.4\plugins\python-ce\helpers\pydev\_pydev_imps\_pydev_execfile.py", line 18, in execfile
+    exec(compile(contents+"\n", file, 'exec'), glob, loc)
+  File "C:\Users\Leon_\OneDrive - Johannes Kepler Universität Linz\JKU\Bachelorarbeit\CommunityPowerNodeDrop\main.py", line 168, in <module>
+    main()
+  File "C:\Users\Leon_\OneDrive - Johannes Kepler Universität Linz\JKU\Bachelorarbeit\CommunityPowerNodeDrop\main.py", line 153, in main
+    best_valid_score, best_valid_result = trainer.fit(train_data, test_data, saved=True, show_progress=config['show_progress'])
+                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Leon_\OneDrive - Johannes Kepler Universität Linz\JKU\Bachelorarbeit\CommunityPowerNodeDrop\PowerDropoutTrainer.py", line 74, in fit
+    new_inter_feat = power_node_edge_dropout(adj_tens=adj_tens,
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Leon_\OneDrive - Johannes Kepler Universität Linz\JKU\Bachelorarbeit\CommunityPowerNodeDrop\utils.py", line 57, in power_node_edge_dropout
+    idx_user_edges_com = torch.randint(0, len(user_edges_com), (int(len(user_edges_com) * ((users_dec_perc_drop + community_dropout_strength * (1-users_dec_perc_drop)) * (1-com_avg_dec_degrees[user_labels[user]]))),))
+                                                                                                                                                                                                 ^^^^^^^^^^^
+NameError: name 'user_labels' is not defined. Did you mean: 'user_com_labels'?

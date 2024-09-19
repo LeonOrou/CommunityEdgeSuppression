@@ -1,0 +1,18 @@
+{"time":"2024-09-19T15:16:35.6888834+02:00","level":"INFO","msg":"using version","core version":"0.18.0"}
+{"time":"2024-09-19T15:16:35.6888834+02:00","level":"INFO","msg":"created symlink","path":"C:\\Users\\Leon_\\OneDrive - Johannes Kepler Universität Linz\\JKU\\Bachelorarbeit\\CommunityPowerNodeDrop\\wandb\\run-20240919_151635-z4a5px7m\\logs\\debug-core.log"}
+{"time":"2024-09-19T15:16:35.6919182+02:00","level":"INFO","msg":"using version","core version":"0.18.0"}
+{"time":"2024-09-19T15:16:35.6919182+02:00","level":"INFO","msg":"created symlink","path":"C:\\Users\\Leon_\\OneDrive - Johannes Kepler Universität Linz\\JKU\\Bachelorarbeit\\CommunityPowerNodeDrop\\wandb\\run-20240919_151635-z4a5px7m\\logs\\debug-core.log"}
+{"time":"2024-09-19T15:16:35.7140933+02:00","level":"INFO","msg":"created new stream","id":"z4a5px7m"}
+{"time":"2024-09-19T15:16:35.7155901+02:00","level":"INFO","msg":"handler: started","stream_id":{"value":"z4a5px7m"}}
+{"time":"2024-09-19T15:16:35.7155901+02:00","level":"INFO","msg":"stream: started","id":"z4a5px7m"}
+{"time":"2024-09-19T15:16:35.7155901+02:00","level":"INFO","msg":"writer: Do: started","stream_id":{"value":"z4a5px7m"}}
+{"time":"2024-09-19T15:16:35.7166098+02:00","level":"INFO","msg":"sender: started","stream_id":{"value":"z4a5px7m"}}
+{"time":"2024-09-19T15:16:36.3562534+02:00","level":"INFO","msg":"wandb-core","!BADKEY":null}
+{"time":"2024-09-19T15:16:36.3690614+02:00","level":"INFO","msg":"Starting system monitor"}
+{"time":"2024-09-19T15:16:37.9788447+02:00","level":"INFO","msg":"stream: closing","id":"z4a5px7m"}
+{"time":"2024-09-19T15:16:37.9810539+02:00","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2024-09-19T15:16:37.9810539+02:00","level":"INFO","msg":"Stopped system monitor"}
+{"time":"2024-09-19T15:16:40.7772922+02:00","level":"INFO","msg":"handler: closed","stream_id":{"value":"z4a5px7m"}}
+{"time":"2024-09-19T15:16:40.7772922+02:00","level":"INFO","msg":"writer: Close: closed","stream_id":{"value":"z4a5px7m"}}
+{"time":"2024-09-19T15:16:40.7778038+02:00","level":"INFO","msg":"sender: closed","stream_id":{"value":"z4a5px7m"}}
+{"time":"2024-09-19T15:16:40.7785008+02:00","level":"INFO","msg":"stream: closed","id":"z4a5px7m"}

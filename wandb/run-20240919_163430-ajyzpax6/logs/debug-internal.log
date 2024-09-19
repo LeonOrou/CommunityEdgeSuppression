@@ -1,0 +1,14 @@
+{"time":"2024-09-19T16:34:30.3964281+02:00","level":"INFO","msg":"using version","core version":"0.18.0"}
+{"time":"2024-09-19T16:34:30.3964281+02:00","level":"INFO","msg":"created symlink","path":"C:\\Users\\Leon_\\OneDrive - Johannes Kepler Universität Linz\\JKU\\Bachelorarbeit\\CommunityPowerNodeDrop\\wandb\\run-20240919_163430-ajyzpax6\\logs\\debug-core.log"}
+{"time":"2024-09-19T16:34:30.3974756+02:00","level":"INFO","msg":"using version","core version":"0.18.0"}
+{"time":"2024-09-19T16:34:30.3974756+02:00","level":"INFO","msg":"created symlink","path":"C:\\Users\\Leon_\\OneDrive - Johannes Kepler Universität Linz\\JKU\\Bachelorarbeit\\CommunityPowerNodeDrop\\wandb\\run-20240919_163430-ajyzpax6\\logs\\debug-core.log"}
+{"time":"2024-09-19T16:34:30.4097127+02:00","level":"INFO","msg":"created new stream","id":"ajyzpax6"}
+{"time":"2024-09-19T16:34:30.4097127+02:00","level":"INFO","msg":"stream: started","id":"ajyzpax6"}
+{"time":"2024-09-19T16:34:30.4097127+02:00","level":"INFO","msg":"handler: started","stream_id":{"value":"ajyzpax6"}}
+{"time":"2024-09-19T16:34:30.4097127+02:00","level":"INFO","msg":"writer: Do: started","stream_id":{"value":"ajyzpax6"}}
+{"time":"2024-09-19T16:34:30.4097127+02:00","level":"INFO","msg":"sender: started","stream_id":{"value":"ajyzpax6"}}
+{"time":"2024-09-19T16:34:31.0790726+02:00","level":"INFO","msg":"wandb-core","!BADKEY":null}
+{"time":"2024-09-19T16:34:31.0827083+02:00","level":"INFO","msg":"Starting system monitor"}
+{"time":"2024-09-19T17:20:45.6895494+02:00","level":"INFO","msg":"stream: closing","id":"ajyzpax6"}
+{"time":"2024-09-19T17:20:45.6921502+02:00","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2024-09-19T17:20:45.6926742+02:00","level":"INFO","msg":"Stopped system monitor"}

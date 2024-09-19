@@ -1,0 +1,35 @@
+C:\Users\Leon_\OneDrive - Johannes Kepler Universität Linz\JKU\Bachelorarbeit\CommunityPowerNodeDrop\venv_lapi\Lib\site-packages\torch\utils\_device.py:62: UserWarning:
+
+Creating a tensor from a list of numpy.ndarrays is extremely slow. Please consider converting the list to a single numpy.ndarray with numpy.array() before converting to a tensor. (Triggered internally at ..\torch\csrc\utils\tensor_new.cpp:248.)
+
+C:\Users\Leon_\OneDrive - Johannes Kepler Universität Linz\JKU\Bachelorarbeit\CommunityPowerNodeDrop\venv_lapi\Lib\site-packages\torch\utils\_device.py:62: UserWarning:
+
+To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).
+
+19 Sep 16:34    INFO  LightGCN(
+  (user_embedding): Embedding(888, 64)
+  (item_embedding): Embedding(823, 64)
+  (mf_loss): BPRLoss()
+  (reg_loss): EmbLoss()
+)[1;34m
+Trainable parameters[0m: 109504[0m
+LightGCN(
+  (user_embedding): Embedding(888, 64)
+  (item_embedding): Embedding(823, 64)
+  (mf_loss): BPRLoss()
+  (reg_loss): EmbLoss()
+)
+Trainable parameters: 109504
+Traceback (most recent call last):
+  File "C:\Users\Leon_\OneDrive - Johannes Kepler Universität Linz\JKU\Bachelorarbeit\CommunityPowerNodeDrop\main.py", line 168, in <module>
+    main()
+  File "C:\Users\Leon_\OneDrive - Johannes Kepler Universität Linz\JKU\Bachelorarbeit\CommunityPowerNodeDrop\main.py", line 153, in main
+    best_valid_score, best_valid_result = trainer.fit(train_data, test_data, saved=True, show_progress=config['show_progress'])
+                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Leon_\OneDrive - Johannes Kepler Universität Linz\JKU\Bachelorarbeit\CommunityPowerNodeDrop\PowerDropoutTrainer.py", line 74, in fit
+    new_inter_feat = power_node_edge_dropout(adj_tens=adj_tens,
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Leon_\OneDrive - Johannes Kepler Universität Linz\JKU\Bachelorarbeit\CommunityPowerNodeDrop\utils.py", line 67, in power_node_edge_dropout
+    user_edges_out = user_edges_out[torch.isin(user_edges_out, user_edges_out[idx_user_edges_keep_out_com])]
+                     ^^^^^^^^^^^^^^
+KeyboardInterrupt

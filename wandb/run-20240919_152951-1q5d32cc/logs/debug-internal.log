@@ -1,0 +1,14 @@
+{"time":"2024-09-19T15:29:51.2671148+02:00","level":"INFO","msg":"using version","core version":"0.18.0"}
+{"time":"2024-09-19T15:29:51.2671148+02:00","level":"INFO","msg":"created symlink","path":"C:\\Users\\Leon_\\OneDrive - Johannes Kepler Universität Linz\\JKU\\Bachelorarbeit\\CommunityPowerNodeDrop\\wandb\\run-20240919_152951-1q5d32cc\\logs\\debug-core.log"}
+{"time":"2024-09-19T15:29:51.2694962+02:00","level":"INFO","msg":"using version","core version":"0.18.0"}
+{"time":"2024-09-19T15:29:51.2694962+02:00","level":"INFO","msg":"created symlink","path":"C:\\Users\\Leon_\\OneDrive - Johannes Kepler Universität Linz\\JKU\\Bachelorarbeit\\CommunityPowerNodeDrop\\wandb\\run-20240919_152951-1q5d32cc\\logs\\debug-core.log"}
+{"time":"2024-09-19T15:29:51.2914294+02:00","level":"INFO","msg":"created new stream","id":"1q5d32cc"}
+{"time":"2024-09-19T15:29:51.2919477+02:00","level":"INFO","msg":"stream: started","id":"1q5d32cc"}
+{"time":"2024-09-19T15:29:51.2919477+02:00","level":"INFO","msg":"handler: started","stream_id":{"value":"1q5d32cc"}}
+{"time":"2024-09-19T15:29:51.2919477+02:00","level":"INFO","msg":"writer: Do: started","stream_id":{"value":"1q5d32cc"}}
+{"time":"2024-09-19T15:29:51.2919477+02:00","level":"INFO","msg":"sender: started","stream_id":{"value":"1q5d32cc"}}
+{"time":"2024-09-19T15:29:51.9810442+02:00","level":"INFO","msg":"wandb-core","!BADKEY":null}
+{"time":"2024-09-19T15:29:51.9858851+02:00","level":"INFO","msg":"Starting system monitor"}
+{"time":"2024-09-19T15:39:05.7775799+02:00","level":"INFO","msg":"stream: closing","id":"1q5d32cc"}
+{"time":"2024-09-19T15:39:05.7775799+02:00","level":"INFO","msg":"Stopping system monitor"}
+{"time":"2024-09-19T15:39:05.7775799+02:00","level":"INFO","msg":"Stopped system monitor"}
