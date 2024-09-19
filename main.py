@@ -57,7 +57,7 @@ def main():
         epochs = config_file['epochs']
 
     # device = 'cuda' if torch.cuda.is_available() else 'cpu'  # create_dataset checks device automatically
-    config = Config(model=model_name, dataset=dataset_name, config_file_list=[f'{dataset_name}_config.yaml'], config_dict={'train_com_labels': None, 'power_nodes_ids': None, 'users_dec_perc_drop': users_dec_perc_drop, 'items_dec_perc_drop': items_dec_perc_drop, 'community_dropout_strength': community_dropout_strength})
+    config = Config(model=model_name, dataset=dataset_name, config_file_list=[f'{dataset_name}_config.yaml'], config_dict={'users_dec_perc_drop': users_dec_perc_drop, 'items_dec_perc_drop': items_dec_perc_drop, 'community_dropout_strength': community_dropout_strength})
     init_seed(seed=seed, reproducibility=config['reproducibility'])
     init_logger(config)
     logger = getLogger()
@@ -115,15 +115,16 @@ def main():
         config.variable_config_dict['user_com_labels'] = torch.tensor(np.loadtxt(f'dataset/{dataset_name}/user_labels_undir_bip{bipartite_connect}_Leiden.csv'), dtype=torch.int64)
         config.variable_config_dict['item_com_labels'] = torch.tensor(np.loadtxt(f'dataset/{dataset_name}/item_labels_undir_bip{bipartite_connect}_Leiden.csv'), dtype=torch.int64)
 
-    if f'power_nodes_ids_com_wise_{do_power_nodes_from_community}.csv' not in os.listdir(f'dataset/{dataset_name}'):
+    # TODO: make names individual to hyperparameters: users and items top percent
+    if f'power_nodes_ids_com_wise_{do_power_nodes_from_community}_top{users_top_percent}users.csv' not in os.listdir(f'dataset/{dataset_name}'):
         config.variable_config_dict['power_nodes_ids'] = torch.tensor(get_power_users_items(adj_tens=torch.tensor(adj_np),
-                                            community_labels=np.array(config.variable_config_dict['train_com_labels']),
+                                            user_com_labels=config.variable_config_dict['user_com_labels'],
                                             users_top_percent=users_top_percent,
                                             items_top_percent=items_dec_perc_drop,
                                             do_power_nodes_from_community=do_power_nodes_from_community,
                                             save_path=f'dataset/{dataset_name}'), dtype=torch.int64)
     else:
-        config.variable_config_dict['power_nodes_ids'] = torch.tensor(np.loadtxt(f'dataset/{dataset_name}/power_nodes_ids_com_wise_{do_power_nodes_from_community}.csv'), dtype=torch.int64)
+        config.variable_config_dict['power_nodes_ids'] = torch.tensor(np.loadtxt(f'dataset/{dataset_name}/power_nodes_ids_com_wise_{do_power_nodes_from_community}_top{users_top_percent}users.csv'), dtype=torch.int64)
 
     # tensor with tensor[com_label] = average degree of each community
     config.variable_config_dict['com_avg_dec_degrees'] = torch.zeros(torch.max(config.variable_config_dict['user_com_labels']) + 1)
@@ -131,9 +132,8 @@ def main():
     for com_label in torch.unique(config.variable_config_dict['user_com_labels']):
         nr_nodes_in_com = torch.count_nonzero(config.variable_config_dict['user_com_labels'] == com_label)
         nr_edges_in_com = torch.sum(config.variable_config_dict['user_com_labels'][adj_tens[:, 0]] == com_label)
-        avg_degree_com_label = nr_edges_in_com / nr_nodes_in_com
-        decimal_avg_degree = avg_degree_com_label / nr_nodes_in_com
-        config.variable_config_dict['com_avg_dec_degrees'][com_label] = decimal_avg_degree
+        decimal_avg_degree_com_label = nr_edges_in_com / nr_nodes_in_com / nr_nodes_in_com
+        config.variable_config_dict['com_avg_dec_degrees'][com_label] = decimal_avg_degree_com_label
 
     # TODO: add user community labels to config.variable_config_dict
     # TODO: add as many things as possible to avoid repeated calculations inside the PowerDropoutTrainer
