@@ -72,9 +72,10 @@ class PowerDropoutTrainer(Trainer):
             del train_data_coo, indices, values
 
             new_inter_feat = power_node_edge_dropout(adj_tens=adj_tens,
-                                                 community_labels=self.config.variable_config_dict['train_com_labels'],
+                                                 user_labels=self.config.variable_config_dict['user_com_labels'],
+                                                 item_labels=self.config.variable_config_dict['item_com_labels'],
                                                  power_users_idx=self.config.variable_config_dict['power_nodes_ids'],
-                                                 power_users_avg_dec_degrees = self.config.variable_config_dict['power_users_avg_dec_degrees'],
+                                                 com_avg_dec_degrees = self.config.variable_config_dict['com_avg_dec_degrees'],
                                                  users_dec_perc_drop=self.config.variable_config_dict['users_dec_perc_drop'],
                                                  items_dec_perc_drop=self.config.variable_config_dict['items_dec_perc_drop'],
                                                  community_dropout_strength=self.config.variable_config_dict['community_dropout_strength'],)
@@ -82,7 +83,9 @@ class PowerDropoutTrainer(Trainer):
             train_data_epoch = TrainDataLoader(config=self.config,
                                                dataset=train_data.dataset.copy(new_inter_feat=Interaction(pd.DataFrame(new_inter_feat,
                                                                                columns=train_data.dataset.inter_feat.columns))),
-                                               sampler=RepeatableSampler(phases='train', dataset=train_data_raw),
+                                               sampler=RepeatableSampler(phases='train', dataset=train_data.dataset.copy(
+                                                                                            new_inter_feat=Interaction(pd.DataFrame(new_inter_feat,
+                                                                                            columns=train_data.dataset.inter_feat.columns)))),
                                                shuffle=self.config['shuffle'])
             ### end power_node_edge_dropout ###
             train_loss = self._train_epoch(

@@ -21,7 +21,7 @@ def set_seed(seed):
     # pandas.util.testing.rng = np.random.RandomState(seed)
 
 
-def power_node_edge_dropout(adj_tens, community_labels, power_users_idx, power_users_avg_dec_degrees, power_items=[], users_dec_perc_drop=0.7, items_dec_perc_drop=0.0, community_dropout_strength=0):
+def power_node_edge_dropout(adj_tens, user_labels, item_labels, power_users_idx, com_avg_dec_degrees, power_items=[], users_dec_perc_drop=0.7, items_dec_perc_drop=0.0, community_dropout_strength=0):
     """
     Drop edges of users and items that are above the threshold in their degree distribution.
     All in torch tensor format.
@@ -41,8 +41,8 @@ def power_node_edge_dropout(adj_tens, community_labels, power_users_idx, power_u
     if users_dec_perc_drop > 0.:  # if 1, then no edges are dropped
         for user in power_users_idx:
             user_edges_idx = torch.where(adj_tens[:, 0] == user, adj_tens[:, 0], 0.0).nonzero().flatten()
-            user_edges_com = user_edges_idx[community_labels[user] == community_labels[adj_tens[user_edges_idx, 1]]]
-            user_edges_out = user_edges_idx[community_labels[user] != community_labels[adj_tens[user_edges_idx, 1]]]
+            user_edges_com = user_edges_idx[user_labels[user] == item_labels[adj_tens[user_edges_idx, 1]]]
+            user_edges_out = user_edges_idx[user_labels[user] != item_labels[adj_tens[user_edges_idx, 1]]]
             # perc_edges_in_community = np.sum(community_labels[user] == community_labels[user_edges]) / len(user_edges)
             # 0 in_community_strength ... make normal random dropout
             # 1 in_community_strength ... drop first only in community until in_community avg degree is reached, then out of community
@@ -52,9 +52,9 @@ def power_node_edge_dropout(adj_tens, community_labels, power_users_idx, power_u
             # nr_users_in_com = torch.count_nonzero(community_labels == com_label_user)
             # nr_edges_in_com = torch.sum(community_labels[adj_tens[:, 0]] == com_label_user)
             # avg_degree_com_label = nr_edges_in_com / nr_users_in_com
-            # power_users_avg_dec_degrees = avg_degree_com_label / nr_users_in_com
+            # users_avg_dec_degrees = avg_degree_com_label / nr_users_in_com
 
-            idx_user_edges_com = torch.randint(0, len(user_edges_com), (int(len(user_edges_com) * ((users_dec_perc_drop + community_dropout_strength * (1-users_dec_perc_drop)) * (1-power_users_avg_dec_degrees))),))
+            idx_user_edges_com = torch.randint(0, len(user_edges_com), (int(len(user_edges_com) * ((users_dec_perc_drop + community_dropout_strength * (1-users_dec_perc_drop)) * (1-com_avg_dec_degrees[user_labels[user]]))),))
             nr_to_drop = int(len(user_edges_idx) * users_dec_perc_drop)
             nr_to_drop_in_com = len(idx_user_edges_com)
             idx_user_edges_out = torch.randint(0, len(user_edges_out), (nr_to_drop - nr_to_drop_in_com,))
@@ -70,16 +70,10 @@ def power_node_edge_dropout(adj_tens, community_labels, power_users_idx, power_u
     if items_dec_perc_drop > 0.:  # if 1, then no edges are dropped
         for item in power_items:
             item_edges_idx = torch.where(adj_tens[:, 1] == item, adj_tens[:, 1], 0.0).nonzero().flatten()
-            item_edges_com = item_edges_idx[community_labels[item] == community_labels[adj_tens[item_edges_idx, 0]]]
-            item_edges_out = item_edges_idx[community_labels[item] != community_labels[adj_tens[item_edges_idx, 0]]]
-            # perc_edges_in_community = np.sum(community_labels[item] == community_labels[item_edges]) / len(item_edges)
-            # 0 in_community_strength ... make normal random dropout
-            # 1 in_community_strength ... drop only in community
+            item_edges_com = item_edges_idx[item_labels[item] == user_labels[adj_tens[item_edges_idx, 0]]]
+            item_edges_out = item_edges_idx[item_labels[item] != user_labels[adj_tens[item_edges_idx, 0]]]
 
-            avg_degree_in_com = np.sum(community_labels[item] == community_labels[adj_tens[item_edges_idx, 0]]) / len(item_edges_idx)
-            decimal_percent_until_avg_degree = avg_degree_in_com / len(item_edges_idx)
-
-            idx_item_edges_com = torch.randint(0, len(item_edges_com), (int(len(item_edges_com) * ((items_dec_perc_drop + community_dropout_strength * (1-items_dec_perc_drop)) * (1-decimal_percent_until_avg_degree))),))
+            idx_item_edges_com = torch.randint(0, len(item_edges_com), (int(len(item_edges_com) * ((items_dec_perc_drop + community_dropout_strength * (1-items_dec_perc_drop)) * (1-com_avg_dec_degrees[item_labels[item]]))),))
             nr_to_drop = int(len(item_edges_idx) * items_dec_perc_drop)
             nr_to_drop_in_com = len(idx_item_edges_com)
             idx_item_edges_out = torch.randint(0, len(item_edges_out), (nr_to_drop - nr_to_drop_in_com,))
@@ -103,11 +97,17 @@ def power_node_edge_dropout(adj_tens, community_labels, power_users_idx, power_u
     return adj_tens
 
 
-def get_community_labels(adj_np, algorithm='Leiden', save_path='data/ml-32m', get_probs=False):
+def get_community_labels(adj_np, algorithm='Leiden', save_path='data/ml-32m', get_probs=False, bipartite_connect=False):
     # check if column 0 and 1 do not intersect, no ambiguity
+    # Ids start at 1 in MovieLens dataset
+    max_userId = np.max(adj_np[:, 0])
+    min_userId = np.min(adj_np[:, 0])
+    max_itemId = np.max(adj_np[:, 1])
+    min_itemId = np.min(adj_np[:, 1])
     if not np.all(adj_np[:, 0] != adj_np[:, 1]):
-        adj_np[:, 1] = adj_np[:, 1] + np.max(adj_np[:, 0]) + 1
-        # make undirected such that also items get community labels
+        adj_np[:, 1] = adj_np[:, 1] + max_userId + min_userId  # min_userId is 1, if its 0: no gap between new user and item ids
+
+    # make undirected such that also items get community labels
     adj_np = np.concatenate([adj_np, adj_np[:, [1, 0, 2]]])
     adj_csr = sp.csr_matrix((adj_np[:, 2], (adj_np[:, 0], adj_np[:, 1])))
 
@@ -121,24 +121,39 @@ def get_community_labels(adj_np, algorithm='Leiden', save_path='data/ml-32m', ge
     #     detect_obj = PropagationClustering(n_iter=-1, weighted=False, sort_clusters=True, return_aggregate=False)
 
     if algorithm != 'PropagationClustering':
-        detect_obj.fit(adj_csr, force_bipartite=False)
+        if bipartite_connect:
+            detect_obj.fit(adj_csr, force_bipartite=True)
+        else:
+            detect_obj.fit(adj_csr, force_bipartite=False)
+
     else:
         detect_obj.fit(adj_csr)
 
-    # np.savetxt(f'{save_path}/labels_col_uniq_undir_nonbip_{algorithm}.csv', detect_obj.labels_col_, delimiter=",")
-    np.savetxt(f'{save_path}/labels_uniq_undir_nonbip_{algorithm}.csv', detect_obj.labels_, delimiter=",")
+    if bipartite_connect:
+        # ? assign items to those users labels that are majority vote the most often pointing to the item
+        pass
+    else: # bipartite_connect=False
+        # do not connect anything as they are connected already
+        # if index is a not-exising user or item, it will be max(community label) + 1, so we can ignore it as the indices are still true
+        user_labels = detect_obj.labels_[0:max_userId+min_userId]  # +1 as indices start at 1
+        item_labels = detect_obj.labels_[max_userId+min_userId:]
+
+        np.savetxt(f'{save_path}/user_labels_undir_bip{bipartite_connect}_{algorithm}.csv', user_labels, delimiter=",")
+        np.savetxt(f'{save_path}/item_labels_undir_bip{bipartite_connect}_{algorithm}.csv', item_labels, delimiter=",")
 
     # edge_labels = detect_obj.predict(adj_csr)
     if get_probs and algorithm != 'KCenters':
         # probs_col = detect_obj.probs_col_[:, :100].toarray()
-        probs = detect_obj.probs_[:, :100].toarray()
-        # np.savetxt(f'{save_path}/labels_col_uniq_undir_nonbip_probs_{algorithm}.csv', probs_col, delimiter=",")
-        np.savetxt(f'{save_path}/labels_uniq_undir_nonbip_probs_{algorithm}.csv', probs, delimiter=",")
+        user_probs = detect_obj.probs_[:max_userId+1, :100].toarray()
+        item_probs = detect_obj.probs_[max_userId+1:, :100].toarray()
+        # np.savetxt(f'{save_path}/labels_col_uniq_undir_bip{bipartite_connect}_probs_{algorithm}.csv', probs_col, delimiter=",")
+        np.savetxt(f'{save_path}/user_labels_undir_bip{bipartite_connect}_probs_{algorithm}.csv', user_probs, delimiter=",")
+        np.savetxt(f'{save_path}/item_labels_undir_bip{bipartite_connect}_probs_{algorithm}.csv', item_probs, delimiter=",")
 
-    return detect_obj.labels_
+    return torch.tensor(user_labels, dtype=torch.int64), torch.tensor(item_labels, dtype=torch.int64)
 
 
-def percent_pointing_inside_com(adj_np, community_labels, for_top_n_communities=10):
+def percent_pointing_inside_com(adj_np, user_labels, item_labels, for_top_n_communities=10):
     """
     How many edges are pointing inside its own community?
     :param adj: scipy.sparse.csr_matrix, adjacency matrix
@@ -153,36 +168,86 @@ def percent_pointing_inside_com(adj_np, community_labels, for_top_n_communities=
 
     if for_top_n_communities is not None:  # there are only 21 communities
         # count for the n biggest communities, how many edges are on average pointing inside its own community
-        unique_labels, counts = np.unique(community_labels, return_counts=True)
+        unique_labels, counts = np.unique(user_labels, return_counts=True)
         sort_index = np.argsort(counts)[::-1]
         unique_labels = unique_labels[sort_index]
         counts = counts[sort_index]
         top_n = unique_labels[:for_top_n_communities]
-        num_nodes = np.unique((adj_np[:, :2].flatten())).shape[0]
-        # # get number of communities with only 1 node
-        # one_counts = np.sum(counts == 1)
-        # print(f'Overall % of nodes with only 1 community: {np.round(one_counts / num_nodes * 100, 2)} %')
+        num_user_nodes = len(user_labels)
 
         # # keep only nodes from n biggest communities
         # users = np.where(np.isin(community_labels, top_n))[0]
         # adj_np = adj_np[np.isin(adj_np[:, 0], users)]
         # adj_np = adj_np[np.isin(adj_np[:, 1], users)]
         #
-        src_labels = community_labels[adj_np[:, 0]]
-        dst_labels = community_labels[adj_np[:, 1]]
+        src_labels = user_labels[adj_np[:, 0]]
+        dst_labels = item_labels[adj_np[:, 1]]
 
         for i, label in enumerate(top_n[:10]):
             # get number of edges pointing inside community
-            # num of edges inside community
-            # take all edges that have community 'label' as destination
-            sum_edges_com_six = np.sum(np.logical_and((src_labels == label), (dst_labels == label)))
+            sum_edges_com = np.sum(np.logical_and((src_labels == label), (dst_labels == label)))
             sum_in_com = np.sum(src_labels == label)
-            print(f'Community {int(label)} has {np.round(sum_in_com/len(adj_np) * 100, 1)} % of edges, {np.round(counts[i]/num_nodes * 100, 1)} % of nodes, and {np.round(sum_edges_com_six/sum_in_com * 100, 4)} % of edges pointing inside its own community')
+            print(f'Community {int(label)} has {np.round(sum_in_com/len(adj_np) * 100, 1)} % of edges, {np.round(counts[i]/num_user_nodes * 100, 1)} % of user nodes, and {np.round(sum_edges_com/sum_in_com * 100, 4)} % of edges pointing inside its own community')
         overall_percent = np.sum(src_labels == dst_labels) / len(adj_np)
         print(f'Overall percent of edges pointing inside community: {overall_percent}')
 
 
-def get_power_users_items(adj_tens, community_labels, users_top_percent=0.01, items_top_percent=0, do_power_nodes_from_community=False, save_path='/data/ml-32m'):
+# def get_power_users_items(adj_tens, community_labels, users_top_percent=0.01, items_top_percent=0, do_power_nodes_from_community=False, save_path='/data/ml-32m'):
+#     """
+#     Get the indices of the top users and items based on their degree.
+#     :param adj_tens: torch.tensor, format (n, 3) with (user, item, rating)
+#     :param users_top_percent: float, percentage of top users to keep
+#     :param items_top_percent: float, percentage of top items to keep
+#     :param community_labels: torch.tensor, community labels for each node
+#     :param do_power_nodes_from_community: bool, if True, get top users and items for each community
+#     :return: torch.tensor, indices of top users, torch.tensor, indices of top items
+#     """
+#     if do_power_nodes_from_community:
+#         power_users_ids = np.array([])
+#         power_items_ids = np.array([])
+#         # get top communities
+#         # TODO: check if only first half of community_labels is needed as they are undir (2x len adj_tens)
+#         # TODO: --> Not needed, would be ambigous later! Make separate users_power_nodes and items_power_nodes!
+#         unique_labels, count = np.unique(community_labels, return_counts=True)
+#         sort_index = np.argsort(count)[::-1]
+#         # unique_labels = unique_labels[sort_index]
+#         count = count[sort_index]
+#         user_labels = community_labels[adj_tens[:, 0]]
+#         item_labels = community_labels[adj_tens[:, 1]]
+#         top_x_perc_user_labels_idx = np.where(count >= 0.1 * len(user_labels))[0]  # loop through all community labels that have at least 10% of the users
+#
+#         for user_label in top_x_perc_user_labels_idx:
+#             # get all users in community
+#             users_idx = np.where(community_labels == user_label)[0]
+#             # get highest degrees of users
+#             # get edges per user
+#             user_edges = adj_tens[np.isin(adj_tens[:, 0], users_idx)]
+#             p_degrees = torch_geometric.utils.degree(torch.tensor(user_edges[:, 0]))
+#             p_degrees = p_degrees.numpy()
+#             top_users_idx = np.argsort(p_degrees)[::-1]
+#             # get indices of top x percent of users with the highest degree
+#             top_x_percent_idx = int(len(users_idx) * users_top_percent) + 1  # to have always at least 1 user from every big community
+#             if power_users_ids.size == 0:
+#                 power_users_ids = top_users_idx[:top_x_percent_idx].flatten()
+#             else:
+#                 power_users_ids = np.concatenate((power_users_ids, top_users_idx[:top_x_percent_idx].flatten()))
+#     else:
+#         p_degrees = torch_geometric.utils.degree(torch.tensor(adj_tens[:, 0]))
+#         p_degrees = p_degrees.numpy()
+#         top_users_idx = np.argsort(p_degrees)[::-1]
+#         # get indices of top x percent of users with the highest degree
+#         top_x_percent_idx = int(len(adj_tens) * (1 - users_top_percent)) + 1  # to have always at least 1 user from every big community
+#         power_users_ids = top_users_idx[:top_x_percent_idx].flatten()
+#     # power_users_adj_idx = np.where(np.isin(adj_tens[:, 0], power_users))
+#     # save indices of top users locally
+#     power_users_ids = np.unique(np.array(power_users_ids, dtype=np.int64))
+#     # also make for items when needed
+#     np.savetxt(f'{save_path}/power_nodes_ids.csv', power_users_ids, delimiter=",")
+#     return power_users_ids
+
+
+def get_power_users_items(adj_tens, community_labels, users_top_percent=0.01, items_top_percent=0,
+                          do_power_nodes_from_community=False, save_path='/data/ml-32m'):
     """
     Get the indices of the top users and items based on their degree.
     :param adj_tens: torch.tensor, format (n, 3) with (user, item, rating)
@@ -192,47 +257,48 @@ def get_power_users_items(adj_tens, community_labels, users_top_percent=0.01, it
     :param do_power_nodes_from_community: bool, if True, get top users and items for each community
     :return: torch.tensor, indices of top users, torch.tensor, indices of top items
     """
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    adj_tens = adj_tens.to(device)
+    community_labels = torch.tensor(community_labels).to(device)
+
     if do_power_nodes_from_community:
-        power_users_ids = np.array([])
-        power_items_ids = np.array([])
+        power_users_ids = torch.tensor([], dtype=torch.int64, device=device)
+        power_items_ids = torch.tensor([], dtype=torch.int64, device=device)
         # get top communities
         # TODO: check if only first half of community_labels is needed as they are undir (2x len adj_tens)
         # TODO: --> Not needed, would be ambigous later! Make separate users_power_nodes and items_power_nodes!
-        unique_labels, count = np.unique(community_labels, return_counts=True)
-        sort_index = np.argsort(count)[::-1]
-        # unique_labels = unique_labels[sort_index]
-        count = count[sort_index]
-        top_x_percent_labels_idx = np.where(count >= 0.1 * len(community_labels))[0]  # loop through all community labels that have at least 10% of the users
+        unique_labels, count = torch.unique(community_labels, return_counts=True)
+        # sort_index = torch.argsort(count, descending=True)
+        # count = count[sort_index]
+        user_labels = community_labels[torch.unique(adj_tens[:, 0])]
+        item_labels = community_labels[torch.unique(adj_tens[:, 1])]
+        # get the unique_label where the label count is at least 1% of the users
+        max_user = torch.max(adj_tens[:, 0])
+        max_item = torch.max(adj_tens[:, 1])
+        top_1_perc_user_labels_idx = torch.where(count >= 0.01 * len(user_labels))[0]
 
-        for label in top_x_percent_labels_idx:
-            # get all users in community
-            users_idx = np.where(community_labels == label)[0]
+        for user_label in top_1_perc_user_labels_idx:
+            # get users from this community label
+            users_idx = torch.where(community_labels == user_label)[0]
+            # from these node ids, get the edges for each id
+            user_edges = adj_tens[torch.where(torch.isin(adj_tens[:, 0], users_idx))]
             # get highest degrees of users
             # get edges per user
-            user_edges = adj_tens[np.isin(adj_tens[:, 0], users_idx)]
-            p_degrees = torch_geometric.utils.degree(torch.tensor(user_edges[:, 0]))
-            p_degrees = p_degrees.numpy()
-            top_users_idx = np.argsort(p_degrees)[::-1]
-            # get indices of top x percent of users with the highest degree
-            top_x_percent_idx = int(len(users_idx) * users_top_percent) + 1  # to have always at least 1 user from every big community
-            if power_users_ids.size == 0:
+            p_degrees = torch_geometric.utils.degree(user_edges[:, 0])
+            top_users_idx = torch.argsort(p_degrees, descending=True)
+            top_x_percent_idx = int(len(users_idx) * users_top_percent) + 1
+            if power_users_ids.size(0) == 0:
                 power_users_ids = top_users_idx[:top_x_percent_idx].flatten()
             else:
-                power_users_ids = np.concatenate((power_users_ids, top_users_idx[:top_x_percent_idx].flatten()))
+                power_users_ids = torch.cat((power_users_ids, top_users_idx[:top_x_percent_idx].flatten()))
     else:
-        p_degrees = torch_geometric.utils.degree(torch.tensor(adj_tens[:, 0]))
-        p_degrees = p_degrees.numpy()
-        top_users_idx = np.argsort(p_degrees)[::-1]
-        # get indices of top x percent of users with the highest degree
-        top_x_percent_idx = int(len(adj_tens) * (1 - users_top_percent)) + 1  # to have always at least 1 user from every big community
+        p_degrees = torch_geometric.utils.degree(adj_tens[:, 0])
+        top_users_idx = torch.argsort(p_degrees, descending=True)
+        top_x_percent_idx = int(len(adj_tens) * (1 - users_top_percent)) + 1
         power_users_ids = top_users_idx[:top_x_percent_idx].flatten()
-    # power_users_adj_idx = np.where(np.isin(adj_tens[:, 0], power_users))
-    # save indices of top users locally
-    power_users_ids = np.unique(np.array(power_users_ids, dtype=np.int64))
-    # also make for items when needed
-    np.savetxt(f'{save_path}/power_nodes_ids.csv', power_users_ids, delimiter=",")
+
+    power_users_ids = torch.unique(power_users_ids)
+    torch.save(power_users_ids.cpu(), f'{save_path}/power_nodes_ids.pt')
     return power_users_ids
-
-
 
 
