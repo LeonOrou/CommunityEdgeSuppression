@@ -4,4 +4,8 @@ dataset/
 .venv/
 venv_lapi/
 .gitignore
+*
+!*.py
+!*.txt
+!*.md
 

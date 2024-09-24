@@ -37,7 +37,7 @@ def power_node_edge_dropout(adj_tens, user_com_labels, item_com_labels, power_us
     :return: new adj_tensor with ratings[drop_edges]=0 at dropped edges
     """
     # make list of edges to keep instead of dropping, its less computation (keep 1-drop)
-    keep_edges = torch.tensor([], dtype=torch.int32)
+    drop_edges = torch.tensor([], dtype=torch.int32)
     power_users_idx = power_users_idx.clone().detach()
     if users_dec_perc_drop > 0.:  # if 1, then no edges are dropped
         for user in power_users_idx:
@@ -54,22 +54,21 @@ def power_node_edge_dropout(adj_tens, user_com_labels, item_com_labels, power_us
             # nr_edges_in_com = torch.sum(community_labels[adj_tens[:, 0]] == com_label_user)
             # avg_degree_com_label = nr_edges_in_com / nr_users_in_com
             # users_avg_dec_degrees = avg_degree_com_label / nr_users_in_com
-
-            idx_user_edges_keep_com = torch.randperm(len(user_edges_com))[:int(len(user_edges_com) * (1-((users_dec_perc_drop + community_dropout_strength * (1-users_dec_perc_drop)) * (1-com_avg_dec_degrees[user_com_labels[user]]))))]
-            nr_to_keep = int(len(user_edges_idx) * (1-users_dec_perc_drop))
-            nr_to_keep_in_com = len(idx_user_edges_keep_com)
+            idx_user_edges_drop_com = torch.randperm(len(user_edges_com))[:int(len(user_edges_com) * (users_dec_perc_drop + community_dropout_strength * (1-users_dec_perc_drop) * (1-com_avg_dec_degrees[user_com_labels[user]])))]
+            nr_to_drop = int(len(user_edges_idx) * users_dec_perc_drop)
+            nr_to_drop_in_com = len(idx_user_edges_drop_com)
             # get indices of edges to keep outside the community
-            idx_user_edges_keep_out_com = torch.randperm(len(user_edges_out))[:nr_to_keep - nr_to_keep_in_com]
+            idx_user_edges_drop_out = torch.randperm(len(user_edges_out))[:nr_to_drop - nr_to_drop_in_com]
 
             # user_edges_com = user_edges_com[idx_user_edges_drop_com]
             # user_edges_out = user_edges_out[idx_user_edges_drop_out]
-            user_edges_com = user_edges_com[torch.isin(user_edges_com, user_edges_com[idx_user_edges_keep_com])]
-            user_edges_out = user_edges_out[torch.isin(user_edges_out, user_edges_out[idx_user_edges_keep_out_com])]
+            user_edges_com = user_edges_com[torch.isin(user_edges_com, user_edges_com[idx_user_edges_drop_com])]
+            user_edges_out = user_edges_out[torch.isin(user_edges_out, user_edges_out[idx_user_edges_drop_out])]
             user_edges = torch.cat((user_edges_com, user_edges_out))
-            if keep_edges.size() == 0:
-                keep_edges = user_edges
+            if drop_edges.size() == 0:
+                drop_edges = user_edges
             else:
-                keep_edges = torch.cat((keep_edges, user_edges))
+                drop_edges = torch.cat((drop_edges, user_edges))
 
     if items_dec_perc_drop > 0.:  # if 1, then no edges are dropped
         for item in power_items:
@@ -77,25 +76,22 @@ def power_node_edge_dropout(adj_tens, user_com_labels, item_com_labels, power_us
             item_edges_com = item_edges_idx[item_com_labels[item] == user_com_labels[adj_tens[item_edges_idx, 0]]]
             item_edges_out = item_edges_idx[item_com_labels[item] != user_com_labels[adj_tens[item_edges_idx, 0]]]
             # make "dropout" by deciding which edges to keep instead of dropping, its less computation
-            idx_item_keep_com = torch.randperm(len(item_edges_com))[:int(len(item_edges_com) * (1-((items_dec_perc_drop + community_dropout_strength * (1-items_dec_perc_drop)) * (1-com_avg_dec_degrees[item_com_labels[item]]))))]
+            idx_item_drop_com = torch.randperm(len(item_edges_com))[:int(len(item_edges_com) * (((items_dec_perc_drop + community_dropout_strength * (1-items_dec_perc_drop)) * (1-com_avg_dec_degrees[item_com_labels[item]]))))]
             nr_to_drop = int(len(item_edges_idx) * items_dec_perc_drop)
-            nr_to_drop_in_com = len(idx_item_keep_com)
-            idx_item_keep_out_com = torch.randperm(len(item_edges_out))[:nr_to_drop - nr_to_drop_in_com]
+            nr_to_drop_in_com = len(idx_item_drop_com)
+            idx_item_drop_out = torch.randperm(len(item_edges_out))[:nr_to_drop - nr_to_drop_in_com]
 
-            item_edges_com = item_edges_com[idx_item_keep_com]
-            item_edges_out = item_edges_out[idx_item_keep_out_com]
+            item_edges_com = item_edges_com[idx_item_drop_com]
+            item_edges_out = item_edges_out[idx_item_drop_out]
             item_edges = torch.cat([item_edges_com, item_edges_out])
-            if keep_edges.size() == 0:
-                keep_edges = item_edges
+            if drop_edges.size() == 0:
+                drop_edges = item_edges
             else:
-                keep_edges = torch.cat((keep_edges, item_edges))
+                drop_edges = torch.cat((drop_edges, item_edges))
 
-    # TODO: check if thats bullshit
-    non_power_user_edges = torch.where(torch.tensor(torch.isin(adj_tens[:, 0], power_users_idx, invert=True)))[0]
-    # non_power_item_edges = torch.where(torch.tensor(torch.isin(adj_tens[:, 1], power_items, invert=True)))[0]
-    keep_edges = torch.unique(torch.flatten(torch.cat([non_power_user_edges, keep_edges])))
-
-    adj_tens = adj_tens[keep_edges]
+    adj_tens[:, 2][drop_edges] = 0
+    # deleting edges where rating is 0
+    adj_tens = adj_tens[adj_tens[:, 2] != 0]
     return adj_tens
 
 
@@ -236,7 +232,7 @@ def get_power_users_items(adj_tens, user_com_labels, item_com_labels=[], users_t
         power_users_ids = top_users_idx[:top_x_percent_idx].flatten()
 
     power_users_ids = torch.unique(power_users_ids)
-    torch.save(power_users_ids.cpu(), f'{save_path}/power_nodes_ids_com_wise_{do_power_nodes_from_community}_top{users_top_percent}users.csv')
+    np.savetxt(f'{save_path}/power_nodes_ids_com_wise_{do_power_nodes_from_community}_top{users_top_percent}users.csv', power_users_ids.numpy(), delimiter=",")
     return power_users_ids
 
 

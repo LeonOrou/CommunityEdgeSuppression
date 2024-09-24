@@ -37,7 +37,7 @@ eval_args:
     mode: full
 metrics: ['Recall', 'MRR', 'NDCG', 'Hit', 'Precision', 'ItemCoverage', 'AveragePopularity', 'GiniIndex', 'ShannonEntropy', 'TailPercentage']
 topk: 20  # try 20, 50, 100
-valid_metric: averagepopularity@20  # for early stopping
+valid_metric: giniindex@20  # for early stopping
 metric_decimal_place: 4
 repeatable: True
 
