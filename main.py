@@ -134,9 +134,6 @@ def main():
         decimal_avg_degree_com_label = nr_edges_in_com / nr_nodes_in_com / nr_nodes_in_com
         config.variable_config_dict['com_avg_dec_degrees'][com_label] = decimal_avg_degree_com_label
 
-    # TODO: add user community labels to config.variable_config_dict
-    # TODO: add as many things as possible to avoid repeated calculations inside the PowerDropoutTrainer
-
     if model_name == 'LightGCN':
         model = LightGCN(config, train_data.dataset).to(config['device'])
     elif model_name == 'ItemKNN':

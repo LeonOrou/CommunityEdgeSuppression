@@ -79,7 +79,7 @@ class PowerDropoutTrainer(Trainer):
                                                  users_dec_perc_drop=self.config.variable_config_dict['users_dec_perc_drop'],
                                                  items_dec_perc_drop=self.config.variable_config_dict['items_dec_perc_drop'],
                                                  community_dropout_strength=self.config.variable_config_dict['community_dropout_strength'],)
-            # train_data_sampler = train_data.sampler
+
             train_data_epoch = TrainDataLoader(config=self.config,
                                                dataset=train_data.dataset.copy(new_inter_feat=Interaction(pd.DataFrame(new_inter_feat,
                                                                                columns=train_data.dataset.inter_feat.columns))),
@@ -87,6 +87,7 @@ class PowerDropoutTrainer(Trainer):
                                                                                             new_inter_feat=Interaction(pd.DataFrame(new_inter_feat,
                                                                                             columns=train_data.dataset.inter_feat.columns)))),
                                                shuffle=self.config['shuffle'])
+
             ### end power_node_edge_dropout ###
             train_loss = self._train_epoch(
                 train_data_epoch, epoch_idx, show_progress=show_progress

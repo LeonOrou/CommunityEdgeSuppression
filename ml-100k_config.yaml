@@ -36,8 +36,8 @@ eval_args:
     split: {'RS': [0.8,0.1,0.1]}
     mode: full
 metrics: ['Recall', 'MRR', 'NDCG', 'Hit', 'Precision', 'ItemCoverage', 'AveragePopularity', 'GiniIndex', 'ShannonEntropy', 'TailPercentage']
-topk: 20  # try 20, 50, 100
-valid_metric: giniindex@20  # for early stopping
+topk: 50  # try 20, 50, 100
+valid_metric: giniindex@50  # for early stopping
 metric_decimal_place: 4
 repeatable: True
 

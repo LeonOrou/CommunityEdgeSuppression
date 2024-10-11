@@ -6,22 +6,24 @@ import scipy
 import torch_geometric
 from sknetwork.clustering import Leiden
 import scipy.sparse as sp
+import pickle
 
 # set seed function for all libraries used in the project
 def set_seed(seed):
+    random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
-    torch.backends.cudnn.enabled = False
     torch_geometric.seed_everything(seed)
     # scipy.random.seed(seed)  # not needed as they use numpy seed
     # pandas.util.testing.rng = np.random.RandomState(seed)
 
 
 def power_node_edge_dropout(adj_tens, user_com_labels, item_com_labels, power_users_idx, com_avg_dec_degrees, power_items=torch.tensor([]), users_dec_perc_drop=0.7, items_dec_perc_drop=0.0, community_dropout_strength=0):
+    # TODO: porpbably remove com_avg_dec_degrees as there is enough customization with the community dropout strength parameter, e.g. 0.8 for com strength
     """
     Drop edges of users and items that are above the threshold in their degree distribution.
     All in torch tensor format.
@@ -54,7 +56,7 @@ def power_node_edge_dropout(adj_tens, user_com_labels, item_com_labels, power_us
             # nr_edges_in_com = torch.sum(community_labels[adj_tens[:, 0]] == com_label_user)
             # avg_degree_com_label = nr_edges_in_com / nr_users_in_com
             # users_avg_dec_degrees = avg_degree_com_label / nr_users_in_com
-            idx_user_edges_drop_com = torch.randperm(len(user_edges_com))[:int(len(user_edges_com) * (users_dec_perc_drop + community_dropout_strength * (1-users_dec_perc_drop) * (1-com_avg_dec_degrees[user_com_labels[user]])))]
+            idx_user_edges_drop_com = torch.randperm(len(user_edges_com))[:int(len(user_edges_com) * (users_dec_perc_drop + community_dropout_strength * (1-users_dec_perc_drop)))]
             nr_to_drop = int(len(user_edges_idx) * users_dec_perc_drop)
             nr_to_drop_in_com = len(idx_user_edges_drop_com)
             # get indices of edges to keep outside the community
@@ -75,8 +77,8 @@ def power_node_edge_dropout(adj_tens, user_com_labels, item_com_labels, power_us
             item_edges_idx = torch.where(torch.tensor(adj_tens[:, 1] == item), adj_tens[:, 1], 0.0).nonzero().flatten()
             item_edges_com = item_edges_idx[item_com_labels[item] == user_com_labels[adj_tens[item_edges_idx, 0]]]
             item_edges_out = item_edges_idx[item_com_labels[item] != user_com_labels[adj_tens[item_edges_idx, 0]]]
-            # make "dropout" by deciding which edges to keep instead of dropping, its less computation
-            idx_item_drop_com = torch.randperm(len(item_edges_com))[:int(len(item_edges_com) * (((items_dec_perc_drop + community_dropout_strength * (1-items_dec_perc_drop)) * (1-com_avg_dec_degrees[item_com_labels[item]]))))]
+            # use  * (1-com_avg_dec_degrees[item_com_labels[item]]) if with reducing to avg degree
+            idx_item_drop_com = torch.randperm(len(item_edges_com))[:int(len(item_edges_com) * (((items_dec_perc_drop + community_dropout_strength * (1-items_dec_perc_drop)))))]
             nr_to_drop = int(len(item_edges_idx) * items_dec_perc_drop)
             nr_to_drop_in_com = len(idx_item_drop_com)
             idx_item_drop_out = torch.randperm(len(item_edges_out))[:nr_to_drop - nr_to_drop_in_com]
@@ -147,6 +149,10 @@ def get_community_labels(adj_np, algorithm='Leiden', save_path='data/ml-32m', ge
         # np.savetxt(f'{save_path}/labels_col_uniq_undir_bip{bipartite_connect}_probs_{algorithm}.csv', probs_col, delimiter=",")
         np.savetxt(f'{save_path}/user_labels_undir_bip{bipartite_connect}_probs_{algorithm}.csv', user_probs, delimiter=",")
         np.savetxt(f'{save_path}/item_labels_undir_bip{bipartite_connect}_probs_{algorithm}.csv', item_probs, delimiter=",")
+
+    #saving detect_obj
+    with open(f'{save_path}/{algorithm}_obj_undir_bip{bipartite_connect}.pkl', 'wb') as f:
+        pickle.dump(detect_obj, f)
 
     return torch.tensor(user_labels, dtype=torch.int64), torch.tensor(item_labels, dtype=torch.int64)
 
@@ -236,3 +242,54 @@ def get_power_users_items(adj_tens, user_com_labels, item_com_labels=[], users_t
     return power_users_ids
 
 
+# measuring community bias of recommendations by checking how many of the recommendations are pointed inside the own community vs how many are pointed outside
+from recbole.evaluator.base_metric import AbstractMetric
+from recbole.utils import EvaluatorType
+
+# TODO: check if thats bullshit
+class CommunityBias(AbstractMetric):
+    metric_type = EvaluatorType.VALUE
+    metric_need = ['rec.items', 'data.num_items', 'data.num_users', 'data.user_com_labels', 'data.count_items']
+    smaller = True  # Set to True if lower bias indicates better performance
+
+    def __init__(self, config):
+        super().__init__(config)
+        # Additional initialization if needed
+
+    def calculate_metric(self, dataobject):
+        """Calculate community bias metric.
+
+        Args:
+            dataobject(DataStruct): contains all information needed to calculate metrics.
+
+        Returns:
+            dict: {'CommunityBias': computed_value}
+        """
+        rec_items = dataobject.get('rec.items')
+        user_com_labels = dataobject.get('data.user_com_labels')  # Array mapping users to their communities
+
+        intra_community_interactions = 0
+        total_interactions = 0
+
+        # Loop over each user to calculate intra vs inter community recommendations
+        # TODO: make not loop but comparison of two arrays
+        for user_id, recommended_items in enumerate(rec_items):
+            user_community = user_com_labels[user_id]
+
+            for item_id in recommended_items:
+                item_community = user_com_labels[item_id]  # Assuming item has community based on user label
+
+                if item_community == user_community:
+                    intra_community_interactions += 1
+
+                total_interactions += 1
+
+        # Calculate bias as a ratio of intra-community to total interactions
+        if total_interactions > 0:
+            community_bias_value = intra_community_interactions / total_interactions
+        else:
+            community_bias_value = 0  # Handle cases with no interactions
+
+        # Return result as a dictionary
+        result_dict = {'CommunityBias': community_bias_value}
+        return result_dict
