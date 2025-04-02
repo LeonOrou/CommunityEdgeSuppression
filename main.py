@@ -30,11 +30,12 @@ def main():
     parser.add_argument("--dataset_name", type=str, default='ml-20m')
     parser.add_argument("--config_file_name", type=str, default=f'ml-20_config.yaml')
     parser.add_argument("--users_top_percent", type=float, default=0.01)
-    parser.add_argument("--items_top_percent", type=float, default=0.0)
+    parser.add_argument("--items_top_percent", type=float, default=0.0)  # isn't item dropout what we want in the end to min bias?
     parser.add_argument("--users_dec_perc_drop", type=float, default=0.70)
     parser.add_argument("--items_dec_perc_drop", type=float, default=0.0)
-    parser.add_argument("--community_dropout_strength", type=float, default=0.0)
-    parser.add_argument("--do_power_nodes_from_community", type=bool, default=False)
+    parser.add_argument("--community_dropout_strength", type=float, default=0.9)
+    parser.add_argument("--do_power_nodes_from_community", type=bool, default=True)
+    # TODO: check scientific evidence for parameter existence and values!
 
     args = parser.parse_args()
 

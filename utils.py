@@ -22,8 +22,12 @@ def set_seed(seed):
     # pandas.util.testing.rng = np.random.RandomState(seed)
 
 
-def power_node_edge_dropout(adj_tens, user_com_labels, item_com_labels, power_users_idx, com_avg_dec_degrees, power_items=torch.tensor([]), users_dec_perc_drop=0.7, items_dec_perc_drop=0.0, community_dropout_strength=0):
-    # TODO: porpbably remove com_avg_dec_degrees as there is enough customization with the community dropout strength parameter, e.g. 0.8 for com strength
+def power_node_edge_dropout(adj_tens, user_com_labels, item_com_labels, power_users_idx, com_avg_dec_degrees,
+                            power_items=torch.tensor([]),
+                            users_dec_perc_drop=0.7,
+                            items_dec_perc_drop=0.0,
+                            community_dropout_strength=0):  # community_dropout_strength=0 means
+    # TODO: probably remove com_avg_dec_degrees as there is enough customization with the community dropout strength parameter, e.g. 0.8 for com strength, check this with scientific evidence
     """
     Drop edges of users and items that are above the threshold in their degree distribution.
     All in torch tensor format.
@@ -35,14 +39,15 @@ def power_node_edge_dropout(adj_tens, user_com_labels, item_com_labels, power_us
     :param power_items: torch.tensor, node ids of power items
     :param users_dec_perc_drop: float, decimal percentage of power users' edges to drop (1 is average degree inside community)
     :param items_dec_perc_drop: float, decimal percentage of power items' edges to drop (1 is average degree inside community)
-    :param community_dropout_strength: float, strength of dropping edges within the community (0 ... no change, 1 ... first only in community)
+    :param community_dropout_strength: float, strength of dropping edges within the community (0 ... no change - normal dropout, 1 ... first only in community)
     :return: new adj_tensor with ratings[drop_edges]=0 at dropped edges
     """
     # make list of edges to keep instead of dropping, its less computation (keep 1-drop)
+    # TODO: make performance analysis
     drop_edges = torch.tensor([], dtype=torch.int32)
-    power_users_idx = power_users_idx.clone().detach()
-    if users_dec_perc_drop > 0.:  # if 1, then no edges are dropped
-        for user in power_users_idx:
+    power_users_idx = power_users_idx.clone().detach()  # TODO: really necessary? Slows process down
+    if users_dec_perc_drop > 0.:  # if 1, then all edges from power nodes are dropped
+        for user in power_users_idx:  # doable without loop?
             user_edges_idx = torch.where(torch.tensor(adj_tens[:, 0] == user), adj_tens[:, 0], 0.0).nonzero().flatten()
             user_edges_com = user_edges_idx[user_com_labels[user] == item_com_labels[adj_tens[user_edges_idx, 1]]]
             user_edges_out = user_edges_idx[user_com_labels[user] != item_com_labels[adj_tens[user_edges_idx, 1]]]
@@ -246,50 +251,23 @@ def get_power_users_items(adj_tens, user_com_labels, item_com_labels=[], users_t
 from recbole.evaluator.base_metric import AbstractMetric
 from recbole.utils import EvaluatorType
 
-# TODO: check if thats bullshit
-class CommunityBias(AbstractMetric):
-    metric_type = EvaluatorType.VALUE
-    metric_need = ['rec.items', 'data.num_items', 'data.num_users', 'data.user_com_labels', 'data.count_items']
-    smaller = True  # Set to True if lower bias indicates better performance
+# TODO: make community bias metric: get recommendations and calculate how many are inside the community versus the recommendations without any modifications
+# TODO: check data types of the inputs
+# TODO: is that really already the bias or do I have to compare this with how well the new recommendations the user still likes, e.g. with NDCG normalization?
+def get_community_bias(new_recs, standard_recs, community_labels):
+    """
+    Calculate the community bias of recommendations.
+    :param new_recs: torch.tensor, new recommendations
+    :param standard_recs: torch.tensor, standard recommendations
+    :param community_labels: torch.tensor, community labels for each node
+    :return: float, community bias
+    """
+    # get community labels of recommendations
+    new_recs_com_labels = community_labels[new_recs]
+    standard_recs_com_labels = community_labels[standard_recs]
 
-    def __init__(self, config):
-        super().__init__(config)
-        # Additional initialization if needed
-
-    def calculate_metric(self, dataobject):
-        """Calculate community bias metric.
-
-        Args:
-            dataobject(DataStruct): contains all information needed to calculate metrics.
-
-        Returns:
-            dict: {'CommunityBias': computed_value}
-        """
-        rec_items = dataobject.get('rec.items')
-        user_com_labels = dataobject.get('data.user_com_labels')  # Array mapping users to their communities
-
-        intra_community_interactions = 0
-        total_interactions = 0
-
-        # Loop over each user to calculate intra vs inter community recommendations
-        # TODO: make not loop but comparison of two arrays
-        for user_id, recommended_items in enumerate(rec_items):
-            user_community = user_com_labels[user_id]
-
-            for item_id in recommended_items:
-                item_community = user_com_labels[item_id]  # Assuming item has community based on user label
-
-                if item_community == user_community:
-                    intra_community_interactions += 1
-
-                total_interactions += 1
-
-        # Calculate bias as a ratio of intra-community to total interactions
-        if total_interactions > 0:
-            community_bias_value = intra_community_interactions / total_interactions
-        else:
-            community_bias_value = 0  # Handle cases with no interactions
-
-        # Return result as a dictionary
-        result_dict = {'CommunityBias': community_bias_value}
-        return result_dict
+    # get number of recommendations pointing inside community
+    num_new_recs_in_com = torch.sum(new_recs_com_labels == community_labels[new_recs])
+    num_standard_recs_in_com = torch.sum(standard_recs_com_labels == community_labels[standard_recs])
+    # a negative value means a reduction in bias by that decimal percent, a positive one an increase
+    return num_new_recs_in_com / num_standard_recs_in_com
