@@ -57,7 +57,9 @@ def main():
         topk = config_file['topk']
         epochs = config_file['epochs']
 
-    # device = 'cuda' if torch.cuda.is_available() else 'cpu'  # create_dataset checks device automatically
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'  # create_dataset checks device automatically
+    torch.set_default_device(device)
+
     config = Config(model=model_name, dataset=dataset_name, config_file_list=[f'{dataset_name}_config.yaml'], config_dict={'users_dec_perc_drop': users_dec_perc_drop, 'items_dec_perc_drop': items_dec_perc_drop, 'community_dropout_strength': community_dropout_strength})
     init_seed(seed=seed, reproducibility=config['reproducibility'])
     init_logger(config)
@@ -76,6 +78,7 @@ def main():
     # dataset = booleanify(dataset, threshold=4, rating_col_name=rating_col_name)
     logger.info(dataset)
     train_data, valid_data, test_data = data_preparation(config, dataset)
+
 
     # initializing wandb
     wandb.login(key="d234bc98a4761bff39de0e5170df00094ac42269")
@@ -151,6 +154,9 @@ def main():
 
     wandb.log({"best_valid_score": best_valid_score, "best_valid_result": best_valid_result})
     logger.info(f"Best valid score: {best_valid_score}, best valid result: {best_valid_result}")
+
+    # TODO: evaluate custom community bias
+    trainer.evaluate(valid_data, show_progress=config['show_progress'])
 
     # save model
     rng_id = np.random.randint(0, 100000)

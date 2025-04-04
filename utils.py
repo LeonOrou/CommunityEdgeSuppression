@@ -7,6 +7,7 @@ import torch_geometric
 from sknetwork.clustering import Leiden
 import scipy.sparse as sp
 import pickle
+from line_profiler_pycharm import profile
 
 # set seed function for all libraries used in the project
 def set_seed(seed):
@@ -21,7 +22,7 @@ def set_seed(seed):
     # scipy.random.seed(seed)  # not needed as they use numpy seed
     # pandas.util.testing.rng = np.random.RandomState(seed)
 
-
+@profile
 def power_node_edge_dropout(adj_tens, user_com_labels, item_com_labels, power_users_idx, com_avg_dec_degrees,
                             power_items=torch.tensor([]),
                             users_dec_perc_drop=0.7,

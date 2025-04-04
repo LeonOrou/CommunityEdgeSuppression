@@ -1,9 +1,6 @@
 # custom recbole trainer which used power_node_edge_dropout before each episode
-from distutils.command.config import config
 
-import recbole
 from recbole.trainer import Trainer
-from utils import power_node_edge_dropout
 from time import time
 from recbole.utils import (
     early_stopping,
@@ -19,7 +16,6 @@ import pandas as pd
 from recbole.data.interaction import Interaction
 from recbole.data.dataloader.general_dataloader import TrainDataLoader
 from recbole.sampler.sampler import RepeatableSampler
-from torch.utils.data.sampler import RandomSampler
 
 
 class PowerDropoutTrainer(Trainer):
@@ -75,7 +71,7 @@ class PowerDropoutTrainer(Trainer):
                                                  user_com_labels=self.config.variable_config_dict['user_com_labels'],
                                                  item_com_labels=self.config.variable_config_dict['item_com_labels'],
                                                  power_users_idx=self.config.variable_config_dict['power_nodes_ids'],
-                                                 com_avg_dec_degrees = self.config.variable_config_dict['com_avg_dec_degrees'],
+                                                 com_avg_dec_degrees=self.config.variable_config_dict['com_avg_dec_degrees'],
                                                  users_dec_perc_drop=self.config.variable_config_dict['users_dec_perc_drop'],
                                                  items_dec_perc_drop=self.config.variable_config_dict['items_dec_perc_drop'],
                                                  community_dropout_strength=self.config.variable_config_dict['community_dropout_strength'],)

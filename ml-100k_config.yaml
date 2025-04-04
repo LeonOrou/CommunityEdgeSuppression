@@ -21,7 +21,7 @@ remove_negative_interactions: True
 
 # Training and evaluation config
 # epochs: 100
-epochs: 100
+epochs: 20
 train_batch_size: 4096
 eval_batch_size: 4096
 train_neg_sample_args:
