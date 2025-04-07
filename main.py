@@ -119,15 +119,17 @@ def main():
         config.variable_config_dict['user_com_labels'] = torch.tensor(np.loadtxt(f'dataset/{dataset_name}/user_labels_undir_bip{bipartite_connect}_Leiden.csv'), dtype=torch.int64)
         config.variable_config_dict['item_com_labels'] = torch.tensor(np.loadtxt(f'dataset/{dataset_name}/item_labels_undir_bip{bipartite_connect}_Leiden.csv'), dtype=torch.int64)
 
-    if f'power_nodes_ids_com_wise_{do_power_nodes_from_community}_top{users_top_percent}users.csv' not in os.listdir(f'dataset/{dataset_name}'):
-        config.variable_config_dict['power_nodes_ids'] = torch.tensor(get_power_users_items(adj_tens=torch.tensor(adj_np),
-                                            user_com_labels=config.variable_config_dict['user_com_labels'],
-                                            users_top_percent=users_top_percent,
-                                            items_top_percent=items_dec_perc_drop,
-                                            do_power_nodes_from_community=do_power_nodes_from_community,
-                                            save_path=f'dataset/{dataset_name}'), dtype=torch.int64)
+    if f'power_users_ids_com_wise_{do_power_nodes_from_community}_top{users_top_percent}users.csv' not in os.listdir(f'dataset/{dataset_name}') or f'power_items_ids_com_wise_{do_power_nodes_from_community}_top{items_top_percent}items.csv' not in os.listdir(f'dataset/{dataset_name}'):
+        config.variable_config_dict['power_users_ids'], config.variable_config_dict['power_items_ids'] = get_power_users_items(
+            adj_tens=torch.tensor(adj_np),
+            user_com_labels=config.variable_config_dict['user_com_labels'],
+            item_com_labels=config.variable_config_dict['item_com_labels'],
+            users_top_percent=users_top_percent,
+            items_top_percent=items_dec_perc_drop,
+            do_power_nodes_from_community=do_power_nodes_from_community,
+            save_path=f'dataset/{dataset_name}')
     else:
-        config.variable_config_dict['power_nodes_ids'] = torch.tensor(np.loadtxt(f'dataset/{dataset_name}/power_nodes_ids_com_wise_{do_power_nodes_from_community}_top{users_top_percent}users.csv'), dtype=torch.int64)
+        config.variable_config_dict['power_users_ids'] = torch.tensor(np.loadtxt(f'dataset/{dataset_name}/power_users_ids_com_wise_{do_power_nodes_from_community}_top{users_top_percent}users.csv'), dtype=torch.int64)
 
     # tensor with tensor[com_label] = average degree of each community
     config.variable_config_dict['com_avg_dec_degrees'] = torch.zeros(torch.max(config.variable_config_dict['user_com_labels']) + 1)
