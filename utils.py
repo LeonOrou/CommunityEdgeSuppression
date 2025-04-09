@@ -190,6 +190,7 @@ def power_node_edge_dropout(adj_tens, user_com_labels, item_com_labels, power_us
 
 
 def get_community_labels(adj_np, algorithm='Leiden', save_path='data/ml-32m', get_probs=False, bipartite_connect=False):
+    ### TODO: try connecting bipartite graph with edges between user and item communities!!
     # check if column 0 and 1 do not intersect, no ambiguity
     # Ids start at 1 in MovieLens dataset
     max_userId = np.max(adj_np[:, 0])

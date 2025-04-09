@@ -18,6 +18,7 @@ import os
 import torch
 import copy
 from PowerDropoutTrainer import PowerDropoutTrainer
+from recbole.trainer import Trainer
 
 
 def main():
@@ -71,6 +72,7 @@ def main():
 
     # set torch default device, check if this is already done in recbole.config
     torch.set_default_device('cuda') if torch.cuda.is_available() else torch.set_default_device('cpu')
+    print(f"torch default device: {torch.device}")
     dataset = create_dataset(config)  # object of shape (n, (user, item, rating))
 
     # preprocessing dataset
@@ -83,6 +85,7 @@ def main():
     # initializing wandb
     wandb.login(key="d234bc98a4761bff39de0e5170df00094ac42269")
 
+    # TODO: change "power items/users" to "item/user hubs"
     wandb_run = wandb.init(
         project="RecSys_PowerNodeEdgeDropout",
         name=f"{model_name}_{dataset_name}_users_top_{users_top_percent}_com_drop_strength_{community_dropout_strength}",
@@ -150,7 +153,8 @@ def main():
         raise ValueError(f"Model {model_name} not supported")
     logger.info(model)
 
-    trainer = PowerDropoutTrainer(config, model)
+    # trainer = PowerDropoutTrainer(config, model)
+    trainer = Trainer(config, model)
 
     best_valid_score, best_valid_result = trainer.fit(train_data, test_data, saved=True, show_progress=config['show_progress'])
 

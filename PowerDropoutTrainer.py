@@ -20,7 +20,8 @@ from recbole.sampler.sampler import RepeatableSampler
 
 class PowerDropoutTrainer(Trainer):
     def __init__(self, config, model):
-        super().__init__(config, model)
+        super(PowerDropoutTrainer, self).__init__(config, model)
+        self.optimizer = self._build_optimizer()
 
     def fit(
         self,
