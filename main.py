@@ -72,7 +72,7 @@ def main():
 
     # set torch default device, check if this is already done in recbole.config
     torch.set_default_device('cuda') if torch.cuda.is_available() else torch.set_default_device('cpu')
-    print(f"torch default device: {torch.device}")
+    print(f"cuda: {torch.cuda.is_available()}")
     dataset = create_dataset(config)  # object of shape (n, (user, item, rating))
 
     # preprocessing dataset
@@ -153,8 +153,8 @@ def main():
         raise ValueError(f"Model {model_name} not supported")
     logger.info(model)
 
-    # trainer = PowerDropoutTrainer(config, model)
-    trainer = Trainer(config, model)
+    trainer = PowerDropoutTrainer(config, model)
+    # trainer = Trainer(config, model)
 
     best_valid_score, best_valid_result = trainer.fit(train_data, test_data, saved=True, show_progress=config['show_progress'])
 
@@ -164,12 +164,12 @@ def main():
     # TODO: evaluate custom community bias
     trainer.evaluate(valid_data, show_progress=config['show_progress'])
 
-    # save model
+    ## save model
     rng_id = np.random.randint(0, 100000)
     wandb.save(f"{model_name}_{dataset_name}_ID{rng_id}.h5")
     wandb_run.finish()
-    # del trainer, train_data, valid_data, test_data
-    # gc.collect()  # garbage collection
+    ## del trainer, train_data, valid_data, test_data
+    ## gc.collect()  # garbage collection
     #
 
 
