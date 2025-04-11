@@ -1,4 +1,5 @@
-from utils import set_seed, get_community_labels, get_power_users_items, power_node_edge_dropout
+from utils import set_seed, power_node_edge_dropout
+from precompute import get_community_connectivity_matrix, get_community_labels, get_power_users_items, percent_pointing_inside_com
 from recbole.config import Config
 from recbole.data import create_dataset, data_preparation
 import wandb
@@ -6,7 +7,6 @@ from argparse import ArgumentParser
 import yaml
 import logging
 from logging import getLogger
-from recbole.trainer import Trainer
 from recbole.utils import init_seed, init_logger
 from recbole.utils.case_study import full_sort_topk
 from recbole.model.general_recommender import LightGCN, ItemKNN, MultiVAE
@@ -29,7 +29,7 @@ def main():
     # # in cmd: python main.py --model_name LightGCN --dataset_name ml-20m --config_file_name ml-20_config.yaml --users_top_percent 0.01 --users_dec_perc_drop 0.70 --community_dropout_strength 0.5 --do_power_nodes_from_community True
     parser.add_argument("--model_name", type=str, default='LightGCN')
     parser.add_argument("--dataset_name", type=str, default='ml-20m')
-    parser.add_argument("--config_file_name", type=str, default=f'ml-20_config.yaml')
+    # parser.add_argument("--config_file_name", type=str, default=f'ml-20_config.yaml')
     parser.add_argument("--users_top_percent", type=float, default=0.01)
     parser.add_argument("--items_top_percent", type=float, default=0.0)  # isn't item dropout what we want in the end to min bias?
     parser.add_argument("--users_dec_perc_drop", type=float, default=0.70)
@@ -81,7 +81,6 @@ def main():
     logger.info(dataset)
     train_data, valid_data, test_data = data_preparation(config, dataset)
 
-
     # initializing wandb
     wandb.login(key="d234bc98a4761bff39de0e5170df00094ac42269")
 
@@ -106,6 +105,8 @@ def main():
     if not os.path.exists(f'dataset/{dataset_name}'):
         os.makedirs(f'dataset/{dataset_name}')
 
+    ### TODO: instead of preprocessing only the train data, we should preprocess the whole dataset and save it in a file
+    # TODO: => use precompute for this. Check if the files already exist, if not, run precompute
     train_data_coo = copy.deepcopy(train_data.dataset).inter_matrix()
     # combine row and col into torch.tensor of shape (n, 2) converting the data to numpy arrays and concatenating them
     indices = torch.tensor((train_data_coo.row, train_data_coo.col), dtype=torch.int32).T
@@ -113,7 +114,7 @@ def main():
     adj_np = np.array(torch.cat((indices, values), dim=1), dtype=np.int64)
     del train_data_coo, indices, values
 
-    bipartite_connect = False  # if bipartite community detection, if True: connect items communities to user communities
+    bipartite_connect = True  # if bipartite community detection, if True: connect items communities to user communities
     if f'user_labels_undir_bip{bipartite_connect}_Leiden.csv' not in os.listdir(f'dataset/{dataset_name}'):
         config.variable_config_dict['user_com_labels'], config.variable_config_dict['item_com_labels'] = get_community_labels(adj_np=adj_np,
                                                           save_path=f'dataset/{dataset_name}',
@@ -133,6 +134,14 @@ def main():
             save_path=f'dataset/{dataset_name}')
     else:
         config.variable_config_dict['power_users_ids'] = torch.tensor(np.loadtxt(f'dataset/{dataset_name}/power_users_ids_com_wise_{do_power_nodes_from_community}_top{users_top_percent}users.csv'), dtype=torch.int64)
+
+    # change later to a call of precompute
+    get_community_connectivity_matrix(adj_np=adj_np, save_path=f'dataset/{dataset_name}')
+    percent_pointing_inside_com(adj_np=adj_np,
+                                user_com_labels=config.variable_config_dict['user_com_labels'],
+                                item_com_labels=config.variable_config_dict['item_com_labels'],
+                                save_path=f'dataset/{dataset_name}')
+
 
     # tensor with tensor[com_label] = average degree of each community
     config.variable_config_dict['com_avg_dec_degrees'] = torch.zeros(torch.max(config.variable_config_dict['user_com_labels']) + 1)
