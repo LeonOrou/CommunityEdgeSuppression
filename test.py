@@ -7,7 +7,7 @@
 # run_recbole(model= 'GRU4Rec', dataset='ml-100k')
 
 import numpy as np
-from utils import get_community_labels
+from utils_functions import get_community_labels
 import scipy.sparse as sp
 from scipy.sparse import csr_matrix, dok_matrix
 

@@ -1,5 +1,5 @@
-from utils import set_seed, power_node_edge_dropout
-from precompute import get_community_connectivity_matrix, get_community_labels, get_power_users_items, percent_pointing_inside_com
+from utils_functions import set_seed, plot_community_confidence, plot_community_connectivity_distribution, plot_degree_distributions
+from precompute import get_community_connectivity_matrix, get_community_labels, get_power_users_items
 from recbole.config import Config
 from recbole.data import create_dataset, data_preparation
 import wandb
@@ -26,16 +26,16 @@ def main():
     set_seed(seed)
 
     parser = ArgumentParser()
-    # # in cmd: python main.py --model_name LightGCN --dataset_name ml-20m --config_file_name ml-20_config.yaml --users_top_percent 0.01 --users_dec_perc_drop 0.70 --community_dropout_strength 0.5 --do_power_nodes_from_community True
+    # in cmd: python main.py --model_name LightGCN --dataset_name ml-20m --config_file_name ml-20_config.yaml --users_top_percent 0.01 --users_dec_perc_drop 0.70 --community_dropout_strength 0.5 --do_power_nodes_from_community True
     parser.add_argument("--model_name", type=str, default='LightGCN')
-    parser.add_argument("--dataset_name", type=str, default='ml-20m')
-    # parser.add_argument("--config_file_name", type=str, default=f'ml-20_config.yaml')
+    parser.add_argument("--dataset_name", type=str, default='ml-100k')
     parser.add_argument("--users_top_percent", type=float, default=0.01)
-    parser.add_argument("--items_top_percent", type=float, default=0.0)  # isn't item dropout what we want in the end to min bias?
-    parser.add_argument("--users_dec_perc_drop", type=float, default=0.70)
-    parser.add_argument("--items_dec_perc_drop", type=float, default=0.0)
-    parser.add_argument("--community_dropout_strength", type=float, default=0.9)
+    parser.add_argument("--items_top_percent", type=float, default=0.05)
+    parser.add_argument("--users_dec_perc_drop", type=float, default=0.0)
+    parser.add_argument("--items_dec_perc_drop", type=float, default=0.3)
+    parser.add_argument("--community_dropout_strength", type=float, default=0.5)
     parser.add_argument("--do_power_nodes_from_community", type=bool, default=True)
+    # parser.add_argument("--do_power_nodes_from_community", action="store_true")
     # TODO: check scientific evidence for parameter existence and values!
 
     args = parser.parse_args()
@@ -48,8 +48,8 @@ def main():
     items_top_percent = args.items_top_percent
     users_dec_perc_drop = args.users_dec_perc_drop
     items_dec_perc_drop = args.items_dec_perc_drop
-    do_power_nodes_from_community = args.do_power_nodes_from_community
     community_dropout_strength = args.community_dropout_strength
+    do_power_nodes_from_community = args.do_power_nodes_from_community
 
     with open(f'{dataset_name}_config.yaml', 'r') as file:
         config_file = yaml.safe_load(file)
@@ -58,8 +58,9 @@ def main():
         topk = config_file['topk']
         epochs = config_file['epochs']
 
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'  # create_dataset checks device automatically
-    torch.set_default_device(device)
+    # set torch default device, check if this is already done in recbole.config
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
 
     config = Config(model=model_name, dataset=dataset_name, config_file_list=[f'{dataset_name}_config.yaml'], config_dict={'users_dec_perc_drop': users_dec_perc_drop, 'items_dec_perc_drop': items_dec_perc_drop, 'community_dropout_strength': community_dropout_strength})
     init_seed(seed=seed, reproducibility=config['reproducibility'])
@@ -70,14 +71,10 @@ def main():
     logger.addHandler(c_handler)
     logger.info(config)
 
-    # set torch default device, check if this is already done in recbole.config
-    torch.set_default_device('cuda') if torch.cuda.is_available() else torch.set_default_device('cpu')
-    print(f"cuda: {torch.cuda.is_available()}")
     dataset = create_dataset(config)  # object of shape (n, (user, item, rating))
 
     # preprocessing dataset
     # thresholding done already in create_dataset() but in case they haven't deleted the edges
-    # dataset = booleanify(dataset, threshold=4, rating_col_name=rating_col_name)
     logger.info(dataset)
     train_data, valid_data, test_data = data_preparation(config, dataset)
 
@@ -109,9 +106,9 @@ def main():
     # TODO: => use precompute for this. Check if the files already exist, if not, run precompute
     train_data_coo = copy.deepcopy(train_data.dataset).inter_matrix()
     # combine row and col into torch.tensor of shape (n, 2) converting the data to numpy arrays and concatenating them
-    indices = torch.tensor((train_data_coo.row, train_data_coo.col), dtype=torch.int32).T
-    values = torch.unsqueeze(torch.tensor(train_data_coo.data, dtype=torch.int32), dim=0).T
-    adj_np = np.array(torch.cat((indices, values), dim=1), dtype=np.int64)
+    indices = torch.tensor((train_data_coo.row, train_data_coo.col), dtype=torch.int32, device=device).T
+    values = torch.unsqueeze(torch.tensor(train_data_coo.data, dtype=torch.int32, device=device), dim=0).T
+    adj_np = np.array(torch.cat((indices, values), dim=1).cpu(), dtype=np.int64)
     del train_data_coo, indices, values
 
     bipartite_connect = True  # if bipartite community detection, if True: connect items communities to user communities
@@ -120,12 +117,12 @@ def main():
                                                           save_path=f'dataset/{dataset_name}',
                                                           get_probs=True)
     else:
-        config.variable_config_dict['user_com_labels'] = torch.tensor(np.loadtxt(f'dataset/{dataset_name}/user_labels_undir_bip{bipartite_connect}_Leiden.csv'), dtype=torch.int64)
-        config.variable_config_dict['item_com_labels'] = torch.tensor(np.loadtxt(f'dataset/{dataset_name}/item_labels_undir_bip{bipartite_connect}_Leiden.csv'), dtype=torch.int64)
+        config.variable_config_dict['user_com_labels'] = torch.tensor(np.loadtxt(f'dataset/{dataset_name}/user_labels_undir_bip{bipartite_connect}_Leiden.csv'), dtype=torch.int64, device=device)
+        config.variable_config_dict['item_com_labels'] = torch.tensor(np.loadtxt(f'dataset/{dataset_name}/item_labels_undir_bip{bipartite_connect}_Leiden.csv'), dtype=torch.int64, device=device)
 
     if f'power_users_ids_com_wise_{do_power_nodes_from_community}_top{users_top_percent}users.csv' not in os.listdir(f'dataset/{dataset_name}') or f'power_items_ids_com_wise_{do_power_nodes_from_community}_top{items_top_percent}items.csv' not in os.listdir(f'dataset/{dataset_name}'):
         config.variable_config_dict['power_users_ids'], config.variable_config_dict['power_items_ids'] = get_power_users_items(
-            adj_tens=torch.tensor(adj_np),
+            adj_tens=torch.tensor(adj_np, device=device),
             user_com_labels=config.variable_config_dict['user_com_labels'],
             item_com_labels=config.variable_config_dict['item_com_labels'],
             users_top_percent=users_top_percent,
@@ -133,19 +130,20 @@ def main():
             do_power_nodes_from_community=do_power_nodes_from_community,
             save_path=f'dataset/{dataset_name}')
     else:
-        config.variable_config_dict['power_users_ids'] = torch.tensor(np.loadtxt(f'dataset/{dataset_name}/power_users_ids_com_wise_{do_power_nodes_from_community}_top{users_top_percent}users.csv'), dtype=torch.int64)
+        config.variable_config_dict['power_users_ids'] = torch.tensor(np.loadtxt(f'dataset/{dataset_name}/power_users_ids_com_wise_{do_power_nodes_from_community}_top{users_top_percent}users.csv'), dtype=torch.int64, device=device)
 
     # change later to a call of precompute
-    get_community_connectivity_matrix(adj_np=adj_np, save_path=f'dataset/{dataset_name}')
-    percent_pointing_inside_com(adj_np=adj_np,
-                                user_com_labels=config.variable_config_dict['user_com_labels'],
-                                item_com_labels=config.variable_config_dict['item_com_labels'],
-                                save_path=f'dataset/{dataset_name}')
+    community_connectivity_matrix = get_community_connectivity_matrix(adj_tens=torch.tensor(adj_np, device=device),
+                                                                      user_com_labels=config.variable_config_dict['user_com_labels'],
+                                                                      item_com_labels=config.variable_config_dict['item_com_labels'])
+    # plot_degree_distributions(adj_tens=torch.tensor(adj_np, device=device), num_bins=100, save_path=f'dataset/{dataset_name}')
+    # plot_community_connectivity_distribution(connectivity_matrix=community_connectivity_matrix, top_n_communities=20, save_path=f'dataset/{dataset_name}')
+    # plot_community_confidence(save_path=f'dataset/{dataset_name}', top_n_communities=10)
 
 
     # tensor with tensor[com_label] = average degree of each community
-    config.variable_config_dict['com_avg_dec_degrees'] = torch.zeros(torch.max(config.variable_config_dict['user_com_labels']) + 1)
-    adj_tens = torch.tensor(adj_np)
+    config.variable_config_dict['com_avg_dec_degrees'] = torch.zeros(torch.max(config.variable_config_dict['user_com_labels']) + 1, device=device)
+    adj_tens = torch.tensor(adj_np, device=device)
     for com_label in torch.unique(config.variable_config_dict['user_com_labels']):
         nr_nodes_in_com = torch.count_nonzero(config.variable_config_dict['user_com_labels'] == com_label)
         nr_edges_in_com = torch.sum(config.variable_config_dict['user_com_labels'][adj_tens[:, 0]] == com_label)
@@ -184,8 +182,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
 
 
 

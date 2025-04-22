@@ -8,7 +8,7 @@ from recbole.utils import (
     set_color,
 )
 import torch
-from utils import power_node_edge_dropout
+from utils_functions import power_node_edge_dropout
 import os
 import numpy as np
 import copy

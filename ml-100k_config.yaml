@@ -19,8 +19,8 @@ remove_negative_interactions: True
 # taking only standard parameters as we want to only test the dropout
 
 # Training and evaluation config
-epochs: 50
-train_batch_size: 512
+epochs: 50  # check paper
+train_batch_size: 512  # check paper
 eval_batch_size: 512
 train_neg_sample_args:
     distribution: uniform
@@ -31,7 +31,7 @@ train_neg_sample_args:
 eval_args:
     group_by: user
     order: RO
-    split: {'RS': [0.8,0.1,0.1]}
+    split: {'RS': [0.6,0.2,0.2]}
     mode: full
 metrics: ['Recall', 'MRR', 'NDCG', 'Hit', 'Precision', 'ItemCoverage', 'AveragePopularity', 'GiniIndex', 'ShannonEntropy', 'TailPercentage']
 topk: 50  # try 20, 50, 100

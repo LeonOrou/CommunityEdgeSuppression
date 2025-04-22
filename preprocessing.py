@@ -1,6 +1,6 @@
 import pandas as pd
 from sklearn.model_selection import train_test_split
-from utils import set_seed
+from utils_functions import set_seed
 
 set_seed(42)
 
