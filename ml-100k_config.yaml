@@ -15,8 +15,8 @@ binarize: True
 remove_negative_interactions: True
 #filter_condition: rating > 4.0
 
-# model config
-# taking only standard parameters as we want to only test the dropout
+# environment settings
+use_gpu: True
 
 # Training and evaluation config
 epochs: 50  # check paper

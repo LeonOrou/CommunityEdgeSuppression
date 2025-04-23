@@ -15,13 +15,12 @@ import copy
 import pandas as pd
 from recbole.data.interaction import Interaction
 from recbole.data.dataloader.general_dataloader import TrainDataLoader
-from recbole.sampler.sampler import RepeatableSampler
+from recbole.sampler.sampler import RepeatableSampler, Sampler
 
 
 class PowerDropoutTrainer(Trainer):
     def __init__(self, config, model):
         super(PowerDropoutTrainer, self).__init__(config, model)
-        self.optimizer = self._build_optimizer()
 
     def fit(
         self,
@@ -55,40 +54,46 @@ class PowerDropoutTrainer(Trainer):
             train_data.get_model(self.model)
         valid_step = 0
 
-
         for epoch_idx in range(self.start_epoch, self.epochs):
             # train
             training_start_time = time()
 
             ### power_node_edge_dropout ###
+            # saving the setting from train_data TrainDataLoader for later use
+            train_data_old = copy.deepcopy(train_data)
+
             train_data_coo = copy.deepcopy(train_data.dataset).inter_matrix()
             # combine row and col into torch.tensor of shape (n, 2) converting the data to numpy arrays and concatenating them
-            indices = torch.tensor((train_data_coo.row, train_data_coo.col), dtype=torch.int32).T
-            values = torch.unsqueeze(torch.tensor(train_data_coo.data, dtype=torch.int32), dim=0).T
-            adj_tens = torch.tensor(torch.cat((indices, values), dim=1), dtype=torch.int64)
+            indices = torch.tensor((train_data_coo.row, train_data_coo.col), dtype=torch.int32, device=self.device).T
+            values = torch.unsqueeze(torch.tensor(train_data_coo.data, dtype=torch.int32, device=self.device), dim=0).T
+            adj_tens = torch.cat((indices, values), dim=1).to(torch.int64)
             del train_data_coo, indices, values
 
             new_inter_feat = power_node_edge_dropout(adj_tens=adj_tens,
-                                                 user_com_labels=self.config.variable_config_dict['user_com_labels'],
-                                                 item_com_labels=self.config.variable_config_dict['item_com_labels'],
-                                                 power_users_idx=self.config.variable_config_dict['power_users_ids'],
-                                                 power_items_idx=self.config.variable_config_dict['power_items_ids'],
-                                                 com_avg_dec_degrees=self.config.variable_config_dict['com_avg_dec_degrees'],
-                                                 users_dec_perc_drop=self.config.variable_config_dict['users_dec_perc_drop'],
-                                                 items_dec_perc_drop=self.config.variable_config_dict['items_dec_perc_drop'],
-                                                 community_dropout_strength=self.config.variable_config_dict['community_dropout_strength'],)
+                 user_com_labels=self.config.variable_config_dict['user_com_labels'],
+                 item_com_labels=self.config.variable_config_dict['item_com_labels'],
+                 power_users_idx=self.config.variable_config_dict['power_users_ids'],
+                 power_items_idx=self.config.variable_config_dict['power_items_ids'],
+                 com_avg_dec_degrees=self.config.variable_config_dict['com_avg_dec_degrees'],
+                 users_dec_perc_drop=self.config.variable_config_dict['users_dec_perc_drop'],
+                 items_dec_perc_drop=self.config.variable_config_dict['items_dec_perc_drop'],
+                 community_dropout_strength=self.config.variable_config_dict['community_dropout_strength'],)
 
-            train_data_epoch = TrainDataLoader(config=self.config,
-                                               dataset=train_data.dataset.copy(new_inter_feat=Interaction(pd.DataFrame(new_inter_feat,
-                                                                               columns=train_data.dataset.inter_feat.columns))),
-                                               sampler=RepeatableSampler(phases='train', dataset=train_data.dataset.copy(
-                                                                                            new_inter_feat=Interaction(pd.DataFrame(new_inter_feat,
-                                                                                            columns=train_data.dataset.inter_feat.columns)))),
-                                               shuffle=self.config['shuffle'])
+            cpu_data = new_inter_feat.cpu().numpy()
+            interaction_df = pd.DataFrame(cpu_data, columns=train_data.dataset.inter_feat.columns)
+            # adding also all parameters to train_data_epoch that the original train_data had
+            # make proper sampler and generator for the new data
+            train_data_new = TrainDataLoader(config=self.config,
+                   dataset=train_data.dataset.copy(new_inter_feat=Interaction(interaction_df)),
+                   sampler=RepeatableSampler(phases='train',
+                            dataset=train_data.dataset.copy(new_inter_feat=Interaction(interaction_df))),
+                   shuffle=self.config['shuffle'])
 
+            del cpu_data, interaction_df
             ### end power_node_edge_dropout ###
+
             train_loss = self._train_epoch(
-                train_data_epoch, epoch_idx, show_progress=show_progress
+                train_data_new, epoch_idx, show_progress=show_progress
             )
             self.train_loss_dict[epoch_idx] = (
                 sum(train_loss) if isinstance(train_loss, tuple) else train_loss

@@ -32,8 +32,8 @@ def main():
     parser.add_argument("--users_top_percent", type=float, default=0.01)
     parser.add_argument("--items_top_percent", type=float, default=0.05)
     parser.add_argument("--users_dec_perc_drop", type=float, default=0.0)
-    parser.add_argument("--items_dec_perc_drop", type=float, default=0.3)
-    parser.add_argument("--community_dropout_strength", type=float, default=0.5)
+    parser.add_argument("--items_dec_perc_drop", type=float, default=0.1)
+    parser.add_argument("--community_dropout_strength", type=float, default=0.7)
     parser.add_argument("--do_power_nodes_from_community", type=bool, default=True)
     # parser.add_argument("--do_power_nodes_from_community", action="store_true")
     # TODO: check scientific evidence for parameter existence and values!
@@ -58,11 +58,20 @@ def main():
         topk = config_file['topk']
         epochs = config_file['epochs']
 
-    # set torch default device, check if this is already done in recbole.config
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Using device: {device}")
+    try_gpu = True
+    if try_gpu:
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    else:
+        device = torch.device('cpu')
 
-    config = Config(model=model_name, dataset=dataset_name, config_file_list=[f'{dataset_name}_config.yaml'], config_dict={'users_dec_perc_drop': users_dec_perc_drop, 'items_dec_perc_drop': items_dec_perc_drop, 'community_dropout_strength': community_dropout_strength})
+    config = Config(model=model_name,
+                    dataset=dataset_name,
+                    config_file_list=[f'{dataset_name}_config.yaml'],
+                    config_dict={'users_dec_perc_drop': users_dec_perc_drop,
+                                 'items_dec_perc_drop': items_dec_perc_drop,
+                                 'community_dropout_strength': community_dropout_strength})
+    config['device'] = device
+
     init_seed(seed=seed, reproducibility=config['reproducibility'])
     init_logger(config)
     logger = getLogger()
@@ -72,10 +81,10 @@ def main():
     logger.info(config)
 
     dataset = create_dataset(config)  # object of shape (n, (user, item, rating))
+    logger.info(dataset)
 
     # preprocessing dataset
     # thresholding done already in create_dataset() but in case they haven't deleted the edges
-    logger.info(dataset)
     train_data, valid_data, test_data = data_preparation(config, dataset)
 
     # initializing wandb
@@ -160,8 +169,8 @@ def main():
         raise ValueError(f"Model {model_name} not supported")
     logger.info(model)
 
-    trainer = PowerDropoutTrainer(config, model)
-    # trainer = Trainer(config, model)
+    # trainer = PowerDropoutTrainer(config, model)
+    trainer = Trainer(config, model)
 
     best_valid_score, best_valid_result = trainer.fit(train_data, test_data, saved=True, show_progress=config['show_progress'])
 

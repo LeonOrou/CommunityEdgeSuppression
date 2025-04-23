@@ -186,9 +186,6 @@ def power_node_edge_dropout(adj_tens, user_com_labels, item_com_labels, power_us
 #     adj_tens = adj_tens[adj_tens[:, 2] != 0]
 #     return adj_tens
 
-# measuring community bias of recommendations by checking how many of the recommendations are pointed inside the own community vs how many are pointed outside
-from recbole.evaluator.base_metric import AbstractMetric
-from recbole.utils import EvaluatorType
 
 # TODO: make community bias metric: get recommendations and calculate how many are inside the community versus the recommendations without any modifications
 # TODO: check data types of the inputs
