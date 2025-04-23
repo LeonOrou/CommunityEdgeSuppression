@@ -19,7 +19,7 @@ remove_negative_interactions: True
 use_gpu: True
 
 # Training and evaluation config
-epochs: 50  # check paper
+epochs: 30  # check paper
 train_batch_size: 512  # check paper
 eval_batch_size: 512
 train_neg_sample_args:
