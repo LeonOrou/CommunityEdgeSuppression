@@ -105,8 +105,8 @@ def prepare_data_and_communities(config, device, users_top_percent, items_top_pe
     for com_label in torch.unique(config.variable_config_dict['user_com_labels']):
         nr_nodes_in_com = torch.count_nonzero(config.variable_config_dict['user_com_labels'] == com_label)
         nr_edges_in_com = torch.sum(config.variable_config_dict['user_com_labels'][adj_tens[:, 0]] == com_label)
-        decimal_avg_degree_com_label = nr_edges_in_com / nr_nodes_in_com / nr_nodes_in_com
-        config.variable_config_dict['com_avg_dec_degrees'][com_label] = decimal_avg_degree_com_label
+        # decimal_avg_degree_com_label = nr_edges_in_com / nr_nodes_in_com / nr_nodes_in_com
+        # config.variable_config_dict['com_avg_dec_degrees'][com_label] = decimal_avg_degree_com_label
 
     return train_data, valid_data, test_data
 
@@ -126,9 +126,11 @@ def create_model(model_name, config, train_data):
 def objective(trial):
     """Optuna objective function for hyperparameter optimization"""
     # Sample hyperparameters
+    torch.cuda.empty_cache()
+
     model_name = trial.suggest_categorical("model_name", ["LightGCN"])
-    users_dec_perc_drop = trial.suggest_categorical("users_dec_perc_drop", [0.0, 0.1, 0.2])
-    items_dec_perc_drop = trial.suggest_categorical("items_dec_perc_drop", [0.0, 0.1, 0.2])
+    users_dec_perc_drop = trial.suggest_categorical("users_dec_perc_drop", [0.0, 0.1])
+    items_dec_perc_drop = trial.suggest_categorical("items_dec_perc_drop", [0.0, 0.2])
     community_dropout_strength = trial.suggest_categorical("community_dropout_strength", [0.0, 0.5, 0.9])
     do_power_nodes_from_community = True
     DATASET_NAME = "ml-100k"
@@ -200,6 +202,12 @@ def objective(trial):
     })
 
     # Clean up
+    # del model
+    # del trainer
+    # del model
+    del train_data
+    del valid_data
+    del test_data
     wandb.finish()
     gc.collect()
     torch.cuda.empty_cache()
@@ -216,6 +224,31 @@ def run_hyperparameter_search():
     # Create an Optuna study that maximizes the objective
     study = optuna.create_study(direction="maximize",
                                 pruner=optuna.pruners.MedianPruner(n_warmup_steps=3))
+    # (0.0, 0.2, 0.9)
+    # (0.1, 0.0, 0.0)
+    # (0.1, 0.0, 0.5)
+    specific_combinations = [
+        {
+            "model_name": "LightGCN",
+            "users_dec_perc_drop": 0.1,
+            "items_dec_perc_drop": 0.0,
+            "community_dropout_strength": 0.0
+        },
+        {
+            "model_name": "LightGCN",
+            "users_dec_perc_drop": 0.0,
+            "items_dec_perc_drop": 0.2,
+            "community_dropout_strength": 0.9
+        },
+        {
+            "model_name": "LightGCN",
+            "users_dec_perc_drop": 0.1,
+            "items_dec_perc_drop": 0.0,
+            "community_dropout_strength": 0.5
+        }
+    ]
+    for params in specific_combinations:
+        study.enqueue_trial(params)
     study.optimize(objective, n_trials=N_TRIALS)
 
     optuna.visualization.plot_param_importances(study).write_html("param_importances.html")

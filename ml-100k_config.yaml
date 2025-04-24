@@ -9,19 +9,22 @@ user_inter_num_interval: "[10,inf)"
 item_inter_num_interval: "[10,inf)"
 val_interval:
     rating: "[4,inf)"
-threshold:
-    rating: 4.0
-binarize: True
+#threshold:
+#    rating: 4.0
+#binarize: True  # do we really want just interaction matrix?
 remove_negative_interactions: True
 #filter_condition: rating > 4.0
 
 # environment settings
 use_gpu: True
+gpu_id: 0
 
 # Training and evaluation config
 epochs: 30  # check paper
 train_batch_size: 512  # check paper
-eval_batch_size: 512
+eval_batch_size: 8192  # TODO: changing this or sample num or something else for faster evaluation, it somehow is currently the number of users in the test set
+eval_step: 5  # Only evaluate every 5 epochs
+
 train_neg_sample_args:
     distribution: uniform
     sample_num: 1
@@ -33,6 +36,7 @@ eval_args:
     order: RO
     split: {'RS': [0.6,0.2,0.2]}
     mode: full
+
 metrics: ['Recall', 'MRR', 'NDCG', 'Hit', 'Precision', 'ItemCoverage', 'AveragePopularity', 'GiniIndex', 'ShannonEntropy', 'TailPercentage']
 topk: 50  # try 20, 50, 100
 valid_metric: ndcg@50  # for early stopping, same k needed as topk
