@@ -74,7 +74,7 @@ class PowerDropoutTrainer(Trainer):
                  item_com_labels=self.config.variable_config_dict['item_com_labels'],
                  power_users_idx=self.config.variable_config_dict['power_users_ids'],
                  power_items_idx=self.config.variable_config_dict['power_items_ids'],
-                 com_avg_dec_degrees=self.config.variable_config_dict['com_avg_dec_degrees'],
+                 # com_avg_dec_degrees=self.config.variable_config_dict['com_avg_dec_degrees'],
                  users_dec_perc_drop=self.config.variable_config_dict['users_dec_perc_drop'],
                  items_dec_perc_drop=self.config.variable_config_dict['items_dec_perc_drop'],
                  community_dropout_strength=self.config.variable_config_dict['community_dropout_strength'],)

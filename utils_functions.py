@@ -21,7 +21,7 @@ def set_seed(seed):
 
 
 # @profile
-def power_node_edge_dropout(adj_tens, user_com_labels, item_com_labels, power_users_idx, com_avg_dec_degrees,
+def power_node_edge_dropout(adj_tens, user_com_labels, item_com_labels, power_users_idx,
                                      power_items_idx,
                                      users_dec_perc_drop=0.7,
                                      items_dec_perc_drop=0.3,

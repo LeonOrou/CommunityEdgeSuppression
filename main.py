@@ -156,8 +156,8 @@ def main():
     for com_label in torch.unique(config.variable_config_dict['user_com_labels']):
         nr_nodes_in_com = torch.count_nonzero(config.variable_config_dict['user_com_labels'] == com_label)
         nr_edges_in_com = torch.sum(config.variable_config_dict['user_com_labels'][adj_tens[:, 0]] == com_label)
-        decimal_avg_degree_com_label = nr_edges_in_com / nr_nodes_in_com / nr_nodes_in_com
-        config.variable_config_dict['com_avg_dec_degrees'][com_label] = decimal_avg_degree_com_label
+        # decimal_avg_degree_com_label = nr_edges_in_com / nr_nodes_in_com / nr_nodes_in_com
+        # config.variable_config_dict['com_avg_dec_degrees'][com_label] = decimal_avg_degree_com_label
 
     if model_name == 'LightGCN':
         model = LightGCN(config, train_data.dataset).to(config['device'])
