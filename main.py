@@ -1,6 +1,5 @@
 from utils_functions import set_seed, plot_community_confidence, plot_community_connectivity_distribution, plot_degree_distributions
 from precompute import get_community_connectivity_matrix, get_community_labels, get_power_users_items
-from recbole.config import Config
 from recbole.data import create_dataset, data_preparation
 import wandb
 from argparse import ArgumentParser
@@ -19,26 +18,28 @@ import torch
 import copy
 from PowerDropoutTrainer import PowerDropoutTrainer
 from recbole.trainer import Trainer
+import os
 
 
 def main():
     seed = 42
     set_seed(seed)
 
-    parser = ArgumentParser()
+    main_parser = ArgumentParser()
     # in cmd: python main.py --model_name LightGCN --dataset_name ml-20m --config_file_name ml-20_config.yaml --users_top_percent 0.01 --users_dec_perc_drop 0.70 --community_dropout_strength 0.5 --do_power_nodes_from_community True
-    parser.add_argument("--model_name", type=str, default='LightGCN')
-    parser.add_argument("--dataset_name", type=str, default='ml-100k')
-    parser.add_argument("--users_top_percent", type=float, default=0.01)
-    parser.add_argument("--items_top_percent", type=float, default=0.05)
-    parser.add_argument("--users_dec_perc_drop", type=float, default=0.0)
-    parser.add_argument("--items_dec_perc_drop", type=float, default=0.1)
-    parser.add_argument("--community_dropout_strength", type=float, default=0.7)
-    parser.add_argument("--do_power_nodes_from_community", type=bool, default=True)
+    main_parser.add_argument("--model_name", type=str, default='LightGCN')
+    main_parser.add_argument("--dataset_name", type=str, default='ml-100k')
+    main_parser.add_argument("--users_top_percent", type=float, default=0.01)
+    main_parser.add_argument("--items_top_percent", type=float, default=0.05)
+    main_parser.add_argument("--users_dec_perc_drop", type=float, default=0.0)
+    main_parser.add_argument("--items_dec_perc_drop", type=float, default=0.1)
+    main_parser.add_argument("--community_dropout_strength", type=float, default=0.7)
+    main_parser.add_argument("--do_power_nodes_from_community", type=bool, default=True)
     # parser.add_argument("--do_power_nodes_from_community", action="store_true")
     # TODO: check scientific evidence for parameter existence and values!
+    args = main_parser.parse_args()
 
-    args = parser.parse_args()
+    from recbole.config import Config
 
     # debugging args dict:
     # args = {'model_name': 'LightGCN', 'dataset_name': 'yoochoose', 'users_top_percent': 0.01, 'users_dec_perc_drop': 0.70, 'community_dropout_strength': 0.5, 'do_power_nodes_from_community': True, 'items_top_percent': 0, 'items_dec_perc_drop': 0}
@@ -169,16 +170,16 @@ def main():
         raise ValueError(f"Model {model_name} not supported")
     logger.info(model)
 
-    # trainer = PowerDropoutTrainer(config, model)
-    trainer = Trainer(config, model)
+    trainer = PowerDropoutTrainer(config, model)
+    # trainer = Trainer(config, model)
 
-    best_valid_score, best_valid_result = trainer.fit(train_data, test_data, saved=True, show_progress=config['show_progress'])
+    best_valid_score, best_valid_result = trainer.fit(train_data, test_data, saved=True)
 
     wandb.log({"best_valid_score": best_valid_score, "best_valid_result": best_valid_result})
     logger.info(f"Best valid score: {best_valid_score}, best valid result: {best_valid_result}")
 
     # TODO: evaluate custom community bias
-    trainer.evaluate(valid_data, show_progress=config['show_progress'])
+    trainer.evaluate(valid_data)
 
     ## save model
     rng_id = np.random.randint(0, 100000)
@@ -186,7 +187,6 @@ def main():
     wandb_run.finish()
     ## del trainer, train_data, valid_data, test_data
     ## gc.collect()  # garbage collection
-    #
 
 
 if __name__ == "__main__":

@@ -224,31 +224,7 @@ def run_hyperparameter_search():
     # Create an Optuna study that maximizes the objective
     study = optuna.create_study(direction="maximize",
                                 pruner=optuna.pruners.MedianPruner(n_warmup_steps=3))
-    # (0.0, 0.2, 0.9)
-    # (0.1, 0.0, 0.0)
-    # (0.1, 0.0, 0.5)
-    specific_combinations = [
-        {
-            "model_name": "LightGCN",
-            "users_dec_perc_drop": 0.1,
-            "items_dec_perc_drop": 0.0,
-            "community_dropout_strength": 0.0
-        },
-        {
-            "model_name": "LightGCN",
-            "users_dec_perc_drop": 0.0,
-            "items_dec_perc_drop": 0.2,
-            "community_dropout_strength": 0.9
-        },
-        {
-            "model_name": "LightGCN",
-            "users_dec_perc_drop": 0.1,
-            "items_dec_perc_drop": 0.0,
-            "community_dropout_strength": 0.5
-        }
-    ]
-    for params in specific_combinations:
-        study.enqueue_trial(params)
+
     study.optimize(objective, n_trials=N_TRIALS)
 
     optuna.visualization.plot_param_importances(study).write_html("param_importances.html")

@@ -23,7 +23,7 @@ gpu_id: 0
 epochs: 30  # check paper
 train_batch_size: 512  # check paper
 eval_batch_size: 8192  # TODO: changing this or sample num or something else for faster evaluation, it somehow is currently the number of users in the test set
-eval_step: 5  # Only evaluate every 5 epochs
+eval_step: 8  # Only evaluate every 5 epochs
 
 train_neg_sample_args:
     distribution: uniform
