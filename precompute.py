@@ -8,19 +8,6 @@ from sknetwork.clustering import Leiden, Louvain
 from argparse import ArgumentParser
 
 
-# get adj_np like in main.py
-parser = ArgumentParser()
-parser.add_argument("--dataset_name", type=str, default='ml-100k')
-parser.add_argument("--save_path", type=str, default='data/ml-100k')
-
-args = parser.parse_args()
-
-dataset_name = args.dataset_name
-save_path = args.save_path
-
-# load only train data as we know only for train data
-
-
 def get_community_labels(adj_np, algorithm='Leiden', save_path='dataset/ml-100k', get_probs=True, force_bipartite=True):
     ### TODO: make it work with Louvain algorithm
     # check if column 0 and 1 do not intersect, no ambiguity (often the ids are two sets so they both start at 1)
