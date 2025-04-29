@@ -174,3 +174,18 @@ class PowerDropoutTrainer(Trainer):
         self._add_hparam_to_tensorboard(self.best_valid_score)
         return self.best_valid_score, self.best_valid_result
 
+    from recbole.trainer import Trainer
+    import torch
+
+    def evaluate(self, eval_data, load_best_model=True, model_file=None, show_progress=False):
+        if load_best_model:
+            if model_file:
+                checkpoint_file = model_file
+            else:
+                checkpoint_file = self.saved_model_file
+            # Add weights_only=False parameter to fix the loading issue
+            checkpoint = torch.load(checkpoint_file, map_location=self.device, weights_only=False)
+            self.model.load_state_dict(checkpoint['state_dict'])
+            self.model.load_other_parameter(checkpoint.get('other_parameter'))
+        return super().evaluate(eval_data, load_best_model=False, show_progress=show_progress)
+
