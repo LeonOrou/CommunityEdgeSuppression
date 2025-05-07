@@ -60,7 +60,7 @@ class PowerDropoutTrainer(Trainer):
 
             ### power_node_edge_dropout ###
             # saving the setting from train_data TrainDataLoader for later use
-            train_data_old = copy.deepcopy(train_data)
+            # train_data_old = copy.deepcopy(train_data)
 
             train_data_coo = copy.deepcopy(train_data.dataset).inter_matrix()
             # combine row and col into torch.tensor of shape (n, 2) converting the data to numpy arrays and concatenating them

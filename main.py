@@ -280,7 +280,7 @@ def main():
         train_data=train_data,
         valid_data=valid_data,
         test_data=test_data,
-        use_power_dropout=True
+        use_power_dropout=True  # set false to get default trainer object
     )
     
     # Save model
