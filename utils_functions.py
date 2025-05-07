@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import random
 import torch_geometric
-from line_profiler_pycharm import profile
+# from line_profiler_pycharm import profile
 import matplotlib
 matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
@@ -215,10 +215,10 @@ def plot_community_confidence(user_probs_path=None, user_labels=None, algorithm=
 
     # Load user probabilities and labels if not provided
     if user_probs_path is None:
-        user_probs_path = f'{save_path}/user_labels_dir_bip{force_bipartite}_probs_{algorithm}.csv'
+        user_probs_path = f'{save_path}/user_labels_{algorithm}_probs.csv'
 
     if user_labels is None:
-        user_labels = np.loadtxt(f'{save_path}/user_labels_undir_bip{force_bipartite}_{algorithm}.csv')
+        user_labels = np.loadtxt(f'{save_path}/user_labels_{algorithm}.csv')
     elif isinstance(user_labels, torch.Tensor):
         user_labels = user_labels.cpu().numpy()
 

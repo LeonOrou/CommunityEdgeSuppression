@@ -28,7 +28,7 @@ def parse_arguments():
     parser.add_argument("--items_top_percent", type=float, default=0.05)
     parser.add_argument("--users_dec_perc_drop", type=float, default=0.0)
     parser.add_argument("--items_dec_perc_drop", type=float, default=0.1)
-    parser.add_argument("--community_dropout_strength", type=float, default=0.7)
+    parser.add_argument("--community_dropout_strength", type=float, default=0.6)
     parser.add_argument("--do_power_nodes_from_community", type=bool, default=True)
     # parser.add_argument("--do_power_nodes_from_community", action="store_true")
     # TODO: check scientific evidence for parameter existence and values!
@@ -129,7 +129,7 @@ def get_or_load_community_data(config, dataset_name, adj_np, device, do_power_no
     bipartite_connect = True  # if bipartite community detection, if True: connect items communities to user communities
     
     # Get or load community labels
-    if f'user_labels_undir_bip{bipartite_connect}_Leiden.csv' not in os.listdir(f'dataset/{dataset_name}'):
+    if f'user_labels_Leiden.csv' not in os.listdir(f'dataset/{dataset_name}'):
         config.variable_config_dict['user_com_labels'], config.variable_config_dict['item_com_labels'] = get_community_labels(
             adj_np=adj_np,
             save_path=f'dataset/{dataset_name}',
@@ -137,12 +137,12 @@ def get_or_load_community_data(config, dataset_name, adj_np, device, do_power_no
         )
     else:
         config.variable_config_dict['user_com_labels'] = torch.tensor(
-            np.loadtxt(f'dataset/{dataset_name}/user_labels_undir_bip{bipartite_connect}_Leiden.csv'), 
+            np.loadtxt(f'dataset/{dataset_name}/user_labels_Leiden.csv'),
             dtype=torch.int64, 
             device=device
         )
         config.variable_config_dict['item_com_labels'] = torch.tensor(
-            np.loadtxt(f'dataset/{dataset_name}/item_labels_undir_bip{bipartite_connect}_Leiden.csv'), 
+            np.loadtxt(f'dataset/{dataset_name}/item_labels_Leiden.csv'),
             dtype=torch.int64, 
             device=device
         )
@@ -268,9 +268,9 @@ def main():
     community_connectivity_matrix = calculate_community_metrics(config, adj_np, device)
     
     # Optional: Uncomment for plots
-    plot_degree_distributions(adj_tens=torch.tensor(adj_np, device=device), num_bins=100, save_path=f'images/', dataset_name=args.dataset_name)
-    plot_community_connectivity_distribution(connectivity_matrix=community_connectivity_matrix, top_n_communities=20, save_path=f'images/', dataset_name=args.dataset_name)
-    plot_community_confidence(save_path=f'images/', dataset_name=args.dataset_name, top_n_communities=10)
+    # plot_degree_distributions(adj_tens=torch.tensor(adj_np, device=device), num_bins=100, save_path=f'images/', dataset_name=args.dataset_name)
+    # plot_community_connectivity_distribution(connectivity_matrix=community_connectivity_matrix, top_n_communities=20, save_path=f'images/', dataset_name=args.dataset_name)
+    # plot_community_confidence(user_probs_path=f'', save_path=f'images/', dataset_name=args.dataset_name, top_n_communities=10)
 
     model = initialize_model(args.model_name, config, train_data)
 
