@@ -4,6 +4,7 @@ dataset/
 .venv/
 venv_lapi/
 .gitignore
+.idea/
 wandb/
 *
 !*.py

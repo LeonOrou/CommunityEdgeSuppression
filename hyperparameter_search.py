@@ -50,32 +50,32 @@ def prepare_data_and_communities(config, device, users_top_percent, items_top_pe
     bipartite_connect = True
 
     # Cache path checking
-    if not os.path.exists(f'dataset/{config['dataset']}'):
-        os.makedirs(f'dataset/{config['dataset']}')
+    if not os.path.exists(f'dataset/{config["dataset"]}'):
+        os.makedirs(f'dataset/{config["dataset"]}')
 
     # Get or load community labels
-    if f'user_labels_undir_bip{bipartite_connect}_Leiden.csv' not in os.listdir(f'dataset/{config['dataset']}'):
+    if f'user_labels_undir_bip{bipartite_connect}_Leiden.csv' not in os.listdir(f'dataset/{config["dataset"]}'):
         config.variable_config_dict['user_com_labels'], config.variable_config_dict[
             'item_com_labels'] = get_community_labels(
             adj_np=adj_np,
-            save_path=f'dataset/{config['dataset']}',
+            save_path=f'dataset/{config["dataset"]}',
             get_probs=True
         )
     else:
         config.variable_config_dict['user_com_labels'] = torch.tensor(
-            np.loadtxt(f'dataset/{config['dataset']}/user_labels_undir_bip{bipartite_connect}_Leiden.csv'),
+            np.loadtxt(f'dataset/{config["dataset"]}/user_labels_undir_bip{bipartite_connect}_Leiden.csv'),
             dtype=torch.int64, device=device
         )
         config.variable_config_dict['item_com_labels'] = torch.tensor(
-            np.loadtxt(f'dataset/{config['dataset']}/item_labels_undir_bip{bipartite_connect}_Leiden.csv'),
+            np.loadtxt(f'dataset/{config["dataset"]}/item_labels_undir_bip{bipartite_connect}_Leiden.csv'),
             dtype=torch.int64, device=device
         )
 
     # Get or load power users/items
     if f'power_users_ids_com_wise_{do_power_nodes_from_community}_top{users_top_percent}users.csv' not in os.listdir(
-            f'dataset/{config['dataset']}') or \
+            f'dataset/{config["dataset"]}') or \
             f'power_items_ids_com_wise_{do_power_nodes_from_community}_top{items_top_percent}items.csv' not in os.listdir(
-        f'dataset/{config['dataset']}'):
+        f'dataset/{config["dataset"]}'):
         config.variable_config_dict['power_users_ids'], config.variable_config_dict[
             'power_items_ids'] = get_power_users_items(
             adj_tens=torch.tensor(adj_np, device=device),
@@ -84,17 +84,17 @@ def prepare_data_and_communities(config, device, users_top_percent, items_top_pe
             users_top_percent=users_top_percent,
             items_top_percent=items_top_percent,
             do_power_nodes_from_community=do_power_nodes_from_community,
-            save_path=f'dataset/{config['dataset']}'
+            save_path=f'dataset/{config["dataset"]}'
         )
     else:
         config.variable_config_dict['power_users_ids'] = torch.tensor(
             np.loadtxt(
-                f'dataset/{config['dataset']}/power_users_ids_com_wise_{do_power_nodes_from_community}_top{users_top_percent}users.csv'),
+                f'dataset/{config["dataset"]}/power_users_ids_com_wise_{do_power_nodes_from_community}_top{users_top_percent}users.csv'),
             dtype=torch.int64, device=device
         )
         config.variable_config_dict['power_items_ids'] = torch.tensor(
             np.loadtxt(
-                f'dataset/{config['dataset']}/power_items_ids_com_wise_{do_power_nodes_from_community}_top{items_top_percent}items.csv'),
+                f'dataset/{config["dataset"]}/power_items_ids_com_wise_{do_power_nodes_from_community}_top{items_top_percent}items.csv'),
             dtype=torch.int64, device=device
         )
 
