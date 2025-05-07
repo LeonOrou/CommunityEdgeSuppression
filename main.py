@@ -267,10 +267,10 @@ def main():
 
     community_connectivity_matrix = calculate_community_metrics(config, adj_np, device)
     
-    # Optional: Uncomment these lines to generate plots
-    # plot_degree_distributions(adj_tens=torch.tensor(adj_np, device=device), num_bins=100, save_path=f'dataset/{args.dataset_name}')
-    # plot_community_connectivity_distribution(connectivity_matrix=community_connectivity_matrix, top_n_communities=20, save_path=f'dataset/{args.dataset_name}')
-    # plot_community_confidence(save_path=f'dataset/{args.dataset_name}', top_n_communities=10)
+    # Optional: Uncomment for plots
+    plot_degree_distributions(adj_tens=torch.tensor(adj_np, device=device), num_bins=100, save_path=f'images/', dataset_name=args.dataset_name)
+    plot_community_connectivity_distribution(connectivity_matrix=community_connectivity_matrix, top_n_communities=20, save_path=f'images/', dataset_name=args.dataset_name)
+    plot_community_confidence(save_path=f'images/', dataset_name=args.dataset_name, top_n_communities=10)
 
     model = initialize_model(args.model_name, config, train_data)
 
