@@ -3,6 +3,8 @@ import torch
 import random
 import torch_geometric
 from line_profiler_pycharm import profile
+import matplotlib
+matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 
 
@@ -106,87 +108,6 @@ def power_node_edge_dropout(adj_tens, user_com_labels, item_com_labels, power_us
 
     return adj_tens
 
-
-# def power_node_edge_dropout(adj_tens, user_com_labels, item_com_labels, power_users_idx, com_avg_dec_degrees,
-#                             power_items=torch.tensor([]),
-#                             users_dec_perc_drop=0.2,
-#                             items_dec_perc_drop=0.3,
-#                             community_dropout_strength=0.7):  # community_dropout_strength=0 means
-#     # TODO: probably remove com_avg_dec_degrees as there is enough customization with the community dropout strength parameter, e.g. 0.8 for com strength, check this with scientific evidence
-#     """
-#     Drop edges of users and items that are above the threshold in their degree distribution.
-#     All in torch tensor format.
-#     :param com_avg_dec_degrees:
-#     :param user_com_labels:
-#     :param item_com_labels:
-#     :param adj_tens: torch.tensor, format (n, 3) with (user, item, rating)
-#     :param power_users_idx: torch.tensor, node ids of power users
-#     :param power_items: torch.tensor, node ids of power items
-#     :param users_dec_perc_drop: float, decimal percentage of power users' edges to drop (1 is average degree inside community)
-#     :param items_dec_perc_drop: float, decimal percentage of power items' edges to drop (1 is average degree inside community)
-#     :param community_dropout_strength: float, strength of dropping edges within the community (0 ... no change - normal dropout, 1 ... first only in community)
-#     :return: new adj_tensor with ratings[drop_edges]=0 at dropped edges
-#     """
-#     # make list of edges to keep instead of dropping, its less computation (keep 1-drop)
-#     # TODO: make performance analysis
-#     drop_edges = torch.tensor([], dtype=torch.int32)
-#     power_users_idx = power_users_idx.clone().detach()  # TODO: really necessary? Slows process down
-#     if users_dec_perc_drop > 0.:  # if 1, then all edges from power nodes are dropped
-#         for user in power_users_idx:  # doable without loop?
-#             user_edges_idx = torch.where(torch.tensor(adj_tens[:, 0] == user), adj_tens[:, 0], 0.0).nonzero().flatten()
-#             user_edges_com = user_edges_idx[user_com_labels[user] == item_com_labels[adj_tens[user_edges_idx, 1]]]
-#             user_edges_out = user_edges_idx[user_com_labels[user] != item_com_labels[adj_tens[user_edges_idx, 1]]]
-#             # perc_edges_in_community = np.sum(community_labels[user] == community_labels[user_edges]) / len(user_edges)
-#             # 0 in_community_strength ... make normal random dropout
-#             # 1 in_community_strength ... drop first only in community until in_community avg degree is reached, then out of community
-#
-#             # # done in main and accessible in config.variable_config_dict['power_users_avg_dec_degrees']
-#             # com_label_user = community_labels[user]
-#             # nr_users_in_com = torch.count_nonzero(community_labels == com_label_user)
-#             # nr_edges_in_com = torch.sum(community_labels[adj_tens[:, 0]] == com_label_user)
-#             # avg_degree_com_label = nr_edges_in_com / nr_users_in_com
-#             # users_avg_dec_degrees = avg_degree_com_label / nr_users_in_com
-#             idx_user_edges_drop_com = torch.randperm(len(user_edges_com))[:int(len(user_edges_com) * (users_dec_perc_drop + community_dropout_strength * (1-users_dec_perc_drop)))]
-#             nr_to_drop = int(len(user_edges_idx) * users_dec_perc_drop)
-#             nr_to_drop_in_com = len(idx_user_edges_drop_com)
-#             # get indices of edges to keep outside the community
-#             idx_user_edges_drop_out = torch.randperm(len(user_edges_out))[:nr_to_drop - nr_to_drop_in_com]
-#
-#             # user_edges_com = user_edges_com[idx_user_edges_drop_com]
-#             # user_edges_out = user_edges_out[idx_user_edges_drop_out]
-#             user_edges_com = user_edges_com[torch.isin(user_edges_com, user_edges_com[idx_user_edges_drop_com])]
-#             user_edges_out = user_edges_out[torch.isin(user_edges_out, user_edges_out[idx_user_edges_drop_out])]
-#             user_edges = torch.cat((user_edges_com, user_edges_out))
-#             if drop_edges.size() == 0:
-#                 drop_edges = user_edges
-#             else:
-#                 drop_edges = torch.cat((drop_edges, user_edges))
-#
-#     if items_dec_perc_drop > 0.:  # if 1, then no edges are dropped
-#         for item in power_items:
-#             item_edges_idx = torch.where(torch.tensor(adj_tens[:, 1] == item), adj_tens[:, 1], 0.0).nonzero().flatten()
-#             item_edges_com = item_edges_idx[item_com_labels[item] == user_com_labels[adj_tens[item_edges_idx, 0]]]
-#             item_edges_out = item_edges_idx[item_com_labels[item] != user_com_labels[adj_tens[item_edges_idx, 0]]]
-#             # use  * (1-com_avg_dec_degrees[item_com_labels[item]]) if with reducing to avg degree
-#             idx_item_drop_com = torch.randperm(len(item_edges_com))[:int(len(item_edges_com) * (((items_dec_perc_drop + community_dropout_strength * (1-items_dec_perc_drop)))))]
-#             nr_to_drop = int(len(item_edges_idx) * items_dec_perc_drop)
-#             nr_to_drop_in_com = len(idx_item_drop_com)
-#             idx_item_drop_out = torch.randperm(len(item_edges_out))[:nr_to_drop - nr_to_drop_in_com]
-#
-#             item_edges_com = item_edges_com[idx_item_drop_com]
-#             item_edges_out = item_edges_out[idx_item_drop_out]
-#             item_edges = torch.cat([item_edges_com, item_edges_out])
-#             if drop_edges.size() == 0:
-#                 drop_edges = item_edges
-#             else:
-#                 drop_edges = torch.cat((drop_edges, item_edges))
-#
-#     adj_tens[:, 2][drop_edges] = 0
-#     # deleting edges where rating is 0
-#     adj_tens = adj_tens[adj_tens[:, 2] != 0]
-#     return adj_tens
-
-
 # TODO: make community bias metric: get recommendations and calculate how many are inside the community versus the recommendations without any modifications
 # TODO: check data types of the inputs
 # TODO: is that really already the bias or do I have to compare this with how well the new recommendations the user still likes, e.g. with NDCG normalization?
@@ -209,7 +130,7 @@ def get_community_bias(new_recs, standard_recs, community_labels):
     return num_new_recs_in_com / num_standard_recs_in_com
 
 
-def plot_community_connectivity_distribution(connectivity_matrix, top_n_communities=10, save_path=None):
+def plot_community_connectivity_distribution(connectivity_matrix, top_n_communities=10, save_path=None, dataset_name=''):
     """
     Create a line plot showing the distribution of connections from each user community to item communities,
     sorted in decreasing order.
@@ -218,6 +139,7 @@ def plot_community_connectivity_distribution(connectivity_matrix, top_n_communit
                                 and item communities (columns)
     :param top_n_communities: int, number of top user communities to display
     :param save_path: str, path to save the figure, or None to display
+    :param dataset_name: str, name of the dataset for saving figures
     """
 
     # Convert to numpy if tensor
@@ -260,7 +182,7 @@ def plot_community_connectivity_distribution(connectivity_matrix, top_n_communit
     plt.grid(True, linestyle='--', alpha=0.7)
     plt.tight_layout()
     if save_path:
-        plt.savefig(save_path)
+        plt.savefig(f"{save_path}/{dataset_name}_community_connectivity_distribution.png")
     plt.show()
 
     # Calculate concentration metrics
@@ -278,7 +200,7 @@ def plot_community_connectivity_distribution(connectivity_matrix, top_n_communit
 
 
 def plot_community_confidence(user_probs_path=None, user_labels=None, algorithm='Leiden', force_bipartite=True,
-                              save_path='dataset/ml-100k', top_n_communities=10):
+                              save_path='images/', top_n_communities=10, dataset_name=''):
     """
     Create a line plot showing community assignment confidence for each user community.
 
@@ -288,6 +210,7 @@ def plot_community_confidence(user_probs_path=None, user_labels=None, algorithm=
     :param force_bipartite: Whether bipartite structure was enforced
     :param save_path: Directory containing saved files
     :param top_n_communities: Number of top communities to display
+    :param dataset_name: Name of the dataset for saving figures
     """
 
     # Load user probabilities and labels if not provided
@@ -346,14 +269,18 @@ def plot_community_confidence(user_probs_path=None, user_labels=None, algorithm=
         avg_conf = np.mean(community_confidence[comm])
         print(f"Community {comm}: {avg_conf:.4f} (n={size})")
 
+    if save_path:
+        plt.savefig(f"{save_path}/{dataset_name}_community_confidence_distribution.png")
 
-def plot_degree_distributions(adj_tens, num_bins=100, save_path=None):
+
+def plot_degree_distributions(adj_tens, num_bins=100, save_path=None, dataset_name=''):
     """
     Plot the degree distributions for users and items in decreasing order.
 
     :param adj_tens: torch.tensor, adjacency matrix with format (n, 3) containing (user_id, item_id, rating)
     :param num_bins: int, number of percentile bins to use
     :param save_path: str or None, path to save the figures
+    :param dataset_name: str, name of the dataset for saving figures
     """
     import matplotlib.pyplot as plt
     import numpy as np
@@ -433,7 +360,7 @@ def plot_degree_distributions(adj_tens, num_bins=100, save_path=None):
     plt.tight_layout()
 
     if save_path:
-        plt.savefig(f"{save_path}_bins.png")
+        plt.savefig(f"{save_path}/{dataset_name}_degree_distribution_info.png")
     plt.show()
 
     # Create line plot of actual degree distributions
@@ -453,7 +380,7 @@ def plot_degree_distributions(adj_tens, num_bins=100, save_path=None):
     plt.grid(True, linestyle='--', alpha=0.7)
 
     if save_path:
-        plt.savefig(f"{save_path}_line.png")
+        plt.savefig(f"{save_path}/{dataset_name}_degree_distribution.png")
     plt.show()
 
     # Create log-scale version for better visualization of tail distribution
