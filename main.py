@@ -137,12 +137,12 @@ def get_or_load_community_data(config, dataset_name, adj_np, device, do_power_no
         )
     else:
         config.variable_config_dict['user_com_labels'] = torch.tensor(
-            np.loadtxt(f'dataset/{dataset_name}/user_labels_Leiden.csv'),
+            np.loadtxt(f'dataset/{dataset_name}/user_labels_Leiden.csv', dtype=np.int64),
             dtype=torch.int64, 
             device=device
         )
         config.variable_config_dict['item_com_labels'] = torch.tensor(
-            np.loadtxt(f'dataset/{dataset_name}/item_labels_Leiden.csv'),
+            np.loadtxt(f'dataset/{dataset_name}/item_labels_Leiden.csv', dtype=np.int64),
             dtype=torch.int64, 
             device=device
         )
