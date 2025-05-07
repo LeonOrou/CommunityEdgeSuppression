@@ -32,8 +32,8 @@ def get_community_labels(adj_np, algorithm='Leiden', save_path='dataset/ml-100k'
     detect_obj.fit(adj_csr, force_bipartite=force_bipartite)
 
     # if index is a not-exising user or item, it will be max(community label) + 1, so we can ignore it as the indices are still true
-    user_labels = detect_obj.labels_row_
-    item_labels = detect_obj.labels_col_  # adding max_userId to item_labels not necessary as connectivity matrix sees them as two different axes
+    user_labels = np.array(detect_obj.labels_row_, dtype=np.int64)
+    item_labels = np.array(detect_obj.labels_col_, dtype=np.int64)  # adding max_userId to item_labels not necessary as connectivity matrix sees them as two different axes
 
     np.savetxt(f'{save_path}/user_labels_{algorithm}.csv', user_labels, delimiter=",")
     np.savetxt(f'{save_path}/item_labels_{algorithm}.csv', item_labels, delimiter=",")
@@ -42,7 +42,7 @@ def get_community_labels(adj_np, algorithm='Leiden', save_path='dataset/ml-100k'
         user_probs = detect_obj.probs_row_[:, :10].toarray()
         # adding max_userId to item_probs is not necessary as connectivity matrix sees them as two different axes
         item_probs = detect_obj.probs_col_[:, :10].toarray()
-        np.savetxt(f'{save_path}/user_labels_{algorithm}.csv', user_probs,
+        np.savetxt(f'{save_path}/user_labels_{algorithm}_probs.csv', user_probs,
                    delimiter=",")
         np.savetxt(f'{save_path}/item_labels_{algorithm}_probs.csv', item_probs,
                    delimiter=",")
