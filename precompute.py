@@ -35,13 +35,44 @@ def get_community_labels(adj_np, algorithm='Leiden', save_path='dataset/ml-100k'
     user_labels = np.array(detect_obj.labels_row_, dtype=np.int64)
     item_labels = np.array(detect_obj.labels_col_, dtype=np.int64)  # adding max_userId to item_labels not necessary as connectivity matrix sees them as two different axes
 
-    np.savetxt(f'{save_path}/user_labels_{algorithm}.csv', user_labels, delimiter=",")
-    np.savetxt(f'{save_path}/item_labels_{algorithm}.csv', item_labels, delimiter=",")
+    # TODO: get only labels from a user if the label probability is over 0.4, otherwise delete the user
+    # TODO: if multiple labels have a probability of over 0.4, add another row of the user with the other label
+    user_probs = detect_obj.probs_row_[:, :10].toarray()
+    item_probs = detect_obj.probs_col_[:, :10].toarray()
+    # argsort the probabilities to get the highest probability label
+    # only take columns that have not all zeros
+    user_probs = user_probs[:, np.any(user_probs, axis=0)]
+    item_probs = item_probs[:, np.any(item_probs, axis=0)]
+
+    # keeping for community connectivity matrix
+    np.savetxt(f'{save_path}/user_labels_{algorithm}_raw.csv', user_labels, delimiter=",")
+    np.savetxt(f'{save_path}/item_labels_{algorithm}_raw.csv', item_labels, delimiter=",")
+
+    user_probs_sorted = np.sort(user_probs, axis=1)[:, ::-1]
+    item_probs_sorted = np.sort(item_probs, axis=1)[:, ::-1]
+
+    # by visual inspection of the community interaction matrix, we choose:
+    #    1 / user_probs.shape[1] * user_probs.shape[1] ** (1/3))
+    #    = user_probs.shape[1] ** (-2/3)
+    user_community_threshold = user_probs.shape[1] ** (-2/3)
+    item_community_threshold = item_probs.shape[1] ** (-2/3)
+    # if the probability of the first label is less than (1/nr_of_labels * 1.5) , set the label to -1
+    user_labels[user_probs_sorted[:, 0] < user_community_threshold] = -1
+    item_labels[item_probs_sorted[:, 0] < item_community_threshold] = -1
+
+    for i in range(1, user_probs.shape[1]):
+        users_with_additional_labels = np.where(user_probs_sorted[:, i] > user_community_threshold)[0]
+        items_with_additional_labels = np.where(item_probs_sorted[:, i] > item_community_threshold)[0]
+        # add another row of the user with the second label if the probability of the second label is over (1/nr_of_labels * 1.5)
+        user_labels = np.concatenate((user_labels, user_labels[users_with_additional_labels]))
+        item_labels = np.concatenate((item_labels, item_labels[items_with_additional_labels]))
+        if users_with_additional_labels.size == 0 and items_with_additional_labels.size == 0:
+            break
+    # for dropout
+    np.savetxt(f'{save_path}/user_labels_{algorithm}_processed.csv', user_labels, delimiter=",")
+    np.savetxt(f'{save_path}/item_labels_{algorithm}_processed.csv', item_labels, delimiter=",")
 
     if get_probs:
-        user_probs = detect_obj.probs_row_[:, :10].toarray()
-        # adding max_userId to item_probs is not necessary as connectivity matrix sees them as two different axes
-        item_probs = detect_obj.probs_col_[:, :10].toarray()
         np.savetxt(f'{save_path}/user_labels_{algorithm}_probs.csv', user_probs,
                    delimiter=",")
         np.savetxt(f'{save_path}/item_labels_{algorithm}_probs.csv', item_probs,
@@ -168,11 +199,11 @@ def get_power_users_items(adj_tens, user_com_labels, item_com_labels,
 
     # Save to files
     if users_top_percent > 0:
-        np.savetxt(f'{save_path}/power_users_ids_com_wise_{do_power_nodes_from_community}_top{users_top_percent}.csv',
+        np.savetxt(f'{save_path}/power_user_ids_top{users_top_percent}.csv',
                    power_users_ids.cpu().numpy(), delimiter=",")
 
     if items_top_percent > 0:
-        np.savetxt(f'{save_path}/power_items_ids_com_wise_{do_power_nodes_from_community}_top{items_top_percent}.csv',
+        np.savetxt(f'{save_path}/power_item_ids_top{items_top_percent}.csv',
                    power_items_ids.cpu().numpy(), delimiter=",")
 
     return power_users_ids, power_items_ids

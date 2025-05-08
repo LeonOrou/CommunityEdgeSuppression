@@ -137,21 +137,18 @@ def get_or_load_community_data(config, dataset_name, adj_np, device, do_power_no
         )
     else:
         config.variable_config_dict['user_com_labels'] = torch.tensor(
-            np.loadtxt(f'dataset/{dataset_name}/user_labels_Leiden.csv', dtype=np.int64),
+            np.loadtxt(f'dataset/{dataset_name}/user_labels_Leiden_processed.csv', dtype=np.int64),
             dtype=torch.int64, 
             device=device
         )
         config.variable_config_dict['item_com_labels'] = torch.tensor(
-            np.loadtxt(f'dataset/{dataset_name}/item_labels_Leiden.csv', dtype=np.int64),
+            np.loadtxt(f'dataset/{dataset_name}/item_labels_Leiden_processed.csv', dtype=np.int64),
             dtype=torch.int64, 
             device=device
         )
     
     # Get or load power nodes
-    power_users_file = f'power_users_ids_com_wise_{do_power_nodes_from_community}_top{users_top_percent}users.csv'
-    power_items_file = f'power_items_ids_com_wise_{do_power_nodes_from_community}_top{items_top_percent}items.csv'
-    
-    if power_users_file not in os.listdir(f'dataset/{dataset_name}') or power_items_file not in os.listdir(f'dataset/{dataset_name}'):
+    if f'power_user_ids_top{users_top_percent}.csv' not in os.listdir(f'dataset/{dataset_name}') or f'power_item_ids_top{items_top_percent}.csv' not in os.listdir(f'dataset/{dataset_name}'):
         config.variable_config_dict['power_users_ids'], config.variable_config_dict['power_items_ids'] = get_power_users_items(
             adj_tens=torch.tensor(adj_np, device=device),
             user_com_labels=config.variable_config_dict['user_com_labels'],
@@ -163,13 +160,13 @@ def get_or_load_community_data(config, dataset_name, adj_np, device, do_power_no
         )
     else:
         config.variable_config_dict['power_users_ids'] = torch.tensor(
-            np.loadtxt(f'dataset/{dataset_name}/{power_users_file}'), 
+            np.loadtxt(f'dataset/{dataset_name}/power_user_ids_top{users_top_percent}.csv'),
             dtype=torch.int64, 
             device=device
         )
-        if os.path.exists(f'dataset/{dataset_name}/{power_items_file}'):
+        if os.path.exists(f'dataset/{dataset_name}/power_item_ids_top{items_top_percent}.csv'):
             config.variable_config_dict['power_items_ids'] = torch.tensor(
-                np.loadtxt(f'dataset/{dataset_name}/{power_items_file}'), 
+                np.loadtxt(f'dataset/{dataset_name}/power_item_ids_top{items_top_percent}.csv'),
                 dtype=torch.int64, 
                 device=device
             )
@@ -182,19 +179,18 @@ def calculate_community_metrics(config, adj_np, device):
     # Get community connectivity matrix
     community_connectivity_matrix = get_community_connectivity_matrix(
         adj_tens=adj_tens,
-        user_com_labels=config.variable_config_dict['user_com_labels'],
-        item_com_labels=config.variable_config_dict['item_com_labels']
+        user_com_labels=np.loadtxt(f'dataset/{config.dataset}/user_labels_Leiden_raw.csv', dtype=np.int64),
+        item_com_labels=np.loadtxt(f'dataset/{config.dataset}/user_labels_Leiden_raw.csv', dtype=np.int64),
     )
     
     # Calculate average degree for each community
-    config.variable_config_dict['com_avg_dec_degrees'] = torch.zeros(
-        torch.max(config.variable_config_dict['user_com_labels']) + 1, 
-        device=device
-    )
+    # config.variable_config_dict['com_avg_dec_degrees'] = torch.zeros(
+    #     torch.max(config.variable_config_dict['user_com_labels']) + 1,
+    #     device=device)
     
-    for com_label in torch.unique(config.variable_config_dict['user_com_labels']):
-        nr_nodes_in_com = torch.count_nonzero(config.variable_config_dict['user_com_labels'] == com_label)
-        nr_edges_in_com = torch.sum(config.variable_config_dict['user_com_labels'][adj_tens[:, 0]] == com_label)
+    # for com_label in torch.unique(config.variable_config_dict['user_com_labels']):
+    #     nr_nodes_in_com = torch.count_nonzero(config.variable_config_dict['user_com_labels'] == com_label)
+    #     nr_edges_in_com = torch.sum(config.variable_config_dict['user_com_labels'][adj_tens[:, 0]] == com_label)
         # decimal_avg_degree_com_label = nr_edges_in_com / nr_nodes_in_com / nr_nodes_in_com
         # config.variable_config_dict['com_avg_dec_degrees'][com_label] = decimal_avg_degree_com_label
     
