@@ -24,18 +24,25 @@ def set_seed(seed):
 
 # @profile
 def power_node_edge_dropout(adj_tens, user_com_labels, item_com_labels, power_users_idx,
-                                     power_items_idx,
-                                     users_dec_perc_drop=0.7,
-                                     items_dec_perc_drop=0.3,
-                                     community_dropout_strength=0.9):
+                                 power_items_idx,
+                                 community_connectivity_matrix=None,
+                                 users_dec_perc_drop=0.7,
+                                 items_dec_perc_drop=0.3,
+                                 community_dropout_strength=0.6,
+                                 drop_power_nodes=True):
     # Make a copy to avoid modifying the original tensor
     adj_tens = adj_tens.clone()
 
     # Create a boolean mask for tracking edges to drop (more efficient than concatenating tensors)
     drop_mask = torch.zeros(adj_tens.shape[0], dtype=torch.bool, device=adj_tens.device)
 
+    # TODO: count edges from each user and get item community for each user above the threshold
+    edge_ids_each_user = ...
+    item_communities_each_user = ...
+    user_communities_each_item = ...
+
     # Process power users
-    if users_dec_perc_drop > 0.0 and power_users_idx.numel() > 0:
+    if users_dec_perc_drop > 0.0 and power_users_idx.numel() > 0 and drop_power_nodes:
         # Pre-compute user communities for all power users
         user_communities = user_com_labels[power_users_idx]
 
@@ -49,7 +56,10 @@ def power_node_edge_dropout(adj_tens, user_com_labels, item_com_labels, power_us
 
                 # Identify in-community and out-of-community edges
                 user_community = user_communities[i]
-                in_com_mask = item_communities == user_community
+                # 'user' community is in which item community the user has most connections to
+                # TODO: count edges from each user and get item community for each user above the threshold
+                # TODO: can be multiple! The mask goes over all communities above threshold then
+                in_com_mask = ...
 
                 # Separate edge indices by community
                 in_com_indices = user_edge_indices[in_com_mask]
@@ -70,9 +80,7 @@ def power_node_edge_dropout(adj_tens, user_com_labels, item_com_labels, power_us
                     perm = torch.randperm(out_com_indices.numel())[:out_com_drop_count]
                     drop_mask[out_com_indices[perm]] = True
 
-    # Process power items (similar approach)
-    if items_dec_perc_drop > 0.0 and power_items_idx.numel() > 0:
-        # Pre-compute item communities
+    if items_dec_perc_drop > 0.0 and power_items_idx.numel() > 0 and drop_power_nodes:
         item_communities = item_com_labels[power_items_idx]
 
         for i, item in enumerate(power_items_idx):
@@ -82,7 +90,10 @@ def power_node_edge_dropout(adj_tens, user_com_labels, item_com_labels, power_us
                 user_communities = user_com_labels[adj_tens[item_edge_indices, 0]]
 
                 item_community = item_communities[i]
-                in_com_mask = user_communities == item_community
+                # 'item' community is in which user community the item has most connections to
+                # TODO: count edges from each user and get item community for each user above the threshold
+                # TODO: can be multiple! The mask goes over all communities above threshold then
+                in_com_mask = ...
 
                 in_com_indices = item_edge_indices[in_com_mask]
                 out_com_indices = item_edge_indices[~in_com_mask]
@@ -100,34 +111,27 @@ def power_node_edge_dropout(adj_tens, user_com_labels, item_com_labels, power_us
                     perm = torch.randperm(out_com_indices.numel())[:out_com_drop_count]
                     drop_mask[out_com_indices[perm]] = True
 
-    # Set ratings of dropped edges to 0
+    if not drop_power_nodes and community_dropout_strength > 0.0:
+        # drop edges from ALL users and items, not just power nodes
+        total_drop_count = int(adj_tens.shape[0] * (users_dec_perc_drop + items_dec_perc_drop))
+        in_com_drop_rate = users_dec_perc_drop + community_dropout_strength * (1 - users_dec_perc_drop)
+        in_com_drop_count = int(adj_tens.shape[0] * in_com_drop_rate)
+        out_com_drop_count = total_drop_count - in_com_drop_count
+        # randomly select edges to drop
+        if in_com_drop_count > 0:
+            # TODO: drop in community!!
+            perm = torch.randperm(adj_tens.shape[0])[:in_com_drop_count]
+            drop_mask[perm] = True
+        if out_com_drop_count > 0:
+            # TODO: drop out of community!!
+            perm = torch.randperm(adj_tens.shape[0])[:out_com_drop_count]
+            drop_mask[perm] = True
+
     adj_tens[drop_mask, 2] = 0
 
-    # Filter out edges with zero ratings
     adj_tens = adj_tens[adj_tens[:, 2] != 0]
 
     return adj_tens
-
-# TODO: make community bias metric: get recommendations and calculate how many are inside the community versus the recommendations without any modifications
-# TODO: check data types of the inputs
-# TODO: is that really already the bias or do I have to compare this with how well the new recommendations the user still likes, e.g. with NDCG normalization?
-def get_community_bias(new_recs, standard_recs, community_labels):
-    """
-    Calculate the community bias of recommendations.
-    :param new_recs: torch.tensor, new recommendations
-    :param standard_recs: torch.tensor, standard recommendations
-    :param community_labels: torch.tensor, community labels for each node
-    :return: float, community bias
-    """
-    # get community labels of recommendations
-    new_recs_com_labels = community_labels[new_recs]
-    standard_recs_com_labels = community_labels[standard_recs]
-
-    # get number of recommendations pointing inside community
-    num_new_recs_in_com = torch.sum(new_recs_com_labels == community_labels[new_recs])
-    num_standard_recs_in_com = torch.sum(standard_recs_com_labels == community_labels[standard_recs])
-    # a negative value means a reduction in bias by that decimal percent, a positive one an increase
-    return num_new_recs_in_com / num_standard_recs_in_com
 
 
 def plot_community_connectivity_distribution(connectivity_matrix, top_n_communities=10, save_path=None, dataset_name=''):

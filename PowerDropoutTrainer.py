@@ -74,10 +74,11 @@ class PowerDropoutTrainer(Trainer):
                  item_com_labels=self.config.variable_config_dict['item_com_labels'],
                  power_users_idx=self.config.variable_config_dict['power_users_ids'],
                  power_items_idx=self.config.variable_config_dict['power_items_ids'],
-                 # com_avg_dec_degrees=self.config.variable_config_dict['com_avg_dec_degrees'],
                  users_dec_perc_drop=self.config.variable_config_dict['users_dec_perc_drop'],
                  items_dec_perc_drop=self.config.variable_config_dict['items_dec_perc_drop'],
-                 community_dropout_strength=self.config.variable_config_dict['community_dropout_strength'],)
+                 community_dropout_strength=self.config.variable_config_dict['community_dropout_strength'],
+                 drop_power_nodes=self.config.variable_config_dict['drop_power_nodes'],
+                 community_connectivity_matrix=self.config.variable_config_dict['community_connectivity_matrix'])
 
             cpu_data = new_inter_feat.cpu().numpy()
             interaction_df = pd.DataFrame(cpu_data, columns=train_data.dataset.inter_feat.columns)

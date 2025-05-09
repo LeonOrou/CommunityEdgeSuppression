@@ -29,8 +29,7 @@ def parse_arguments():
     parser.add_argument("--users_dec_perc_drop", type=float, default=0.0)
     parser.add_argument("--items_dec_perc_drop", type=float, default=0.1)
     parser.add_argument("--community_dropout_strength", type=float, default=0.6)
-    parser.add_argument("--do_power_nodes_from_community", type=bool, default=True)
-    # parser.add_argument("--do_power_nodes_from_community", action="store_true")
+    parser.add_argument("--drop_power_nodes", type=bool, default=True)
     # TODO: check scientific evidence for parameter existence and values!
     return parser.parse_args()
 
@@ -64,7 +63,8 @@ def setup_config(args, device, seed):
         config_dict={
             'users_dec_perc_drop': args.users_dec_perc_drop,
             'items_dec_perc_drop': args.items_dec_perc_drop,
-            'community_dropout_strength': args.community_dropout_strength
+            'community_dropout_strength': args.community_dropout_strength,
+            'drop_power_nodes': args.drop_power_nodes,
         }
     )
     config['device'] = device
@@ -120,7 +120,7 @@ def preprocess_train_data(train_data, device):
     return adj_np
 
 
-def get_or_load_community_data(config, dataset_name, adj_np, device, do_power_nodes_from_community, users_top_percent, items_top_percent):
+def get_or_load_community_data(config, dataset_name, adj_np, device, users_top_percent, items_top_percent):
     """Get or load community labels and power nodes."""
     # Create directory if it doesn't exist
     if not os.path.exists(f'dataset/{dataset_name}'):
@@ -155,7 +155,6 @@ def get_or_load_community_data(config, dataset_name, adj_np, device, do_power_no
             item_com_labels=config.variable_config_dict['item_com_labels'],
             users_top_percent=users_top_percent,
             items_top_percent=items_top_percent,
-            do_power_nodes_from_community=do_power_nodes_from_community,
             save_path=f'dataset/{dataset_name}'
         )
     else:
@@ -213,9 +212,9 @@ def initialize_model(model_name, config, train_data):
     return model
 
 
-def train_and_evaluate(config, model, train_data, valid_data, test_data, use_power_dropout=True):
+def train_and_evaluate(config, model, train_data, valid_data, test_data, use_dropout=True):
     """Train and evaluate the model."""
-    if use_power_dropout:
+    if use_dropout:
         trainer = PowerDropoutTrainer(config, model)
     else:
         trainer = Trainer(config, model)
@@ -256,13 +255,13 @@ def main():
         dataset_name=args.dataset_name,
         adj_np=adj_np,
         device=device,
-        do_power_nodes_from_community=args.do_power_nodes_from_community,
         users_top_percent=args.users_top_percent,
         items_top_percent=args.items_top_percent
     )
 
     community_connectivity_matrix = calculate_community_metrics(config, adj_np, device)
-    
+    config.variable_config_dict['community_connectivity_matrix'] = community_connectivity_matrix
+
     # Optional: Uncomment for plots
     # plot_degree_distributions(adj_tens=torch.tensor(adj_np, device=device), num_bins=100, save_path=f'images/', dataset_name=args.dataset_name)
     # plot_community_connectivity_distribution(connectivity_matrix=community_connectivity_matrix, top_n_communities=20, save_path=f'images/', dataset_name=args.dataset_name)
@@ -276,7 +275,7 @@ def main():
         train_data=train_data,
         valid_data=valid_data,
         test_data=test_data,
-        use_power_dropout=True  # set false to get default trainer object
+        use_dropout=True  # set false here to get default trainer object
     )
     
     # Save model
