@@ -1,5 +1,5 @@
 from utils_functions import set_seed, plot_community_confidence, plot_community_connectivity_distribution, plot_degree_distributions
-from precompute import get_community_connectivity_matrix, get_community_labels, get_power_users_items
+from precompute import get_community_connectivity_matrix, get_community_labels, get_power_users_items, get_user_item_community_connectivity_matrices
 from recbole.data import create_dataset, data_preparation
 import wandb
 from argparse import ArgumentParser
@@ -29,7 +29,7 @@ def parse_arguments():
     parser.add_argument("--users_dec_perc_drop", type=float, default=0.0)
     parser.add_argument("--items_dec_perc_drop", type=float, default=0.1)
     parser.add_argument("--community_dropout_strength", type=float, default=0.6)
-    parser.add_argument("--drop_power_nodes", type=bool, default=True)
+    parser.add_argument("--drop_from_power_nodes", type=bool, default=True)
     # TODO: check scientific evidence for parameter existence and values!
     return parser.parse_args()
 
@@ -64,7 +64,7 @@ def setup_config(args, device, seed):
             'users_dec_perc_drop': args.users_dec_perc_drop,
             'items_dec_perc_drop': args.items_dec_perc_drop,
             'community_dropout_strength': args.community_dropout_strength,
-            'drop_power_nodes': args.drop_power_nodes,
+            'drop_from_power_nodes': args.drop_from_power_nodes,
         }
     )
     config['device'] = device
@@ -104,7 +104,6 @@ def initialize_wandb(args, config_params):
             "users_dec_perc_drop": args.users_dec_perc_drop,
             "items_dec_perc_drop": args.items_dec_perc_drop,
             "community_dropout_strength": args.community_dropout_strength,
-            "do_power_nodes_from_community": args.do_power_nodes_from_community,
             "batch_size": config_params['batch_size'],
             "TopK": config_params['topk']
         }
@@ -120,67 +119,38 @@ def preprocess_train_data(train_data, device):
     return adj_np
 
 
-def get_or_load_community_data(config, dataset_name, adj_np, device, users_top_percent, items_top_percent):
+def get_community_data(config, adj_np, device, users_top_percent, items_top_percent):
     """Get or load community labels and power nodes."""
     # Create directory if it doesn't exist
-    if not os.path.exists(f'dataset/{dataset_name}'):
-        os.makedirs(f'dataset/{dataset_name}')
-    
-    bipartite_connect = True  # if bipartite community detection, if True: connect items communities to user communities
-    
-    # Get or load community labels
-    if f'user_labels_Leiden.csv' not in os.listdir(f'dataset/{dataset_name}'):
-        config.variable_config_dict['user_com_labels'], config.variable_config_dict['item_com_labels'] = get_community_labels(
-            adj_np=adj_np,
-            save_path=f'dataset/{dataset_name}',
-            get_probs=True
-        )
-    else:
-        config.variable_config_dict['user_com_labels'] = torch.tensor(
-            np.loadtxt(f'dataset/{dataset_name}/user_labels_Leiden_processed.csv', dtype=np.int64),
-            dtype=torch.int64, 
-            device=device
-        )
-        config.variable_config_dict['item_com_labels'] = torch.tensor(
-            np.loadtxt(f'dataset/{dataset_name}/item_labels_Leiden_processed.csv', dtype=np.int64),
-            dtype=torch.int64, 
-            device=device
-        )
-    
-    # Get or load power nodes
-    if f'power_user_ids_top{users_top_percent}.csv' not in os.listdir(f'dataset/{dataset_name}') or f'power_item_ids_top{items_top_percent}.csv' not in os.listdir(f'dataset/{dataset_name}'):
-        config.variable_config_dict['power_users_ids'], config.variable_config_dict['power_items_ids'] = get_power_users_items(
-            adj_tens=torch.tensor(adj_np, device=device),
-            user_com_labels=config.variable_config_dict['user_com_labels'],
-            item_com_labels=config.variable_config_dict['item_com_labels'],
-            users_top_percent=users_top_percent,
-            items_top_percent=items_top_percent,
-            save_path=f'dataset/{dataset_name}'
-        )
-    else:
-        config.variable_config_dict['power_users_ids'] = torch.tensor(
-            np.loadtxt(f'dataset/{dataset_name}/power_user_ids_top{users_top_percent}.csv'),
-            dtype=torch.int64, 
-            device=device
-        )
-        if os.path.exists(f'dataset/{dataset_name}/power_item_ids_top{items_top_percent}.csv'):
-            config.variable_config_dict['power_items_ids'] = torch.tensor(
-                np.loadtxt(f'dataset/{dataset_name}/power_item_ids_top{items_top_percent}.csv'),
-                dtype=torch.int64, 
-                device=device
-            )
+    if not os.path.exists(f'dataset/{config.dataset}'):
+        os.makedirs(f'dataset/{config.dataset}')
+
+    (config.variable_config_dict['user_com_labels'],
+     config.variable_config_dict['item_com_labels']) = get_community_labels(
+        config=config,
+        adj_np=adj_np,
+        save_path=f'dataset/{config.dataset}',
+        get_probs=True)
+
+    (config.variable_config_dict['power_users_ids'],
+     config.variable_config_dict['power_items_ids']) = get_power_users_items(
+        config=config,
+        adj_tens=torch.tensor(adj_np, device=device),
+        user_com_labels=config.variable_config_dict['user_com_labels'],
+        item_com_labels=config.variable_config_dict['item_com_labels'],
+        users_top_percent=users_top_percent,
+        items_top_percent=items_top_percent,
+        save_path=f'dataset/{config.dataset}')
 
 
 def calculate_community_metrics(config, adj_np, device):
     """Calculate community connectivity matrix and average degrees."""
     adj_tens = torch.tensor(adj_np, device=device)
-    
-    # Get community connectivity matrix
-    community_connectivity_matrix = get_community_connectivity_matrix(
-        adj_tens=adj_tens,
-        user_com_labels=np.loadtxt(f'dataset/{config.dataset}/user_labels_Leiden_raw.csv', dtype=np.int64),
-        item_com_labels=np.loadtxt(f'dataset/{config.dataset}/user_labels_Leiden_raw.csv', dtype=np.int64),
-    )
+
+    (user_community_connectivity_matrix,
+     item_community_connectivity_matrix) = get_user_item_community_connectivity_matrices(adj_tens=adj_tens,
+                                                                                      user_com_labels=config.variable_config_dict['user_com_labels'],
+                                                                                      item_com_labels=config.variable_config_dict['item_com_labels'])
     
     # Calculate average degree for each community
     # config.variable_config_dict['com_avg_dec_degrees'] = torch.zeros(
@@ -193,7 +163,7 @@ def calculate_community_metrics(config, adj_np, device):
         # decimal_avg_degree_com_label = nr_edges_in_com / nr_nodes_in_com / nr_nodes_in_com
         # config.variable_config_dict['com_avg_dec_degrees'][com_label] = decimal_avg_degree_com_label
     
-    return community_connectivity_matrix
+    return user_community_connectivity_matrix, item_community_connectivity_matrix
 
 
 def initialize_model(model_name, config, train_data):
@@ -246,21 +216,27 @@ def main():
 
     train_data, valid_data, test_data = prepare_dataset(config)
 
-    wandb_run = initialize_wandb(args, config_params)
+    log = False
+    if log:
+        wandb_run = initialize_wandb(args, config_params)
 
     adj_np = preprocess_train_data(train_data, device)
 
-    get_or_load_community_data(
+    get_community_data(
         config=config,
-        dataset_name=args.dataset_name,
         adj_np=adj_np,
         device=device,
         users_top_percent=args.users_top_percent,
         items_top_percent=args.items_top_percent
     )
 
-    community_connectivity_matrix = calculate_community_metrics(config, adj_np, device)
-    config.variable_config_dict['community_connectivity_matrix'] = community_connectivity_matrix
+    user_community_connectivity_matrix, item_community_connectivity_matrix = calculate_community_metrics(config, adj_np, device)
+    # user/item id 0 is never used / nan as labels start at 1 and we use them for indexing
+    # normalize as distribution along the rows
+    user_community_connectivity_matrix = user_community_connectivity_matrix / torch.sum(user_community_connectivity_matrix, dim=1, keepdim=True)
+    item_community_connectivity_matrix = item_community_connectivity_matrix / torch.sum(item_community_connectivity_matrix, dim=1, keepdim=True)
+    config.variable_config_dict['user_community_connectivity_matrix'] = user_community_connectivity_matrix
+    config.variable_config_dict['item_community_connectivity_matrix'] = item_community_connectivity_matrix
 
     # Optional: Uncomment for plots
     # plot_degree_distributions(adj_tens=torch.tensor(adj_np, device=device), num_bins=100, save_path=f'images/', dataset_name=args.dataset_name)
@@ -278,11 +254,10 @@ def main():
         use_dropout=True  # set false here to get default trainer object
     )
     
-    # Save model
-    rng_id = np.random.randint(0, 100000)
-    wandb.save(f"{args.model_name}_{args.dataset_name}_ID{rng_id}.h5")
-
-    wandb_run.finish()
+    if log:
+        rng_id = np.random.randint(0, 100000)
+        wandb.save(f"{args.model_name}_{args.dataset_name}_ID{rng_id}.h5")
+        wandb_run.finish()
 
 
 if __name__ == "__main__":
