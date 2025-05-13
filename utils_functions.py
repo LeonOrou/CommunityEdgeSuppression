@@ -4,7 +4,7 @@ import random
 import torch_geometric
 # from line_profiler_pycharm import profile
 import matplotlib
-matplotlib.use('TkAgg')
+matplotlib.use('agg')
 import matplotlib.pyplot as plt
 from precompute import get_user_item_community_connectivity_matrices
 
@@ -25,13 +25,29 @@ def set_seed(seed):
 
 # @profile
 def power_node_edge_dropout(adj_tens, user_com_labels, item_com_labels, power_users_idx,
+<<<<<<< Updated upstream
                             power_items_idx,
                             user_community_connectivity_matrix=None,
                             item_community_connectivity_matrix=None,
+=======
+<<<<<<< Updated upstream
+                                     power_items_idx,
+                                     users_dec_perc_drop=0.7,
+                                     items_dec_perc_drop=0.3,
+                                     community_dropout_strength=0.9):
+=======
+                            power_items_idx,
+                            biased_user_edges_mask=None,
+                            biased_item_edges_mask=None,
+>>>>>>> Stashed changes
                             users_dec_perc_drop=0.1,
                             items_dec_perc_drop=0.2,
                             community_dropout_strength=0.6,
                             drop_from_power_nodes=True):
+<<<<<<< Updated upstream
+=======
+>>>>>>> Stashed changes
+>>>>>>> Stashed changes
     # Make a copy to avoid modifying the original tensor
     adj_tens = adj_tens.clone()
 
@@ -41,18 +57,31 @@ def power_node_edge_dropout(adj_tens, user_com_labels, item_com_labels, power_us
     # TODO: count edges from each user and get item community for each user above the threshold
 
     # Process power users
+<<<<<<< Updated upstream
     if users_dec_perc_drop > 0.0 and power_users_idx.numel() > 0 and drop_from_power_nodes:
+=======
+<<<<<<< Updated upstream
+    if users_dec_perc_drop > 0.0 and power_users_idx.numel() > 0:
+>>>>>>> Stashed changes
         # Pre-compute user communities for all power users
         user_communities = user_com_labels[power_users_idx]
+=======
+    if users_dec_perc_drop > 0.0 and power_users_idx.numel() > 0 and drop_from_power_nodes:
+        biased_power_user_edges_mask = biased_user_edges_mask[power_users_idx]
+>>>>>>> Stashed changes
 
-        for i, user in enumerate(power_users_idx):
-            # Find edges connected to this user more efficiently
-            user_edge_indices = torch.nonzero(adj_tens[:, 0] == user).squeeze(1)
+        # Calculate dropout rates and counts
+        total_drop_count = int(biased_power_user_edges_mask.numel() * users_dec_perc_drop)
+        in_com_drop_rate = users_dec_perc_drop + community_dropout_strength * (1 - users_dec_perc_drop)
+        in_com_drop_count = min(int(in_com_indices.numel() * in_com_drop_rate), in_com_indices.numel())
+        out_com_drop_count = min(total_drop_count - in_com_drop_count, out_com_indices.numel())
 
-            if user_edge_indices.numel() > 0:
-                # Get communities of connected items
-                item_communities = item_com_labels[adj_tens[user_edge_indices, 1]]
+        # Randomly select edges to drop
+        if in_com_drop_count > 0:
+            perm = torch.randperm(in_com_indices.numel())[:in_com_drop_count]
+            drop_mask[in_com_indices[perm]] = True
 
+<<<<<<< Updated upstream
                 # Identify in-community and out-of-community edges
                 user_community = user_communities[i]
                 # 'user' community is in which item community the user has most connections to
@@ -78,6 +107,11 @@ def power_node_edge_dropout(adj_tens, user_com_labels, item_com_labels, power_us
                 if out_com_drop_count > 0:
                     perm = torch.randperm(out_com_indices.numel())[:out_com_drop_count]
                     drop_mask[out_com_indices[perm]] = True
+=======
+        if out_com_drop_count > 0:
+            perm = torch.randperm(out_com_indices.numel())[:out_com_drop_count]
+            drop_mask[out_com_indices[perm]] = True
+>>>>>>> Stashed changes
 
     if items_dec_perc_drop > 0.0 and power_items_idx.numel() > 0 and drop_from_power_nodes:
         item_communities = item_com_labels[power_items_idx]
@@ -89,10 +123,19 @@ def power_node_edge_dropout(adj_tens, user_com_labels, item_com_labels, power_us
                 user_communities = user_com_labels[adj_tens[item_edge_indices, 0]]
 
                 item_community = item_communities[i]
+<<<<<<< Updated upstream
                 # 'item' community is in which user community the item has most connections to
                 # TODO: count edges from each user and get item community for each user above the threshold
                 # TODO: can be multiple! The mask goes over all communities above threshold then
                 in_com_mask = ...
+=======
+<<<<<<< Updated upstream
+                in_com_mask = user_communities == item_community
+=======
+                # 'item' community is in which user community the item has most connections to
+                in_com_mask = ...
+>>>>>>> Stashed changes
+>>>>>>> Stashed changes
 
                 in_com_indices = item_edge_indices[in_com_mask]
                 out_com_indices = item_edge_indices[~in_com_mask]
@@ -276,6 +319,7 @@ def plot_community_confidence(user_probs_path=None, user_labels=None, algorithm=
         plt.savefig(f"{save_path}/{dataset_name}_community_confidence_distribution.png")
 
 
+<<<<<<< Updated upstream
 # via euclidean distance between user/item community connectivity matrices and uniform distribution
 # for each user and each item, the bias individually
 def get_community_bias(adj_tens, user_com_labels, item_com_labels):
@@ -314,6 +358,38 @@ def get_community_bias(adj_tens, user_com_labels, item_com_labels):
 
     bias_worst_users = torch.linalg.matrix_norm(item_communities_each_user - worst_distribution_users, dim=1)
     bias_worst_items = torch.linalg.matrix_norm(user_communities_each_item - worst_distribution_items, dim=1)
+=======
+<<<<<<< Updated upstream
+=======
+# via euclidean distance between user/item community connectivity matrices and uniform distribution
+# for each user and each item, the bias individually
+def get_community_bias(item_communities_each_user_dist=None, user_communities_each_item_dist=None):
+    """
+    Get the community bias of the users and items.
+
+    :param item_communities_each_user_dist: torch.tensor, item community distribution for each user
+    :param user_communities_each_item_dist: torch.tensor, user community distribution for each item
+    :return: tuple of torch.tensors, community bias for users and items
+    """
+
+    uniform_distribution_users = torch.full_like(item_communities_each_user_dist, 1.0 / item_communities_each_user_dist.size(1))
+    uniform_distribution_items = torch.full_like(user_communities_each_item_dist, 1.0 / user_communities_each_item_dist.size(1))
+
+    # torch.norm does L2 norm by default
+    user_bias = torch.linalg.norm(uniform_distribution_users - item_communities_each_user_dist, dim=1)
+    item_bias = torch.linalg.norm(uniform_distribution_items - user_communities_each_item_dist, dim=1)
+
+    # Normalize the bias to be between 0 and 1
+    # make worst possible distribution and divide by it to make it the maximum 1
+    worst_distribution_users = torch.zeros_like(item_communities_each_user_dist)
+    worst_distribution_items = torch.zeros_like(user_communities_each_item_dist)
+    worst_distribution_users[:, 0] = 1.0  # worst distribution is all in one community
+    worst_distribution_items[:, 0] = 1.0
+
+    # bias for each user and item, can be processed for distributions, averages, etc.
+    bias_worst_users = torch.linalg.norm(uniform_distribution_users - worst_distribution_users, dim=1)
+    bias_worst_items = torch.linalg.norm(uniform_distribution_items - worst_distribution_items, dim=1)
+>>>>>>> Stashed changes
 
     user_bias /= bias_worst_users
     item_bias /= bias_worst_items
@@ -321,6 +397,40 @@ def get_community_bias(adj_tens, user_com_labels, item_com_labels):
     return user_bias.cpu(), item_bias.cpu()
 
 
+<<<<<<< Updated upstream
+=======
+def plot_community_bias(user_biases, item_biases, save_path=None, dataset_name=''):
+    """
+    Plot the community biases for users and items.
+
+    :param user_biases: torch.tensor, community bias for users
+    :param item_biases: torch.tensor, community bias for items
+    :param save_path: str or None, path to save the figure
+    :param dataset_name: str, name of the dataset for saving figures
+    """
+    # index zero is not a node, so we need to remove it
+    user_biases = user_biases[1:]
+    item_biases = item_biases[1:]
+
+    # Convert to numpy if tensor
+    if isinstance(user_biases, torch.Tensor):
+        user_biases = user_biases.cpu().numpy()
+        item_biases = item_biases.cpu().numpy()
+
+    plt.figure(figsize=(12, 8))
+    plt.boxplot([user_biases, item_biases], labels=['User bias', 'Items bias'])
+    plt.title('Community Bias for each user and item')
+    plt.ylabel('Bias [0, 1]')
+    plt.ylim(0, 1)
+    plt.grid(True, linestyle='--', alpha=0.7)
+
+    if save_path:
+        plt.savefig(f"{save_path}/{dataset_name}_community_bias.png")
+    plt.show()
+
+
+>>>>>>> Stashed changes
+>>>>>>> Stashed changes
 def plot_degree_distributions(adj_tens, num_bins=100, save_path=None, dataset_name=''):
     """
     Plot the degree distributions for users and items in decreasing order.

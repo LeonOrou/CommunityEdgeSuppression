@@ -79,19 +79,48 @@ def get_community_labels(config, adj_np, algorithm='Leiden', save_path='dataset/
     user_labels[user_probs_sorted[:, 0] < user_community_threshold] = -1
     item_labels[item_probs_sorted[:, 0] < item_community_threshold] = -1
 
+<<<<<<< Updated upstream
     user_labels_matrix = np.zeros((user_labels.shape[0], user_probs_sorted.shape[1]), dtype=np.int64)
     item_labels_matrix = np.zeros((item_labels.shape[0], item_probs_sorted.shape[1]), dtype=np.int64)
     user_labels_matrix[:, 0] = user_labels
     item_labels_matrix[:, 0] = item_labels
 
+=======
+<<<<<<< Updated upstream
+=======
+    user_labels_matrix = np.zeros((user_labels.shape[0], user_probs_sorted.shape[1]), dtype=np.int64)
+    item_labels_matrix = np.zeros((item_labels.shape[0], item_probs_sorted.shape[1]), dtype=np.int64)
+
+    user_labels_matrix_mask = np.zeros((user_labels.shape[0], user_probs_sorted.shape[1]), dtype=np.int64)
+    item_labels_matrix_mask = np.zeros((item_labels.shape[0], item_probs_sorted.shape[1]), dtype=np.int64)
+    user_labels_matrix_mask[:, user_labels] = 1
+    item_labels_matrix_mask[:, item_labels] = 1
+
+    user_labels_matrix[:, 0] = user_labels
+    item_labels_matrix[:, 0] = item_labels
+
+>>>>>>> Stashed changes
+>>>>>>> Stashed changes
     for i in range(1, user_probs.shape[1]):
         user_labels_i = np.where(user_probs_sorted[:, i] > user_community_threshold, user_probs_argsorted[:, i], -1)
         item_labels_i = np.where(item_probs_sorted[:, i] > item_community_threshold, item_probs_argsorted[:, i], -1)
 
         if np.all(user_labels_i == -1) and np.all(item_labels_i == -1):
             break
+<<<<<<< Updated upstream
         user_labels_matrix[:, i] = user_labels_i
         item_labels_matrix[:, i] = item_labels_i
+=======
+<<<<<<< Updated upstream
+    # for dropout
+    np.savetxt(f'{save_path}/user_labels_{algorithm}_processed.csv', user_labels, delimiter=",")
+    np.savetxt(f'{save_path}/item_labels_{algorithm}_processed.csv', item_labels, delimiter=",")
+=======
+        user_labels_matrix[:, i] = user_labels_i
+        item_labels_matrix[:, i] = item_labels_i
+        user_labels_matrix_mask[:, [user_labels_i != -1]] = 1
+        item_labels_matrix_mask[:, [item_labels_i != -1]] = 1
+>>>>>>> Stashed changes
 
     # keep only columns that have not all zeros
     user_labels_matrix = user_labels_matrix[:, np.any(user_labels_matrix, axis=0)]
@@ -100,6 +129,13 @@ def get_community_labels(config, adj_np, algorithm='Leiden', save_path='dataset/
     # used for dropout
     np.savetxt(f'{save_path}/user_labels_{algorithm}_matrix.csv', user_labels_matrix, delimiter=",", fmt='% 4d')
     np.savetxt(f'{save_path}/item_labels_{algorithm}_matrix.csv', item_labels_matrix, delimiter=",", fmt='% 4d')
+<<<<<<< Updated upstream
+=======
+>>>>>>> Stashed changes
+
+    np.savetxt(f'{save_path}/user_labels_{algorithm}_matrix_mask.csv', user_labels_matrix_mask, delimiter=",", fmt='% 4d')
+    np.savetxt(f'{save_path}/item_labels_{algorithm}_matrix_mask.csv', item_labels_matrix_mask, delimiter=",", fmt='% 4d')
+>>>>>>> Stashed changes
 
     if get_probs:
         np.savetxt(f'{save_path}/user_labels_{algorithm}_probs.csv', user_probs,
@@ -240,6 +276,11 @@ def get_community_connectivity_matrix(adj_tens, user_com_labels, item_com_labels
     return connectivity_matrix  # raw interaction counts, not normalized
 
 
+<<<<<<< Updated upstream
+=======
+<<<<<<< Updated upstream
+=======
+>>>>>>> Stashed changes
 def get_user_item_community_connectivity_matrices(adj_tens, user_com_labels, item_com_labels):
     """
     Measure community bias from this output!!
@@ -336,6 +377,40 @@ def get_user_item_community_connectivity_matrices(adj_tens, user_com_labels, ite
     return item_communities_each_user, user_communities_each_item
 
 
+<<<<<<< Updated upstream
 
 
 
+=======
+def get_biased_edges_mask(adj_tens, user_com_labels_mask, item_com_labels_mask,
+                      user_community_connectivity_matrix_distribution,
+                      item_community_connectivity_matrix_distribution,
+                      bias_threshold=0.4):
+    # make two masks for the user and item community connectivity matrices to get values above threshold
+    user_com_con_mask = user_community_connectivity_matrix_distribution > bias_threshold
+    item_com_con_mask = item_community_connectivity_matrix_distribution > bias_threshold
+
+    # get rows in adj_tens where adj_tens[:, 0] is True in user_com_mask
+    user_com_mask = user_com_labels_mask[adj_tens[:, 0].long()]
+    item_com_mask = item_com_labels_mask[adj_tens[:, 1].long()]
+
+    # get edges from adj_tens where user_com_mask and item_com_mask are True, but keeping adj_tens shape
+    biased_user_nodes = adj_tens[user_com_mask][:, 0]
+    biased_item_nodes = adj_tens[item_com_mask][:, 1]
+
+    biased_user_nodes_item_com_con = user_com_con_mask[biased_user_nodes]
+    biased_item_nodes_user_com_con = item_com_con_mask[biased_item_nodes]
+
+    biased_item_nodes_communities = item_com_labels_mask[biased_item_nodes]
+    biased_user_nodes_communities = user_com_labels_mask[biased_user_nodes]
+
+    biased_user_edges_mask = biased_user_nodes_item_com_con == biased_item_nodes_communities
+    biased_item_edges_mask = biased_item_nodes_user_com_con == biased_user_nodes_communities
+
+    return biased_user_edges_mask, biased_item_edges_mask
+
+
+
+
+>>>>>>> Stashed changes
+>>>>>>> Stashed changes
