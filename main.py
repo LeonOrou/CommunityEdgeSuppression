@@ -231,8 +231,6 @@ def main():
         items_top_percent=args.items_top_percent
     )
 
-    community_connectivity_matrix = calculate_community_metrics(config, adj_np, device)
-
     user_community_connectivity_matrix, item_community_connectivity_matrix = calculate_community_metrics(config, adj_np, device)
     # user/item id 0 is never used / nan as labels start at 1 and we use them for indexing
     # normalize as distribution along the rows
@@ -250,13 +248,14 @@ def main():
     user_labels_Leiden_matrix_mask = np.loadtxt(f'dataset/{config.dataset}/user_labels_Leiden_matrix_mask.csv', delimiter=',')
     item_labels_Leiden_matrix_mask = np.loadtxt(f'dataset/{config.dataset}/item_labels_Leiden_matrix_mask.csv', delimiter=',')
 
-    config.variable_config_dict['biased_user_edges_mask'] = get_biased_edges_mask(adj_tens=torch.tensor(adj_np,
-                                                                                                        device=device),
-                                                                                  user_com_labels_mask=user_labels_Leiden_matrix_mask,
-                                                                                  item_com_labels_mask=item_labels_Leiden_matrix_mask,
-                                                                                  user_community_connectivity_matrix_distribution=user_community_connectivity_matrix,
-                                                                                  item_community_connectivity_matrix_distribution=item_community_connectivity_matrix,
-                                                                                  bias_threshold=0.4)
+    (config.variable_config_dict['biased_user_edges_mask'],
+     config.variable_config_dict['biased_item_edges_mask']) = get_biased_edges_mask(
+        adj_tens=torch.tensor(adj_np, device=device),
+        user_com_labels_mask=user_labels_Leiden_matrix_mask,
+        item_com_labels_mask=item_labels_Leiden_matrix_mask,
+        user_community_connectivity_matrix_distribution=user_community_connectivity_matrix,
+        item_community_connectivity_matrix_distribution=item_community_connectivity_matrix,
+        bias_threshold=0.4)
 
     # user_biases, item_biases = get_community_bias(user_communities_each_item_dist=config.variable_config_dict['user_community_connectivity_matrix'],
     #                                               item_communities_each_user_dist=config.variable_config_dict['item_community_connectivity_matrix'])
@@ -286,3 +285,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
