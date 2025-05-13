@@ -70,9 +70,6 @@ class PowerDropoutTrainer(Trainer):
             del train_data_coo, indices, values
 
             new_inter_feat = power_node_edge_dropout(adj_tens=adj_tens,
-<<<<<<< Updated upstream
-=======
-<<<<<<< Updated upstream
                  user_com_labels=self.config.variable_config_dict['user_com_labels'],
                  item_com_labels=self.config.variable_config_dict['item_com_labels'],
                  power_users_idx=self.config.variable_config_dict['power_users_ids'],
@@ -81,23 +78,6 @@ class PowerDropoutTrainer(Trainer):
                  users_dec_perc_drop=self.config.variable_config_dict['users_dec_perc_drop'],
                  items_dec_perc_drop=self.config.variable_config_dict['items_dec_perc_drop'],
                  community_dropout_strength=self.config.variable_config_dict['community_dropout_strength'],)
-=======
->>>>>>> Stashed changes
-                                                     user_com_labels=self.config.variable_config_dict['user_com_labels'],
-                                                     item_com_labels=self.config.variable_config_dict['item_com_labels'],
-                                                     power_users_idx=self.config.variable_config_dict['power_users_ids'],
-                                                     power_items_idx=self.config.variable_config_dict['power_items_ids'],
-                                                     users_dec_perc_drop=self.config.variable_config_dict['users_dec_perc_drop'],
-                                                     items_dec_perc_drop=self.config.variable_config_dict['items_dec_perc_drop'],
-                                                     community_dropout_strength=self.config.variable_config_dict['community_dropout_strength'],
-                                                     drop_from_power_nodes=self.config.variable_config_dict['drop_from_power_nodes'],
-<<<<<<< Updated upstream
-                                                     user_community_connectivity_matrix=self.config.variable_config_dict['user_community_connectivity_matrix'],
-                                                     item_community_connectivity_matrix=self.config.variable_config_dict['item_community_connectivity_matrix'],)
-=======
-                                                     )
->>>>>>> Stashed changes
->>>>>>> Stashed changes
 
             cpu_data = new_inter_feat.cpu().numpy()
             interaction_df = pd.DataFrame(cpu_data, columns=train_data.dataset.inter_feat.columns)

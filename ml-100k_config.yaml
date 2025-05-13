@@ -2,6 +2,7 @@
 USER_ID_FIELD: user_id
 ITEM_ID_FIELD: item_id
 RATING_FIELD: rating
+RATING_FIELD: rating  # we shouldnt need as we differentiate only from no or positive interaction
 load_col:
     inter: [user_id, item_id, rating]
 
