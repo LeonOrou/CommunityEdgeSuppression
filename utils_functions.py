@@ -70,7 +70,6 @@ def power_node_edge_dropout(adj_tens, user_com_labels, item_com_labels, power_us
                     perm = torch.randperm(out_com_indices.numel())[:out_com_drop_count]
                     drop_mask[out_com_indices[perm]] = True
 
-    # Process power items (similar approach)
     if items_dec_perc_drop > 0.0 and power_items_idx.numel() > 0:
         # Pre-compute item communities
         item_communities = item_com_labels[power_items_idx]
@@ -107,6 +106,7 @@ def power_node_edge_dropout(adj_tens, user_com_labels, item_com_labels, power_us
     adj_tens = adj_tens[adj_tens[:, 2] != 0]
 
     return adj_tens
+
 
 # TODO: make community bias metric: get recommendations and calculate how many are inside the community versus the recommendations without any modifications
 # TODO: check data types of the inputs
