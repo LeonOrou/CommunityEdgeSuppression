@@ -25,12 +25,12 @@ def parse_arguments():
     # in cmd: python main.py --model_name LightGCN --dataset_name ml-20m --config_file_name ml-20_config.yaml --users_top_percent 0.01 --users_dec_perc_drop 0.70 --community_dropout_strength 0.5 --do_power_nodes_from_community True
     parser.add_argument("--model_name", type=str, default='LightGCN')
     parser.add_argument("--dataset_name", type=str, default='ml-100k')
-    parser.add_argument("--users_top_percent", type=float, default=0.01)
+    parser.add_argument("--users_top_percent", type=float, default=0.05)
     parser.add_argument("--items_top_percent", type=float, default=0.05)
     parser.add_argument("--users_dec_perc_drop", type=float, default=0.0)
     parser.add_argument("--items_dec_perc_drop", type=float, default=0.1)
     parser.add_argument("--community_dropout_strength", type=float, default=0.6)
-    parser.add_argument("--drop_from_power_nodes", type=bool, default=True)
+    parser.add_argument("--drop_only_power_nodes", type=bool, default=True)
     # TODO: check scientific evidence for parameter existence and values!
     return parser.parse_args()
 
@@ -65,7 +65,7 @@ def setup_config(args, device, seed):
             'users_dec_perc_drop': args.users_dec_perc_drop,
             'items_dec_perc_drop': args.items_dec_perc_drop,
             'community_dropout_strength': args.community_dropout_strength,
-            'drop_from_power_nodes': args.drop_from_power_nodes,
+            'drop_only_power_nodes': args.drop_only_power_nodes,
         }
     )
     config['device'] = device

@@ -16,28 +16,15 @@ def get_community_labels(config, adj_np, algorithm='Leiden', save_path='dataset/
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     if f'user_labels_Leiden_processed.csv' in os.listdir(f'dataset/{config.dataset}'):
         return torch.tensor(
-            np.loadtxt(f'dataset/{config.dataset}/user_labels_Leiden_matrix.csv', dtype=np.int32),
-            dtype=torch.int32,
+            np.loadtxt(f'dataset/{config.dataset}/user_labels_Leiden_matrix.csv'),
+            dtype=torch.int64,
             device=device
         ), torch.tensor(
-            np.loadtxt(f'dataset/{config.dataset}/item_labels_Leiden_matrix.csv', dtype=np.int32),
-            dtype=torch.int32,
+            np.loadtxt(f'dataset/{config.dataset}/item_labels_Leiden_matrix.csv'),
+            dtype=torch.int64,
             device=device
         )
 
-
-    # check if column 0 and 1 do not intersect, no ambiguity (often the ids are two sets so they both start at 1)
-    # Ids start at 1 in MovieLens dataset
-    max_userId = np.max(adj_np[:, 0])
-    min_userId = np.min(adj_np[:, 0])
-    max_itemId = np.max(adj_np[:, 1])
-    min_itemId = np.min(adj_np[:, 1])
-    # if not np.all(adj_np[:, 0] != adj_np[:, 1]):
-    #     adj_np[:, 1] = adj_np[:,
-    #                    1] + max_userId + min_userId  # min_userId is 1, if its 0: no gap between new user and item ids
-
-    # make undirected such that also items get community labels
-    # adj_np = np.concatenate([adj_np, adj_np[:, [1, 0, 2]]])
     adj_csr = sp.csr_matrix((adj_np[:, 2].astype(float), (adj_np[:, 0].astype(int), adj_np[:, 1].astype(int))))
 
     if algorithm == 'Leiden':
@@ -79,16 +66,11 @@ def get_community_labels(config, adj_np, algorithm='Leiden', save_path='dataset/
     user_labels[user_probs_sorted[:, 0] < user_community_threshold] = -1
     item_labels[item_probs_sorted[:, 0] < item_community_threshold] = -1
 
-    user_labels_matrix = np.zeros((user_labels.shape[0], user_probs_sorted.shape[1]), dtype=np.int64)
-    item_labels_matrix = np.zeros((item_labels.shape[0], item_probs_sorted.shape[1]), dtype=np.int64)
+    user_labels_sorted_matrix = np.full((user_labels.shape[0], user_probs_sorted.shape[1]), fill_value=-1, dtype=np.int64)
+    item_labels_sorted_matrix = np.full((item_labels.shape[0], item_probs_sorted.shape[1]), fill_value=-1, dtype=np.int64)
 
-    user_labels_matrix_mask = np.zeros((user_labels.shape[0], user_probs_sorted.shape[1]), dtype=np.int64)
-    item_labels_matrix_mask = np.zeros((item_labels.shape[0], item_probs_sorted.shape[1]), dtype=np.int64)
-    user_labels_matrix_mask[:, user_labels] = 1
-    item_labels_matrix_mask[:, item_labels] = 1
-
-    user_labels_matrix[:, 0] = user_labels
-    item_labels_matrix[:, 0] = item_labels
+    user_labels_sorted_matrix[:, 0] = user_labels
+    item_labels_sorted_matrix[:, 0] = item_labels
 
     for i in range(1, user_probs.shape[1]):
         user_labels_i = np.where(user_probs_sorted[:, i] > user_community_threshold, user_probs_argsorted[:, i], -1)
@@ -96,25 +78,23 @@ def get_community_labels(config, adj_np, algorithm='Leiden', save_path='dataset/
 
         if np.all(user_labels_i == -1) and np.all(item_labels_i == -1):
             break
-        user_labels_matrix[:, i] = user_labels_i
-        item_labels_matrix[:, i] = item_labels_i
-        user_labels_matrix_mask[:, [user_labels_i != -1]] = 1
-        item_labels_matrix_mask[:, [item_labels_i != -1]] = 1
+        user_labels_sorted_matrix[:, i] = user_labels_i
+        item_labels_sorted_matrix[:, i] = item_labels_i
 
-    # for dropout
+    user_labels_matrix_mask = np.where(user_labels_sorted_matrix != -1, 1, 0)
+    item_labels_matrix_mask = np.where(item_labels_sorted_matrix != -1, 1, 0)
+
+    # keep only columns that have not all -1s
+    user_labels_sorted_matrix = user_labels_sorted_matrix[:, np.any(user_labels_sorted_matrix != -1, axis=0)]
+    item_labels_sorted_matrix = item_labels_sorted_matrix[:, np.any(item_labels_sorted_matrix != -1, axis=0)]
+
     np.savetxt(f'{save_path}/user_labels_{algorithm}_processed.csv', user_labels, delimiter=",")
     np.savetxt(f'{save_path}/item_labels_{algorithm}_processed.csv', item_labels, delimiter=",")
 
+    np.savetxt(f'{save_path}/user_labels_{algorithm}_matrix.csv', user_labels_sorted_matrix, delimiter=",", fmt='% 4d')
+    np.savetxt(f'{save_path}/item_labels_{algorithm}_matrix.csv', item_labels_sorted_matrix, delimiter=",", fmt='% 4d')
 
-
-    # keep only columns that have not all zeros
-    user_labels_matrix = user_labels_matrix[:, np.any(user_labels_matrix, axis=0)]
-    item_labels_matrix = item_labels_matrix[:, np.any(item_labels_matrix, axis=0)]
-
-    # used for dropout
-    np.savetxt(f'{save_path}/user_labels_{algorithm}_matrix.csv', user_labels_matrix, delimiter=",", fmt='% 4d')
-    np.savetxt(f'{save_path}/item_labels_{algorithm}_matrix.csv', item_labels_matrix, delimiter=",", fmt='% 4d')
-
+    # for dropout
     np.savetxt(f'{save_path}/user_labels_{algorithm}_matrix_mask.csv', user_labels_matrix_mask, delimiter=",", fmt='% 4d')
     np.savetxt(f'{save_path}/item_labels_{algorithm}_matrix_mask.csv', item_labels_matrix_mask, delimiter=",", fmt='% 4d')
 
@@ -124,7 +104,7 @@ def get_community_labels(config, adj_np, algorithm='Leiden', save_path='dataset/
         np.savetxt(f'{save_path}/item_labels_{algorithm}_probs.csv', item_probs,
                    delimiter=",", fmt='%.4f')
 
-    return torch.tensor(user_labels_matrix, dtype=torch.int64, device=device), torch.tensor(item_labels_matrix, dtype=torch.int64, device=device)
+    return torch.tensor(user_labels_sorted_matrix, dtype=torch.int64, device=device), torch.tensor(item_labels_sorted_matrix, dtype=torch.int64, device=device)
 
 
 def get_power_users_items(config, adj_tens, user_com_labels, item_com_labels,
@@ -144,7 +124,7 @@ def get_power_users_items(config, adj_tens, user_com_labels, item_com_labels,
     # read and return them if already computed locally
     device = adj_tens.device  # Get the device of the input tensor
     if f'power_user_ids_top{users_top_percent}.csv' in os.listdir(
-            f'dataset/{config.dataset}') or f'power_item_ids_top{items_top_percent}.csv' in os.listdir(
+            f'dataset/{config.dataset}') and f'power_item_ids_top{items_top_percent}.csv' in os.listdir(
             f'dataset/{config.dataset}'):
         return torch.tensor(
             np.loadtxt(f'dataset/{config.dataset}/power_user_ids_top{users_top_percent}.csv'),
