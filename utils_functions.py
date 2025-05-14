@@ -62,7 +62,7 @@ def power_node_edge_dropout(adj_tens, power_users_idx,
             user_edge_mask = torch.nonzero(~user_edge_mask).squeeze(1)  # ~ to get ALL edges, not just power users
 
         user_edge_indices = torch.nonzero(user_edge_mask).squeeze(1)
-        total_user_drop_count = int(user_edge_indices.numel() * users_dec_perc_drop)
+        total_user_drop_count = int(adj_tens.shape[0] * users_dec_perc_drop)  # TODO: discuss from what the users_dec_perc_drop says to drop from; all edges, biased edges, power edges
 
         # Find in-community edges (biased)
         in_com_user_indices = user_edge_indices[biased_user_edges_mask[user_edge_indices]]
@@ -71,7 +71,7 @@ def power_node_edge_dropout(adj_tens, power_users_idx,
 
         # Calculate how many edges to drop from in-community vs out-of-community
         in_com_user_drop_rate = users_dec_perc_drop + community_dropout_strength * (1 - users_dec_perc_drop)
-        in_com_user_drop_count = min(int(in_com_user_indices.numel() * in_com_user_drop_rate),
+        in_com_user_drop_count = min(int(total_user_drop_count * in_com_user_drop_rate),
                                      in_com_user_indices.numel())
         out_com_user_drop_count = min(total_user_drop_count - in_com_user_drop_count,
                                       out_com_user_indices.numel())
@@ -98,7 +98,7 @@ def power_node_edge_dropout(adj_tens, power_users_idx,
         item_edge_indices = torch.nonzero(item_edge_mask).squeeze(1)
 
         # Calculate number of edges to drop
-        total_item_drop_count = int(item_edge_indices.numel() * items_dec_perc_drop)
+        total_item_drop_count = int(adj_tens.shape[0] * items_dec_perc_drop)  # TODO: discuss from what the users_dec_perc_drop says to drop from; all edges, biased edges, power edges
 
         # Find in-community edges (biased)
         in_com_item_indices = item_edge_indices[biased_item_edges_mask[item_edge_indices]]
@@ -107,7 +107,7 @@ def power_node_edge_dropout(adj_tens, power_users_idx,
 
         # Calculate how many edges to drop from in-community vs out-of-community
         in_com_item_drop_rate = items_dec_perc_drop + community_dropout_strength * (1 - items_dec_perc_drop)
-        in_com_item_drop_count = min(int(in_com_item_indices.numel() * in_com_item_drop_rate),
+        in_com_item_drop_count = min(int(total_item_drop_count * in_com_item_drop_rate),
                                      in_com_item_indices.numel())
         out_com_item_drop_count = min(total_item_drop_count - in_com_item_drop_count,
                                       out_com_item_indices.numel())
@@ -115,7 +115,7 @@ def power_node_edge_dropout(adj_tens, power_users_idx,
         # Drop in-community edges
         if in_com_item_drop_count > 0 and in_com_item_indices.numel() > 0:
             perm = torch.randperm(in_com_item_indices.numel(), device=device)[:in_com_item_drop_count]
-            drop_mask[in_com_item_indices[perm]] = True
+            drop_mask[in_com_item_indices[perm]] = True  # TODO: handle cases where the dropped edges would overlap
 
         # Drop out-of-community edges
         if out_com_item_drop_count > 0 and out_com_item_indices.numel() > 0:

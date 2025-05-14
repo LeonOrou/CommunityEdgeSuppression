@@ -14,13 +14,13 @@ def get_community_labels(config, adj_np, algorithm='Leiden', save_path='dataset/
 
     # read and return them if already computed locally
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    if f'user_labels_Leiden_processed.csv' in os.listdir(f'dataset/{config.dataset}'):
+    if f'user_labels_Leiden_matrix_mask.csv' in os.listdir(f'dataset/{config.dataset}'):
         return torch.tensor(
-            np.loadtxt(f'dataset/{config.dataset}/user_labels_Leiden_matrix.csv'),
+            np.loadtxt(f'dataset/{config.dataset}/user_labels_Leiden_matrix.csv', delimiter=','),
             dtype=torch.int64,
             device=device
         ), torch.tensor(
-            np.loadtxt(f'dataset/{config.dataset}/item_labels_Leiden_matrix.csv'),
+            np.loadtxt(f'dataset/{config.dataset}/item_labels_Leiden_matrix.csv', delimiter=','),
             dtype=torch.int64,
             device=device
         )
@@ -69,10 +69,10 @@ def get_community_labels(config, adj_np, algorithm='Leiden', save_path='dataset/
     user_labels_sorted_matrix = np.full((user_labels.shape[0], user_probs_sorted.shape[1]), fill_value=-1, dtype=np.int64)
     item_labels_sorted_matrix = np.full((item_labels.shape[0], item_probs_sorted.shape[1]), fill_value=-1, dtype=np.int64)
 
-    user_labels_sorted_matrix[:, 0] = user_labels
-    item_labels_sorted_matrix[:, 0] = item_labels
+    user_labels_matrix_mask = np.zeros(user_labels_sorted_matrix.shape, dtype=np.int64)
+    item_labels_matrix_mask = np.zeros(item_labels_sorted_matrix.shape, dtype=np.int64)
 
-    for i in range(1, user_probs.shape[1]):
+    for i in range(0, user_probs.shape[1]):
         user_labels_i = np.where(user_probs_sorted[:, i] > user_community_threshold, user_probs_argsorted[:, i], -1)
         item_labels_i = np.where(item_probs_sorted[:, i] > item_community_threshold, item_probs_argsorted[:, i], -1)
 
@@ -81,8 +81,10 @@ def get_community_labels(config, adj_np, algorithm='Leiden', save_path='dataset/
         user_labels_sorted_matrix[:, i] = user_labels_i
         item_labels_sorted_matrix[:, i] = item_labels_i
 
-    user_labels_matrix_mask = np.where(user_labels_sorted_matrix != -1, 1, 0)
-    item_labels_matrix_mask = np.where(item_labels_sorted_matrix != -1, 1, 0)
+        user_rows_with_label = np.where(user_labels_sorted_matrix[:, i] != -1)[0]
+        user_labels_matrix_mask[user_rows_with_label, user_labels_i[user_rows_with_label]] = 1
+        item_rows_with_label = np.where(item_labels_sorted_matrix[:, i] != -1)[0]
+        item_labels_matrix_mask[item_rows_with_label, item_labels_i[item_rows_with_label]] = 1
 
     # keep only columns that have not all -1s
     user_labels_sorted_matrix = user_labels_sorted_matrix[:, np.any(user_labels_sorted_matrix != -1, axis=0)]
@@ -334,29 +336,43 @@ def get_user_item_community_connectivity_matrices(adj_tens, user_com_labels, ite
 
 
 def get_biased_edges_mask(adj_tens, user_com_labels_mask, item_com_labels_mask,
-                      user_community_connectivity_matrix_distribution,
-                      item_community_connectivity_matrix_distribution,
-                      bias_threshold=0.4):
+                          user_community_connectivity_matrix_distribution,
+                          item_community_connectivity_matrix_distribution,
+                          bias_threshold=0.4):
+    # TODO: this can for sure be done more efficiently
     # make two masks for the user and item community connectivity matrices to get values above threshold
-    user_com_con_mask = user_community_connectivity_matrix_distribution > bias_threshold
-    item_com_con_mask = item_community_connectivity_matrix_distribution > bias_threshold
+    user_com_connectivity_mask = user_community_connectivity_matrix_distribution > bias_threshold
+    item_com_connectivity_mask = item_community_connectivity_matrix_distribution > bias_threshold
 
+    # get indices where in user/item com masks at least one community is above threshold
+    user_com_labels_mask_rows = torch.any(user_com_labels_mask > 0, dim=1)
+    item_com_labels_mask_rows = torch.any(item_com_labels_mask > 0, dim=1)
     # get rows in adj_tens where adj_tens[:, 0] is True in user_com_mask
-    user_com_mask = user_com_labels_mask[adj_tens[:, 0].long()]
-    item_com_mask = item_com_labels_mask[adj_tens[:, 1].long()]
+    user_com_mask = user_com_labels_mask_rows[adj_tens[:, 0]]
+    item_com_mask = item_com_labels_mask_rows[adj_tens[:, 1]]
 
     # get edges from adj_tens where user_com_mask and item_com_mask are True, but keeping adj_tens shape
     biased_user_nodes = adj_tens[user_com_mask][:, 0]
+    biased_user_nodes_items = adj_tens[user_com_mask][:, 1]
     biased_item_nodes = adj_tens[item_com_mask][:, 1]
+    biased_item_nodes_users = adj_tens[item_com_mask][:, 0]
 
-    biased_user_nodes_item_com_con = user_com_con_mask[biased_user_nodes]
-    biased_item_nodes_user_com_con = item_com_con_mask[biased_item_nodes]
+    biased_user_nodes_item_com_con = user_com_connectivity_mask[biased_user_nodes]
+    biased_item_nodes_user_com_con = item_com_connectivity_mask[biased_item_nodes]
 
-    biased_item_nodes_communities = item_com_labels_mask[biased_item_nodes]
-    biased_user_nodes_communities = user_com_labels_mask[biased_user_nodes]
+    biased_item_nodes_communities = item_com_labels_mask[biased_user_nodes_items]
+    biased_user_nodes_communities = user_com_labels_mask[biased_item_nodes_users]
 
-    biased_user_edges_mask = biased_user_nodes_item_com_con == biased_item_nodes_communities
-    biased_item_edges_mask = biased_item_nodes_user_com_con == biased_user_nodes_communities
+    user_com_mask_nonzero_idx = user_com_mask.nonzero(as_tuple=True)[0]
+    item_com_mask_nonzero_idx = item_com_mask.nonzero(as_tuple=True)[0]
+
+    true_user_indices = torch.all(biased_user_nodes_item_com_con == biased_item_nodes_communities, dim=1)
+    true_item_indices = torch.all(biased_item_nodes_user_com_con == biased_user_nodes_communities, dim=1)
+
+    biased_user_edges_mask = torch.zeros(adj_tens.shape[0], dtype=torch.bool, device=adj_tens.device)
+    biased_item_edges_mask = torch.zeros(adj_tens.shape[0], dtype=torch.bool, device=adj_tens.device)
+    biased_user_edges_mask[user_com_mask_nonzero_idx[true_user_indices]] = True
+    biased_item_edges_mask[item_com_mask_nonzero_idx[true_item_indices]] = True
 
     return biased_user_edges_mask, biased_item_edges_mask
 

@@ -2,7 +2,6 @@
 USER_ID_FIELD: user_id
 ITEM_ID_FIELD: item_id
 RATING_FIELD: rating
-RATING_FIELD: rating  # we shouldnt need as we differentiate only from no or positive interaction
 load_col:
     inter: [user_id, item_id, rating]
 
@@ -21,9 +20,9 @@ use_gpu: True
 gpu_id: 0
 
 # Training and evaluation config
-epochs: 30  # check paper
+epochs: 200  # check paper
 train_batch_size: 512  # check paper
-eval_batch_size: 8192  # TODO: changing this or sample num or something else for faster evaluation, it somehow is currently the number of users in the test set
+eval_batch_size: 512  # TODO: changing this or sample num or something else for faster evaluation, it somehow is currently the number of users in the test set
 eval_step: 2  # Only evaluate every X-th epochs
 
 train_neg_sample_args:

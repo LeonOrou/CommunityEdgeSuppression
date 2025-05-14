@@ -27,9 +27,9 @@ def parse_arguments():
     parser.add_argument("--dataset_name", type=str, default='ml-100k')
     parser.add_argument("--users_top_percent", type=float, default=0.05)
     parser.add_argument("--items_top_percent", type=float, default=0.05)
-    parser.add_argument("--users_dec_perc_drop", type=float, default=0.0)
-    parser.add_argument("--items_dec_perc_drop", type=float, default=0.1)
-    parser.add_argument("--community_dropout_strength", type=float, default=0.6)
+    parser.add_argument("--users_dec_perc_drop", type=float, default=0.05)
+    parser.add_argument("--items_dec_perc_drop", type=float, default=0.05)
+    parser.add_argument("--community_dropout_strength", type=float, default=0.8)
     parser.add_argument("--drop_only_power_nodes", type=bool, default=True)
     # TODO: check scientific evidence for parameter existence and values!
     return parser.parse_args()
@@ -217,9 +217,7 @@ def main():
 
     train_data, valid_data, test_data = prepare_dataset(config)
 
-    log = False
-    if log:
-        wandb_run = initialize_wandb(args, config_params)
+    wandb_run = initialize_wandb(args, config_params)
 
     adj_np = preprocess_train_data(train_data, device)
 
@@ -251,8 +249,8 @@ def main():
     (config.variable_config_dict['biased_user_edges_mask'],
      config.variable_config_dict['biased_item_edges_mask']) = get_biased_edges_mask(
         adj_tens=torch.tensor(adj_np, device=device),
-        user_com_labels_mask=user_labels_Leiden_matrix_mask,
-        item_com_labels_mask=item_labels_Leiden_matrix_mask,
+        user_com_labels_mask=torch.tensor(user_labels_Leiden_matrix_mask, device=device),
+        item_com_labels_mask=torch.tensor(item_labels_Leiden_matrix_mask, device=device),
         user_community_connectivity_matrix_distribution=user_community_connectivity_matrix,
         item_community_connectivity_matrix_distribution=item_community_connectivity_matrix,
         bias_threshold=0.4)
@@ -262,7 +260,7 @@ def main():
     # plot_community_bias(user_biases=user_biases, item_biases=item_biases, save_path=f'images/', dataset_name=config.dataset)
 
     # Optional: Uncomment for plots
-    # plot_degree_distributions(adj_tens=torch.tensor(adj_np, device=device), num_bins=100, save_path=f'images/', dataset_name=args.dataset_name)
+    # plot_degree_distributions(adj_tens=torch.tensor(adj_tens, device=device), num_bins=100, save_path=f'images/', dataset_name=args.dataset_name)
     # plot_community_connectivity_distribution(connectivity_matrix=community_connectivity_matrix, top_n_communities=20, save_path=f'images/', dataset_name=args.dataset_name)
     # plot_community_confidence(user_probs_path=f'', save_path=f'images/', dataset_name=args.dataset_name, top_n_communities=10)
 
@@ -276,11 +274,10 @@ def main():
         test_data=test_data,
         use_dropout=True  # set false here to get default trainer object
     )
-    
-    if log:
-        rng_id = np.random.randint(0, 100000)
-        wandb.save(f"{args.model_name}_{args.dataset_name}_ID{rng_id}.h5")
-        wandb_run.finish()
+
+    rng_id = np.random.randint(0, 100000)
+    wandb.save(f"{args.model_name}_{args.dataset_name}_ID{rng_id}.h5")
+    wandb_run.finish()
 
 
 if __name__ == "__main__":

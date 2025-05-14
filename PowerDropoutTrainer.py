@@ -76,6 +76,7 @@ class PowerDropoutTrainer(Trainer):
                                                      biased_item_edges_mask=self.config.variable_config_dict['biased_item_edges_mask'],
                                                      users_dec_perc_drop=self.config.variable_config_dict['users_dec_perc_drop'],
                                                      items_dec_perc_drop=self.config.variable_config_dict['items_dec_perc_drop'],
+                                                     community_dropout_strength=self.config.variable_config_dict['community_dropout_strength'],
                                                      drop_only_power_nodes=self.config.variable_config_dict['drop_only_power_nodes'], )
 
             cpu_data = new_inter_feat.cpu().numpy()
