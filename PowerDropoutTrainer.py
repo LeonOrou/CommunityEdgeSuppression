@@ -15,12 +15,16 @@ import copy
 import pandas as pd
 from recbole.data.interaction import Interaction
 from recbole.data.dataloader.general_dataloader import TrainDataLoader
-from recbole.sampler.sampler import RepeatableSampler, Sampler
+from recbole.sampler.sampler import RepeatableSampler
 
 
 class PowerDropoutTrainer(Trainer):
     def __init__(self, config, model):
         super(PowerDropoutTrainer, self).__init__(config, model)
+        ### adding learning rate scheduler ###
+        self.lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimizer,
+                                                                       patience=self.config.variable_config_dict['patience'],
+                                                                       min_lr=self.config.variable_config_dict['min_lr'],)
 
     def fit(
         self,
@@ -145,6 +149,11 @@ class PowerDropoutTrainer(Trainer):
                 valid_result_output = (
                     set_color("valid result", "blue") + ": \n" + dict2str(valid_result)
                 )
+
+                ### added lr-scheduler step ###
+                self.lr_scheduler.step(valid_score)
+                ###
+
                 if verbose:
                     self.logger.info(valid_score_output)
                     self.logger.info(valid_result_output)
