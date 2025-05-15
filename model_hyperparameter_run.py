@@ -71,7 +71,7 @@ def setup_device(gpu):
         return torch.device('cpu')
 
 
-def setup_config(args, device, seed=42):
+def setup_config(args, device):
     """Setup RecBole configuration with hyperparameters."""
     # Common parameters
 

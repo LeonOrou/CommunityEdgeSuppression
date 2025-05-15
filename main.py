@@ -32,7 +32,7 @@ def parse_arguments():
     parser.add_argument("--community_dropout_strength", type=float, default=0.8)
     parser.add_argument("--drop_only_power_nodes", type=bool, default=True)
     parser.add_argument("--use_dropout", type=bool, default=True)
-    # TODO: check scientific evidence for parameter existence and values!
+
     return parser.parse_args()
 
 
@@ -57,47 +57,50 @@ def setup_device(try_gpu=True):
 
 def setup_config(args, device, seed):
     """Setup RecBole configuration."""
+    config_dict = {
+        'users_dec_perc_drop': args.users_dec_perc_drop,
+        'items_dec_perc_drop': args.items_dec_perc_drop,
+        'community_dropout_strength': args.community_dropout_strength,
+        'drop_only_power_nodes': args.drop_only_power_nodes,
+        'patience': 5,
+        'gamma': 0.5,
+        'min_lr': 1e-5,
+        'scheduler': 'plateau',
+
+        'reproducibility': True,
+        'device': device
+    }
+
+    if args.model_name == 'LightGCN':
+        config_dict['train_batch_size'] = 512
+        config_dict['eval_batch_size'] = 512
+        config_dict['epochs'] = 200
+        config_dict['n_layers'] = 5  # from model hyperparameter search
+        config_dict['embedding_size'] = 256
+    elif args.model_name == 'ItemKNN':
+        config_dict['epochs'] = 1
+        config_dict['k'] = 250
+        config_dict['shrink'] = 10  # from model hyperparameter search
+    elif args.model_name == 'MultiVAE':
+        config_dict['epochs'] = 200
+        config_dict['train_batch_size'] = 4096
+        config_dict['eval_batch_size'] = 4096
+        config_dict['hidden_dimension'] = 800  # from model hyperparameter search
+        config_dict['latent_dimension'] = 200
+        config_dict['dropout_prob'] = 0.7
+        config_dict['anneal_cap'] = 0.3
+        config_dict['total_anneal_steps'] = 200000
+
     config = Config(
         model=args.model_name,
         dataset=args.dataset_name,
         config_file_list=[f'{args.dataset_name}_config.yaml'],
-        config_dict={
-            'users_dec_perc_drop': args.users_dec_perc_drop,
-            'items_dec_perc_drop': args.items_dec_perc_drop,
-            'community_dropout_strength': args.community_dropout_strength,
-            'drop_only_power_nodes': args.drop_only_power_nodes,
-        }
+        config_dict=config_dict
     )
     config['device'] = device
 
-    config.variable_config_dict['patience'] = 5,
-    config.variable_config_dict['gamma'] = 0.5,
-    config.variable_config_dict['min_lr'] = 1e-5,
-    config.variable_config_dict['scheduler'] = 'plateau'
-    config.variable_config_dict['scheduler_metric'] = 'valid_score'
-
-    if args.model_name == 'LightGCN':
-        config.variable_config_dict['train_batch_size'] = 512
-        config.variable_config_dict['eval_batch_size'] = 512
-        config.variable_config_dict['epochs'] = 200
-        config.variable_config_dict['n_layers'] = 5  # from model hyperparameter search
-        config.variable_config_dict['embedding_size'] = 256,
-    elif args.model_name == 'ItemKNN':
-        config.variable_config_dict['epochs'] = 1,
-        config.variable_config_dict['k'] = 250,
-        config.variable_config_dict['shrink'] = 10,  # from model hyperparameter search
-    elif args.model_name == 'MultiVAE':
-        config.variable_config_dict['epochs'] = 200,
-        config.variable_config_dict['train_batch_size'] = 4096,
-        config.variable_config_dict['eval_batch_size'] = 4096,
-        config.variable_config_dict['hidden_dimension'] = 800,  # from model hyperparameter search
-        config.variable_config_dict['latent_dimension'] = 200,
-        config.variable_config_dict['dropout_prob'] = 0.7,
-        config.variable_config_dict['anneal_cap'] = 0.3,
-        config.variable_config_dict['total_anneal_steps'] = 200000,
-
     # Initialize seed and logging
-    init_seed(seed=seed, reproducibility=config['reproducibility'])
+    init_seed(seed=seed, reproducibility=True)
     init_logger(config)
     logger = getLogger()
     c_handler = logging.StreamHandler()
@@ -146,7 +149,6 @@ def initialize_wandb(args, config_params, config):
             "dropout_prob": config.variable_config_dict['dropout_prob'] if args.model_name == 'MultiVAE' else None,
             "anneal_cap": config.variable_config_dict['anneal_cap'] if args.model_name == 'MultiVAE' else None,
             "total_anneal_steps": config.variable_config_dict['total_anneal_steps'] if args.model_name == 'MultiVAE' else None,
-
         }
     )
 
@@ -300,15 +302,6 @@ def main():
     )
 
     get_biased_connectivity_data(config=config, adj_tens=torch.tensor(adj_np, device=device))
-
-    # user_biases, item_biases = get_community_bias(user_communities_each_item_dist=config.variable_config_dict['user_community_connectivity_matrix'],
-    #                                               item_communities_each_user_dist=config.variable_config_dict['item_community_connectivity_matrix'])
-    # plot_community_bias(user_biases=user_biases, item_biases=item_biases, save_path=f'images/', dataset_name=config.dataset)
-
-    # Optional: Uncomment for plots
-    # plot_degree_distributions(adj_tens=torch.tensor(adj_tens, device=device), num_bins=100, save_path=f'images/', dataset_name=args.dataset_name)
-    # plot_community_connectivity_distribution(connectivity_matrix=community_connectivity_matrix, top_n_communities=20, save_path=f'images/', dataset_name=args.dataset_name)
-    # plot_community_confidence(user_probs_path=f'', save_path=f'images/', dataset_name=args.dataset_name, top_n_communities=10)
 
     model = initialize_model(args.model_name, config, train_data)
 
