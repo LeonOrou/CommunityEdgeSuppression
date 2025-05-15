@@ -151,7 +151,7 @@ class PowerDropoutTrainer(Trainer):
                 )
 
                 ### added lr-scheduler step ###
-                self.lr_scheduler.step(valid_score)
+                # self.lr_scheduler.step(valid_score)
                 ###
 
                 if verbose:

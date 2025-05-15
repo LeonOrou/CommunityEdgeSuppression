@@ -27,10 +27,10 @@ def parse_arguments():
     parser.add_argument("--dataset_name", type=str, default='ml-100k')
     parser.add_argument("--users_top_percent", type=float, default=0.05)
     parser.add_argument("--items_top_percent", type=float, default=0.05)
-    parser.add_argument("--users_dec_perc_drop", type=float, default=0.05)
+    parser.add_argument("--users_dec_perc_drop", type=float, default=0.00)
     parser.add_argument("--items_dec_perc_drop", type=float, default=0.05)
-    parser.add_argument("--community_dropout_strength", type=float, default=0.8)
-    parser.add_argument("--drop_only_power_nodes", type=bool, default=True)
+    parser.add_argument("--community_dropout_strength", type=float, default=0.6)
+    parser.add_argument("--drop_only_power_nodes", type=bool, default=False)
     parser.add_argument("--use_dropout", type=bool, default=True)
 
     return parser.parse_args()
@@ -62,18 +62,17 @@ def setup_config(args, device, seed):
         'items_dec_perc_drop': args.items_dec_perc_drop,
         'community_dropout_strength': args.community_dropout_strength,
         'drop_only_power_nodes': args.drop_only_power_nodes,
-        'patience': 5,
+        'patience': 2,
         'gamma': 0.5,
         'min_lr': 1e-5,
         'scheduler': 'plateau',
-
         'reproducibility': True,
         'device': device
     }
 
     if args.model_name == 'LightGCN':
-        config_dict['train_batch_size'] = 512
-        config_dict['eval_batch_size'] = 512
+        config_dict['train_batch_size'] = 128
+        config_dict['eval_batch_size'] = 128
         config_dict['epochs'] = 200
         config_dict['n_layers'] = 5  # from model hyperparameter search
         config_dict['embedding_size'] = 256
@@ -138,8 +137,8 @@ def initialize_wandb(args, config_params, config):
             "TopK": config_params['topk'],
             "learning_rate": config_params['learning_rate'],
             "epochs": config.variable_config_dict['epochs'],
-            "train_batch_size": config.variable_config_dict['train_batch_size'],
-            "eval_batch_size": config.variable_config_dict['eval_batch_size'],
+            "train_batch_size": config.variable_config_dict['train_batch_size'] if args.model_name != 'ItemKNN' else None,
+            "eval_batch_size": config.variable_config_dict['eval_batch_size'] if args.model_name != 'ItemKNN' else None,
             "embedding_size": config.variable_config_dict['embedding_size'] if args.model_name == 'LightGCN' else None,
             "n_layers": config.variable_config_dict['n_layers'] if args.model_name == 'LightGCN' else None,
             "k": config.variable_config_dict['k'] if args.model_name == 'ItemKNN' else None,
@@ -193,18 +192,6 @@ def calculate_community_metrics(config, adj_tens, device):
      item_community_connectivity_matrix) = get_user_item_community_connectivity_matrices(adj_tens=adj_tens,
                                                                                       user_com_labels=config.variable_config_dict['user_com_labels'],
                                                                                       item_com_labels=config.variable_config_dict['item_com_labels'])
-
-    # Calculate average degree for each community
-    # config.variable_config_dict['com_avg_dec_degrees'] = torch.zeros(
-    #     torch.max(config.variable_config_dict['user_com_labels']) + 1,
-    #     device=device)
-
-    # for com_label in torch.unique(config.variable_config_dict['user_com_labels']):
-    #     nr_nodes_in_com = torch.count_nonzero(config.variable_config_dict['user_com_labels'] == com_label)
-    #     nr_edges_in_com = torch.sum(config.variable_config_dict['user_com_labels'][adj_tens[:, 0]] == com_label)
-        # decimal_avg_degree_com_label = nr_edges_in_com / nr_nodes_in_com / nr_nodes_in_com
-        # config.variable_config_dict['com_avg_dec_degrees'][com_label] = decimal_avg_degree_com_label
-
     return user_community_connectivity_matrix, item_community_connectivity_matrix
 
 

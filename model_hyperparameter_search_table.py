@@ -117,34 +117,7 @@ def get_hyperparameter_results():
 
         # Keep newest run for each unique parameter combination
         df = df.sort_values('created_at', ascending=False)
-        if len(param_cols) > 0:
-            print(f"Identifying unique {model_name} configurations based on: {', '.join(param_cols)}")
-
-            # Sort by timestamp first
-            df = df.sort_values('created_at', ascending=False)
-
-            try:
-                # Try to drop duplicates normally
-                df = df.drop_duplicates(subset=param_cols, keep='first')
-            except Exception as e:
-                print(f"Error dropping duplicates: {e}")
-                print("Using alternative approach to handle duplicates...")
-
-                # Alternative approach: manually identify unique configurations
-                unique_configs = {}
-                unique_indices = []
-
-                for idx, row in df.iterrows():
-                    # Create a tuple of parameter values as a unique key
-                    key_values = tuple(row[col] for col in param_cols)
-
-                    # Keep this row if we haven't seen this configuration before
-                    if key_values not in unique_configs:
-                        unique_configs[key_values] = True
-                        unique_indices.append(idx)
-
-                # Filter dataframe to keep only unique configurations
-                df = df.loc[unique_indices]
+        df = df.drop_duplicates(subset=param_cols, keep='first')
 
         # Sort by test NDCG in descending order
         df = df.sort_values('test_ndcg', ascending=False)
@@ -180,6 +153,8 @@ def display_results(results):
 
         # Save to CSV
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        # Create directory if it doesn't exist
+        os.makedirs("results", exist_ok=True)
         filename = f"results/{model_name}_results_{timestamp}.csv"
         df.to_csv(filename, index=False)
         print(f"Results saved to {filename}")
@@ -192,3 +167,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
