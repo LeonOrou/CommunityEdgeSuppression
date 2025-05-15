@@ -10,17 +10,15 @@ import os
 
 
 def get_community_labels(config, adj_np, algorithm='Leiden', save_path='dataset/ml-100k', get_probs=True, force_bipartite=True):
-    ### TODO: make it work with Louvain algorithm
-
     # read and return them if already computed locally
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    if f'user_labels_Leiden_matrix_mask.csv' in os.listdir(f'dataset/{config.dataset}'):
+    if f'user_labels_{algorithm}_matrix_mask.csv' in os.listdir(f'dataset/{config.dataset}'):
         return torch.tensor(
-            np.loadtxt(f'dataset/{config.dataset}/user_labels_Leiden_matrix.csv', delimiter=','),
+            np.loadtxt(f'dataset/{config.dataset}/user_labels_{algorithm}_matrix.csv', delimiter=','),
             dtype=torch.int64,
             device=device
         ), torch.tensor(
-            np.loadtxt(f'dataset/{config.dataset}/item_labels_Leiden_matrix.csv', delimiter=','),
+            np.loadtxt(f'dataset/{config.dataset}/item_labels_{algorithm}_matrix.csv', delimiter=','),
             dtype=torch.int64,
             device=device
         )
@@ -29,13 +27,9 @@ def get_community_labels(config, adj_np, algorithm='Leiden', save_path='dataset/
 
     if algorithm == 'Leiden':
         detect_obj = Leiden(return_aggregate=False, verbose=False)
-    elif algorithm == 'Louvain':
-        detect_obj = Louvain(return_aggregate=False, verbose=False)
 
     detect_obj.fit(adj_csr, force_bipartite=force_bipartite)
 
-    # TODO: get only labels from a user if the label probability is over 0.4, otherwise delete the user
-    # TODO: if multiple labels have a probability of over 0.4, add another row of the user with the other label
     user_probs = detect_obj.probs_row_.toarray()
     item_probs = detect_obj.probs_col_.toarray()
     # argsort the probabilities to get the highest probability label
