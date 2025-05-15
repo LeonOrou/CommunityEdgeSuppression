@@ -31,6 +31,7 @@ def parse_arguments():
     parser.add_argument("--items_dec_perc_drop", type=float, default=0.05)
     parser.add_argument("--community_dropout_strength", type=float, default=0.8)
     parser.add_argument("--drop_only_power_nodes", type=bool, default=True)
+    parser.add_argument("--use_dropout", type=bool, default=True)
     # TODO: check scientific evidence for parameter existence and values!
     return parser.parse_args()
 
@@ -40,10 +41,9 @@ def load_config_from_yaml(dataset_name):
     with open(f'{dataset_name}_config.yaml', 'r') as file:
         config_file = yaml.safe_load(file)
         return {
-            'batch_size': config_file['train_batch_size'],
             'rating_col_name': config_file['RATING_FIELD'],
             'topk': config_file['topk'],
-            'epochs': config_file['epochs']
+            'learning_rate': config_file['learning_rate'],
         }
 
 
@@ -70,6 +70,32 @@ def setup_config(args, device, seed):
     )
     config['device'] = device
 
+    config.variable_config_dict['patience'] = 5,
+    config.variable_config_dict['gamma'] = 0.5,
+    config.variable_config_dict['min_lr'] = 1e-5,
+    config.variable_config_dict['scheduler'] = 'plateau'
+    config.variable_config_dict['scheduler_metric'] = 'valid_score'
+
+    if args.model_name == 'LightGCN':
+        config.variable_config_dict['train_batch_size'] = 512
+        config.variable_config_dict['eval_batch_size'] = 512
+        config.variable_config_dict['epochs'] = 200
+        config.variable_config_dict['n_layers'] = 5  # from model hyperparameter search
+        config.variable_config_dict['embedding_size'] = 256,
+    elif args.model_name == 'ItemKNN':
+        config.variable_config_dict['epochs'] = 1,
+        config.variable_config_dict['k'] = 250,
+        config.variable_config_dict['shrink'] = 10,  # from model hyperparameter search
+    elif args.model_name == 'MultiVAE':
+        config.variable_config_dict['epochs'] = 200,
+        config.variable_config_dict['train_batch_size'] = 4096,
+        config.variable_config_dict['eval_batch_size'] = 4096,
+        config.variable_config_dict['hidden_dimension'] = 800,  # from model hyperparameter search
+        config.variable_config_dict['latent_dimension'] = 200,
+        config.variable_config_dict['dropout_prob'] = 0.7,
+        config.variable_config_dict['anneal_cap'] = 0.3,
+        config.variable_config_dict['total_anneal_steps'] = 200000,
+
     # Initialize seed and logging
     init_seed(seed=seed, reproducibility=config['reproducibility'])
     init_logger(config)
@@ -78,7 +104,7 @@ def setup_config(args, device, seed):
     c_handler.setLevel(logging.INFO)
     logger.addHandler(c_handler)
     logger.info(config)
-    
+
     return config, logger
 
 
@@ -90,14 +116,13 @@ def prepare_dataset(config):
     return data_preparation(config, dataset)  # outputs train_data, valid_data, test_data
 
 
-def initialize_wandb(args, config_params):
+def initialize_wandb(args, config_params, config):
     """Initialize Weights & Biases for experiment tracking."""
     wandb.login(key="d234bc98a4761bff39de0e5170df00094ac42269")
     return wandb.init(
         project="RecSys_PowerNodeEdgeDropout",
         name=f"{args.model_name}_{args.dataset_name}_users_top_{args.users_top_percent}_com_drop_strength_{args.community_dropout_strength}",
         config={
-            "epochs": config_params['epochs'],
             "dataset": args.dataset_name,
             "model": args.model_name,
             "users_top_percent": args.users_top_percent,
@@ -105,8 +130,23 @@ def initialize_wandb(args, config_params):
             "users_dec_perc_drop": args.users_dec_perc_drop,
             "items_dec_perc_drop": args.items_dec_perc_drop,
             "community_dropout_strength": args.community_dropout_strength,
-            "batch_size": config_params['batch_size'],
-            "TopK": config_params['topk']
+            "use_dropout": args.use_dropout,
+            "drop_only_power_nodes": args.drop_only_power_nodes,
+            "TopK": config_params['topk'],
+            "learning_rate": config_params['learning_rate'],
+            "epochs": config.variable_config_dict['epochs'],
+            "train_batch_size": config.variable_config_dict['train_batch_size'],
+            "eval_batch_size": config.variable_config_dict['eval_batch_size'],
+            "embedding_size": config.variable_config_dict['embedding_size'] if args.model_name == 'LightGCN' else None,
+            "n_layers": config.variable_config_dict['n_layers'] if args.model_name == 'LightGCN' else None,
+            "k": config.variable_config_dict['k'] if args.model_name == 'ItemKNN' else None,
+            "shrink": config.variable_config_dict['shrink'] if args.model_name == 'ItemKNN' else None,
+            "hidden_dimension": config.variable_config_dict['hidden_dimension'] if args.model_name == 'MultiVAE' else None,
+            "latent_dimension": config.variable_config_dict['latent_dimension'] if args.model_name == 'MultiVAE' else None,
+            "dropout_prob": config.variable_config_dict['dropout_prob'] if args.model_name == 'MultiVAE' else None,
+            "anneal_cap": config.variable_config_dict['anneal_cap'] if args.model_name == 'MultiVAE' else None,
+            "total_anneal_steps": config.variable_config_dict['total_anneal_steps'] if args.model_name == 'MultiVAE' else None,
+
         }
     )
 
@@ -144,26 +184,25 @@ def get_community_data(config, adj_np, device, users_top_percent, items_top_perc
         save_path=f'dataset/{config.dataset}')
 
 
-def calculate_community_metrics(config, adj_np, device):
+def calculate_community_metrics(config, adj_tens, device):
     """Calculate community connectivity matrix and average degrees."""
-    adj_tens = torch.tensor(adj_np, device=device)
 
     (user_community_connectivity_matrix,
      item_community_connectivity_matrix) = get_user_item_community_connectivity_matrices(adj_tens=adj_tens,
                                                                                       user_com_labels=config.variable_config_dict['user_com_labels'],
                                                                                       item_com_labels=config.variable_config_dict['item_com_labels'])
-    
+
     # Calculate average degree for each community
     # config.variable_config_dict['com_avg_dec_degrees'] = torch.zeros(
     #     torch.max(config.variable_config_dict['user_com_labels']) + 1,
     #     device=device)
-    
+
     # for com_label in torch.unique(config.variable_config_dict['user_com_labels']):
     #     nr_nodes_in_com = torch.count_nonzero(config.variable_config_dict['user_com_labels'] == com_label)
     #     nr_edges_in_com = torch.sum(config.variable_config_dict['user_com_labels'][adj_tens[:, 0]] == com_label)
         # decimal_avg_degree_com_label = nr_edges_in_com / nr_nodes_in_com / nr_nodes_in_com
         # config.variable_config_dict['com_avg_dec_degrees'][com_label] = decimal_avg_degree_com_label
-    
+
     return user_community_connectivity_matrix, item_community_connectivity_matrix
 
 
@@ -177,7 +216,7 @@ def initialize_model(model_name, config, train_data):
         model = MultiVAE(config, train_data.dataset).to(config['device'])
     else:
         raise ValueError(f"Model {model_name} not supported")
-    
+
     logger = getLogger()
     logger.info(model)
     return model
@@ -189,47 +228,24 @@ def train_and_evaluate(config, model, train_data, valid_data, test_data, use_dro
         trainer = PowerDropoutTrainer(config, model)
     else:
         trainer = Trainer(config, model)
-    
+
     best_valid_score, best_valid_result = trainer.fit(train_data, test_data, saved=True)
-    
+
     wandb.log({"best_valid_score": best_valid_score, "best_valid_result": best_valid_result})
     logger = getLogger()
     logger.info(f"Best valid score: {best_valid_score}, best valid result: {best_valid_result}")
-    
+
     # Evaluate on validation data
     eval_result = trainer.evaluate(valid_data)
-    
+
     return best_valid_score, best_valid_result, trainer
 
 
-def main():
-    # Set seed for reproducibility
-    seed = 42
-    set_seed(seed)
-
-    args = parse_arguments()
-
-    config_params = load_config_from_yaml(args.dataset_name)
-
-    device = setup_device(try_gpu=True)
-
-    config, logger = setup_config(args, device, seed)
-
-    train_data, valid_data, test_data = prepare_dataset(config)
-
-    wandb_run = initialize_wandb(args, config_params)
-
-    adj_np = preprocess_train_data(train_data, device)
-
-    get_community_data(
-        config=config,
-        adj_np=adj_np,
-        device=device,
-        users_top_percent=args.users_top_percent,
-        items_top_percent=args.items_top_percent
-    )
-
-    user_community_connectivity_matrix, item_community_connectivity_matrix = calculate_community_metrics(config, adj_np, device)
+def get_biased_connectivity_data(config, adj_tens):
+    device = config['device']
+    user_community_connectivity_matrix, item_community_connectivity_matrix = calculate_community_metrics(config=config,
+                                                                                                         adj_tens=adj_tens,
+                                                                                                         device=device)
     # user/item id 0 is never used / nan as labels start at 1 and we use them for indexing
     # normalize as distribution along the rows
     user_community_connectivity_matrix = user_community_connectivity_matrix / torch.sum(user_community_connectivity_matrix, dim=1, keepdim=True)
@@ -248,12 +264,42 @@ def main():
 
     (config.variable_config_dict['biased_user_edges_mask'],
      config.variable_config_dict['biased_item_edges_mask']) = get_biased_edges_mask(
-        adj_tens=torch.tensor(adj_np, device=device),
+        adj_tens=adj_tens,
         user_com_labels_mask=torch.tensor(user_labels_Leiden_matrix_mask, device=device),
         item_com_labels_mask=torch.tensor(item_labels_Leiden_matrix_mask, device=device),
         user_community_connectivity_matrix_distribution=user_community_connectivity_matrix,
         item_community_connectivity_matrix_distribution=item_community_connectivity_matrix,
         bias_threshold=0.4)
+
+
+def main():
+    # Set seed for reproducibility
+    seed = 42
+    set_seed(seed)
+
+    args = parse_arguments()
+
+    config_params = load_config_from_yaml(args.dataset_name)
+
+    device = setup_device(try_gpu=True)
+
+    config, logger = setup_config(args, device, seed)
+
+    train_data, valid_data, test_data = prepare_dataset(config)
+
+    wandb_run = initialize_wandb(args, config_params, config)
+
+    adj_np = preprocess_train_data(train_data, device)
+
+    get_community_data(
+        config=config,
+        adj_np=adj_np,
+        device=device,
+        users_top_percent=args.users_top_percent,
+        items_top_percent=args.items_top_percent
+    )
+
+    get_biased_connectivity_data(config=config, adj_tens=torch.tensor(adj_np, device=device))
 
     # user_biases, item_biases = get_community_bias(user_communities_each_item_dist=config.variable_config_dict['user_community_connectivity_matrix'],
     #                                               item_communities_each_user_dist=config.variable_config_dict['item_community_connectivity_matrix'])
@@ -272,7 +318,7 @@ def main():
         train_data=train_data,
         valid_data=valid_data,
         test_data=test_data,
-        use_dropout=True  # set false here to get default trainer object
+        use_dropout=args.use_dropout
     )
 
     rng_id = np.random.randint(0, 100000)

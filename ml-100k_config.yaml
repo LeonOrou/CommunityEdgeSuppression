@@ -11,8 +11,8 @@ val_interval:
     rating: "[4,inf)"
 #threshold:
 #    rating: 4.0
-#binarize: True  # do we really want just interaction matrix?
-remove_negative_interactions: True
+binarize: True  # do we really want just interaction matrix?
+#remove_negative_interactions: True
 #filter_condition: rating > 4.0
 
 # environment settings
@@ -20,10 +20,11 @@ use_gpu: True
 gpu_id: 0
 
 # Training and evaluation config
-epochs: 200  # check paper
-train_batch_size: 512  # check paper
-eval_batch_size: 512  # TODO: changing this or sample num or something else for faster evaluation, it somehow is currently the number of users in the test set
+#epochs: 100  # check paper  # change for each model: multiVAE/LightGCN up to 300, ItemKNN is 1 or 2
+#train_batch_size: 512  # check paper  # change for each model multiVAE 4096, LightGCN 512, ItemKNN 1
+#eval_batch_size: 512  # TODO: changing this or sample num or something else for faster evaluation, it somehow is currently the number of users in the test set
 eval_step: 2  # Only evaluate every X-th epochs
+learning_rate : 0.001
 
 train_neg_sample_args:
     distribution: uniform
@@ -31,6 +32,12 @@ train_neg_sample_args:
     alpha: 1.0
     dynamic: False
     candidate_num: 0
+#eval_args:  # 5-fold cross-validation with a six-th fold being the test set
+#    group_by: user
+#    order: RO
+#    split: { 'KF': 6 }  # 6 folds total
+#    mode: full
+#    fold_info: [ 0, 1, 2, 3, 4, -1 ]  # Use folds 0-4 for cross-validation, fold 5 as test
 eval_args:
     group_by: user
     order: RO
