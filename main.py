@@ -116,15 +116,6 @@ def setup_config(args, device, seed):
     return config, logger
 
 
-def prepare_dataset(config):
-    """Create and prepare dataset."""
-    dataset = create_dataset(config)
-    logger = getLogger()
-    logger.info(dataset)
-    # TODO: keep the create_dataset, but adapt the config to make Cross Validation work
-    return data_preparation(config, dataset)  # outputs train_data, valid_data, test_data
-
-
 def initialize_wandb(args, config_params, config):
     """Initialize Weights & Biases for experiment tracking."""
     wandb.login(key="d234bc98a4761bff39de0e5170df00094ac42269")
@@ -293,40 +284,60 @@ def create_k_folded_local_dataset(k=6, dataset='ml-100k'):
         np.savetxt(f'dataset/{dataset}/{dataset}_fold_{i}.csv', fold, fmt='%d')
 
 
-def load_folded_datasets(config, dataset_name, k, k_th_fold):
-    # TODO: re probably dot need this as we use create_dataset and adapt prepare_dataset for cross validation
-    '''
-    :param dataset_name:
-    :param k_th_fold: this is the valid dataset
-    '''
-    # train are fold 0-k_th_fold-1 excluding k_th_fold
-    # valid is fold k_th_fold
-    # test is fold k
-    train_indices = [i for i in range(k-1) if i != k_th_fold]
-    train_data = []
-    for i in train_indices:
-        train_data.append(np.loadtxt(f'dataset/{dataset_name}/{dataset_name}_fold_{i}.csv'))
-    valid_data = np.loadtxt(f'dataset/{dataset_name}/{dataset_name}_fold_{k_th_fold}.csv')
-    test_data = np.loadtxt(f'dataset/{dataset_name}/{dataset_name}_fold_{k}.csv')
-
-    inter_feat_columns = ['user_id', 'item_id', 'rating']
-
-    # make Train/Valid/TestDataLoader objects
-    # TODO: adapt the config to make Cross Validation work
-    # TODO: check what the dataset object is and how I can create it
-
-    return train_data, valid_data, test_data
-
-
 def get_datasets(config, args):
-    # train_data, valid_data, test_data = prepare_dataset(config)
-    # TODO: instead of prepare_dataset, load k-folds from local splits
-
+    """Prepare dataset using a specific fold for validation."""
     if not os.path.exists(f'dataset/{args.dataset_name}/{args.dataset_name}_fold_0.csv'):
         create_k_folded_local_dataset(k=6, dataset=args.dataset_name)
 
-    return load_folded_datasets(config=config, dataset_name=args.dataset_name,
-                                                             k_th_fold=args.k_th_fold)
+    # Load the original dataset
+    original_dataset = create_dataset(config)
+    logger = getLogger()
+    logger.info(original_dataset)
+
+    # Load fold data
+    train_fold_indices = []
+    for i in range(6):  # Assuming 6 folds
+        if i != args.k_th_fold and i != 5:  # Fold 5 reserved for testing
+            fold_data = np.loadtxt(f'dataset/{args.dataset_name}/{args.dataset_name}_fold_{i}.csv')
+            train_fold_indices.extend(fold_data.tolist())
+
+    valid_fold = np.loadtxt(f'dataset/{args.dataset_name}/{args.dataset_name}_fold_{args.k_th_fold}.csv')
+    test_fold = np.loadtxt(
+        f'dataset/{args.dataset_name}/{args.dataset_name}_fold_5.csv')  # Always use fold 5 for testing
+
+    # Convert to DataFrames
+    train_df = pd.DataFrame(train_fold_indices, columns=['user_id', 'item_id', 'rating'])
+    valid_df = pd.DataFrame(valid_fold, columns=['user_id', 'item_id', 'rating'])
+    test_df = pd.DataFrame(test_fold, columns=['user_id', 'item_id', 'rating'])
+
+    # Create custom dataset with the fold data
+    train_dataset = original_dataset.copy(new_inter_feat=Interaction(train_df))
+
+    # Create data loaders
+    train_data = TrainDataLoader(
+        config=config,
+        dataset=train_dataset,
+        sampler=RepeatableSampler(phases='train', dataset=train_dataset),
+        shuffle=config['shuffle']
+    )
+
+    valid_dataset = original_dataset.copy(new_inter_feat=Interaction(valid_df))
+    valid_data = TrainDataLoader(
+        config=config,
+        dataset=valid_dataset,
+        sampler=RepeatableSampler(phases='valid', dataset=valid_dataset),
+        shuffle=False
+    )
+
+    test_dataset = original_dataset.copy(new_inter_feat=Interaction(test_df))
+    test_data = TrainDataLoader(
+        config=config,
+        dataset=test_dataset,
+        sampler=RepeatableSampler(phases='test', dataset=test_dataset),
+        shuffle=False
+    )
+
+    return train_data, valid_data, test_data
 
 
 def main():
@@ -342,9 +353,10 @@ def main():
 
     config, logger = setup_config(args, device, seed)
 
-    train_data, valid_data, test_data = get_datasets(config=config, args=args, dataset_name=args.dataset_name, k_th_fold=args.k_th_fold)
+    train_data, valid_data, test_data = get_datasets(config=config, args=args)
 
     wandb_run = initialize_wandb(args, config_params, config)
+    wandb.config.update({"fold": args.k_th_fold})
 
     adj_np = get_adj_from_object(train_data, device)
 
