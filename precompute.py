@@ -40,7 +40,7 @@ def get_community_labels(config, adj_np, algorithm='Leiden', save_path='dataset/
     user_probs_argsorted = np.argsort(user_probs, axis=1)[:, ::-1]
     item_probs_argsorted = np.argsort(item_probs, axis=1)[:, ::-1]
 
-    # the detect_obj.labels doesnt always assign the most probable label for some reason so we have to do
+    # the detect_obj.labels doesn't always assign the most probable label for some reason so we have to do
     user_labels = user_probs_argsorted[:, 0]
     item_labels = item_probs_argsorted[:, 0]
 
@@ -269,11 +269,11 @@ def get_user_item_community_connectivity_matrices(adj_tens, user_com_labels, ite
     user_communities_each_item = torch.zeros((nr_items, nr_user_communities), device=device)
 
     # Get number of columns in community label matrices
-    user_comm_cols = user_com_labels.size(1)
-    item_comm_cols = item_com_labels.size(1)
+    user_com_cols = user_com_labels.size(1)
+    item_com_cols = item_com_labels.size(1)
 
     # Process each user community column
-    for col in range(user_comm_cols):
+    for col in range(user_com_cols):
         user_communities = user_com_labels[users, col]
         valid_mask = user_communities >= 0  # Skip -1 values (no community assignment)
 
@@ -300,7 +300,7 @@ def get_user_item_community_connectivity_matrices(adj_tens, user_com_labels, ite
         user_communities_each_item += temp_tensor
 
     # Process each item community column
-    for col in range(item_comm_cols):
+    for col in range(item_com_cols):
         item_communities = item_com_labels[items, col]
         valid_mask = item_communities >= 0  # Skip -1 values (no community assignment)
 
@@ -333,7 +333,7 @@ def get_biased_edges_mask(adj_tens, user_com_labels_mask, item_com_labels_mask,
                           user_community_connectivity_matrix_distribution,
                           item_community_connectivity_matrix_distribution,
                           bias_threshold=0.4):
-    # TODO: this can for sure be done more efficiently
+
     # make two masks for the user and item community connectivity matrices to get values above threshold
     user_com_connectivity_mask = user_community_connectivity_matrix_distribution > bias_threshold
     item_com_connectivity_mask = item_community_connectivity_matrix_distribution > bias_threshold
@@ -360,6 +360,7 @@ def get_biased_edges_mask(adj_tens, user_com_labels_mask, item_com_labels_mask,
     user_com_mask_nonzero_idx = user_com_mask.nonzero(as_tuple=True)[0]
     item_com_mask_nonzero_idx = item_com_mask.nonzero(as_tuple=True)[0]
 
+    # get indices where rows of biased_item_nodes_user_com_con and biased_user_nodes_communities are identical
     true_user_indices = torch.all(biased_user_nodes_item_com_con == biased_item_nodes_communities, dim=1)
     true_item_indices = torch.all(biased_item_nodes_user_com_con == biased_user_nodes_communities, dim=1)
 

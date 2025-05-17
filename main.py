@@ -35,7 +35,7 @@ def parse_arguments():
     parser.add_argument("--users_dec_perc_drop", type=float, default=0.05)
     parser.add_argument("--items_dec_perc_drop", type=float, default=0.05)
     parser.add_argument("--community_dropout_strength", type=float, default=0.6)
-    parser.add_argument("--drop_only_power_nodes", type=bool, default=False)
+    parser.add_argument("--drop_only_power_nodes", type=bool, default=True)
     parser.add_argument("--use_dropout", type=bool, default=True)
     parser.add_argument("--k_th_fold", type=int, default=0)
 
@@ -78,8 +78,8 @@ def setup_config(args, device, seed):
     }
 
     if args.model_name == 'LightGCN':
-        config_dict['train_batch_size'] = 128
-        config_dict['eval_batch_size'] = 128
+        config_dict['train_batch_size'] = 256
+        config_dict['eval_batch_size'] = 256
         config_dict['epochs'] = 200
         config_dict['n_layers'] = 5  # from model hyperparameter search
         config_dict['embedding_size'] = 256
@@ -133,6 +133,7 @@ def initialize_wandb(args, config_params, config):
             "community_dropout_strength": args.community_dropout_strength,
             "use_dropout": args.use_dropout,
             "drop_only_power_nodes": args.drop_only_power_nodes,
+            "k_th_fold": args.k_th_fold,
             "TopK": config_params['topk'],
             "learning_rate": config_params['learning_rate'],
             "epochs": config.variable_config_dict['epochs'],
@@ -140,7 +141,7 @@ def initialize_wandb(args, config_params, config):
             "eval_batch_size": config.variable_config_dict['eval_batch_size'] if args.model_name != 'ItemKNN' else None,
             "embedding_size": config.variable_config_dict['embedding_size'] if args.model_name == 'LightGCN' else None,
             "n_layers": config.variable_config_dict['n_layers'] if args.model_name == 'LightGCN' else None,
-            "k": config.variable_config_dict['k'] if args.model_name == 'ItemKNN' else None,
+            "k_ItemKNN": config.variable_config_dict['k'] if args.model_name == 'ItemKNN' else None,
             "shrink": config.variable_config_dict['shrink'] if args.model_name == 'ItemKNN' else None,
             "hidden_dimension": config.variable_config_dict['hidden_dimension'] if args.model_name == 'MultiVAE' else None,
             "latent_dimension": config.variable_config_dict['latent_dimension'] if args.model_name == 'MultiVAE' else None,
@@ -154,7 +155,7 @@ def initialize_wandb(args, config_params, config):
 def get_adj_from_object(data_loader_object, device):
     """Preprocess training data to adjacency matrix format."""
     data_coo = copy.deepcopy(data_loader_object.dataset).inter_matrix()
-    indices = torch.tensor((data_coo.row, data_coo.col), dtype=torch.int32, device=device).T
+    indices = torch.tensor((np.concatenate((data_coo.row, data_coo.col), axis=1)), dtype=torch.int32, device=device).T
     values = torch.unsqueeze(torch.tensor(data_coo.data, dtype=torch.int32, device=device), dim=0).T
     adj_np = np.array(torch.cat((indices, values), dim=1).cpu(), dtype=np.int64)
     return adj_np
@@ -347,7 +348,7 @@ def get_datasets(config, args):
 def get_subset_masks(config, k_th_fold):
     """Get subset masks for community data."""
     dataset_len = config.variable_config_dict['dataset_len']
-    fold_size = dataset_len / 6  # has to be int!
+    fold_size = dataset_len / 6  # has to be int, calculated in create_k_folded_local_dataset!
     start = k_th_fold * fold_size
     end = (k_th_fold + 1) * fold_size if k_th_fold != 5 else dataset_len
 
@@ -361,6 +362,9 @@ def get_subset_masks(config, k_th_fold):
     config.variable_config_dict['train_mask'] = train_mask
     config.variable_config_dict['valid_mask'] = valid_mask
     config.variable_config_dict['test_mask'] = test_mask
+
+
+
 
 
 def main():
@@ -379,12 +383,12 @@ def main():
     train_data, valid_data, test_data = get_datasets(config=config, args=args)
 
     wandb_run = initialize_wandb(args, config_params, config)
-    wandb.config.update({"fold": args.k_th_fold})
 
     adj_np_train = get_adj_from_object(train_data, device)
     adj_np_valid = get_adj_from_object(valid_data, device)
     adj_np_test = get_adj_from_object(test_data, device)
-    adj_np = np.concatenate((adj_np_train, adj_np_valid, adj_np_test), axis=0)
+    fold_size = config.variable_config_dict['dataset_len'] // 6
+    adj_np = np.concatenate((adj_np_train[:fold_size * config.variable_config_dict['k_th_fold']], adj_np_valid, adj_np_train[fold_size * (config.variable_config_dict['k_th_fold'] + 1):], adj_np_test), axis=0)
 
     # TODO: get community data from whole dataset for big runs
     # TODO: mask out the community data for the subsets
@@ -409,6 +413,13 @@ def main():
         test_data=test_data,
         use_dropout=args.use_dropout
     )
+
+    # load the folds results from wandb (last 5 runs) including all eval scores and get averages from all folds
+    if args.k_th_fold == 5:
+        last_5_runs = wandb.Api().runs(path="RecSys_PowerNodeEdgeDropout/RecSys_PowerNodeEdgeDropout", order_by="-created_at", per_page=5)
+        all_runs = []
+
+
 
     rng_id = np.random.randint(0, 100000)
     wandb.save(f"{args.model_name}_{args.dataset_name}_ID{rng_id}.h5")
