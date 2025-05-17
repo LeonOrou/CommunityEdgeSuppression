@@ -73,7 +73,8 @@ def setup_config(args, device, seed):
         'min_lr': 1e-5,
         'scheduler': 'plateau',
         'reproducibility': True,
-        'device': device
+        'device': device,
+        'k_th_fold': args.k_th_fold,
     }
 
     if args.model_name == 'LightGCN':
@@ -165,6 +166,7 @@ def get_community_data(config, adj_np, device, users_top_percent, items_top_perc
     if not os.path.exists(f'dataset/{config.dataset}'):
         os.makedirs(f'dataset/{config.dataset}')
 
+    # TODO: all community data has to be from whole dataset and masked for the subsets
     (config.variable_config_dict['user_com_labels'],
      config.variable_config_dict['item_com_labels']) = get_community_labels(
         config=config,
@@ -295,18 +297,18 @@ def get_datasets(config, args):
     logger.info(original_dataset)
 
     # Load fold data
-    train_fold_indices = []
+    train_folds = []
     for i in range(6):  # Assuming 6 folds
         if i != args.k_th_fold and i != 5:  # Fold 5 reserved for testing
             fold_data = np.loadtxt(f'dataset/{args.dataset_name}/{args.dataset_name}_fold_{i}.csv')
-            train_fold_indices.extend(fold_data.tolist())
+            train_folds.extend(fold_data.tolist())
 
     valid_fold = np.loadtxt(f'dataset/{args.dataset_name}/{args.dataset_name}_fold_{args.k_th_fold}.csv')
     test_fold = np.loadtxt(
         f'dataset/{args.dataset_name}/{args.dataset_name}_fold_5.csv')  # Always use fold 5 for testing
 
     # Convert to DataFrames
-    train_df = pd.DataFrame(train_fold_indices, columns=['user_id', 'item_id', 'rating'])
+    train_df = pd.DataFrame(train_folds, columns=['user_id', 'item_id', 'rating'])
     valid_df = pd.DataFrame(valid_fold, columns=['user_id', 'item_id', 'rating'])
     test_df = pd.DataFrame(test_fold, columns=['user_id', 'item_id', 'rating'])
 
@@ -337,7 +339,28 @@ def get_datasets(config, args):
         shuffle=False
     )
 
+    config.variable_config_dict['dataset_len'] = len(train_folds) + len(valid_fold) + len(test_fold)
+
     return train_data, valid_data, test_data
+
+
+def get_subset_masks(config, k_th_fold):
+    """Get subset masks for community data."""
+    dataset_len = config.variable_config_dict['dataset_len']
+    fold_size = dataset_len / 6  # has to be int!
+    start = k_th_fold * fold_size
+    end = (k_th_fold + 1) * fold_size if k_th_fold != 5 else dataset_len
+
+    valid_mask = np.zeros(dataset_len, dtype=bool)
+    valid_mask[start:end] = True
+    test_mask = np.zeros(dataset_len, dtype=bool)
+    test_mask[fold_size * 5:] = True
+    train_mask = np.zeros(dataset_len, dtype=bool)
+    train_mask[~valid_mask & ~test_mask] = True
+
+    config.variable_config_dict['train_mask'] = train_mask
+    config.variable_config_dict['valid_mask'] = valid_mask
+    config.variable_config_dict['test_mask'] = test_mask
 
 
 def main():
@@ -358,10 +381,14 @@ def main():
     wandb_run = initialize_wandb(args, config_params, config)
     wandb.config.update({"fold": args.k_th_fold})
 
-    adj_np = get_adj_from_object(train_data, device)
+    adj_np_train = get_adj_from_object(train_data, device)
+    adj_np_valid = get_adj_from_object(valid_data, device)
+    adj_np_test = get_adj_from_object(test_data, device)
+    adj_np = np.concatenate((adj_np_train, adj_np_valid, adj_np_test), axis=0)
 
     # TODO: get community data from whole dataset for big runs
-    # TODO: mask out the community data for the test set
+    # TODO: mask out the community data for the subsets
+    # TODO: get mask from k_th_fold
     get_community_data(
         config=config,
         adj_np=adj_np,
