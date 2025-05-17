@@ -63,8 +63,8 @@ class PowerDropoutTrainer(Trainer):
             training_start_time = time()
 
             ### power_node_edge_dropout ###
-            # saving the setting from train_data TrainDataLoader for later use
-            # train_data_old = copy.deepcopy(train_data)
+            # saving the setting from data_loader_object TrainDataLoader for later use
+            # train_data_old = copy.deepcopy(data_loader_object)
 
             train_data_coo = copy.deepcopy(train_data.dataset).inter_matrix()
             # combine row and col into torch.tensor of shape (n, 2) converting the data to numpy arrays and concatenating them
@@ -85,12 +85,12 @@ class PowerDropoutTrainer(Trainer):
 
             cpu_data = new_inter_feat.cpu().numpy()
             interaction_df = pd.DataFrame(cpu_data, columns=train_data.dataset.inter_feat.columns)
-            # adding also all parameters to train_data_epoch that the original train_data had
+            # adding also all parameters to train_data_epoch that the original data_loader_object had
             # make proper sampler and generator for the new data
             train_data_new = TrainDataLoader(config=self.config,
                    dataset=train_data.dataset.copy(new_inter_feat=Interaction(interaction_df)),
                    sampler=RepeatableSampler(phases='train',
-                   dataset=train_data.dataset.copy(new_inter_feat=Interaction(interaction_df))),
+                                             dataset=train_data.dataset.copy(new_inter_feat=Interaction(interaction_df))),
                    shuffle=self.config['shuffle'])
 
             del cpu_data, interaction_df

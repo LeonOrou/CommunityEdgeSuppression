@@ -1,3 +1,7 @@
+from recbole.data.dataloader import TrainDataLoader
+from recbole.data.interaction import Interaction
+from recbole.sampler import RepeatableSampler
+
 from utils_functions import set_seed, plot_community_confidence, plot_community_connectivity_distribution, plot_degree_distributions
 from precompute import get_community_connectivity_matrix, get_community_labels, get_power_users_items, \
     get_biased_edges_mask, get_user_item_community_connectivity_matrices
@@ -17,6 +21,7 @@ import copy
 from PowerDropoutTrainer import PowerDropoutTrainer
 from recbole.trainer import Trainer
 import os
+import pandas as pd
 
 
 def parse_arguments():
@@ -27,11 +32,12 @@ def parse_arguments():
     parser.add_argument("--dataset_name", type=str, default='ml-100k')
     parser.add_argument("--users_top_percent", type=float, default=0.05)
     parser.add_argument("--items_top_percent", type=float, default=0.05)
-    parser.add_argument("--users_dec_perc_drop", type=float, default=0.00)
+    parser.add_argument("--users_dec_perc_drop", type=float, default=0.05)
     parser.add_argument("--items_dec_perc_drop", type=float, default=0.05)
     parser.add_argument("--community_dropout_strength", type=float, default=0.6)
     parser.add_argument("--drop_only_power_nodes", type=bool, default=False)
     parser.add_argument("--use_dropout", type=bool, default=True)
+    parser.add_argument("--k_th_fold", type=int, default=0)
 
     return parser.parse_args()
 
@@ -115,6 +121,7 @@ def prepare_dataset(config):
     dataset = create_dataset(config)
     logger = getLogger()
     logger.info(dataset)
+    # TODO: keep the create_dataset, but adapt the config to make Cross Validation work
     return data_preparation(config, dataset)  # outputs train_data, valid_data, test_data
 
 
@@ -152,11 +159,11 @@ def initialize_wandb(args, config_params, config):
     )
 
 
-def preprocess_train_data(train_data, device):
+def get_adj_from_object(data_loader_object, device):
     """Preprocess training data to adjacency matrix format."""
-    train_data_coo = copy.deepcopy(train_data.dataset).inter_matrix()
-    indices = torch.tensor((train_data_coo.row, train_data_coo.col), dtype=torch.int32, device=device).T
-    values = torch.unsqueeze(torch.tensor(train_data_coo.data, dtype=torch.int32, device=device), dim=0).T
+    data_coo = copy.deepcopy(data_loader_object.dataset).inter_matrix()
+    indices = torch.tensor((data_coo.row, data_coo.col), dtype=torch.int32, device=device).T
+    values = torch.unsqueeze(torch.tensor(data_coo.data, dtype=torch.int32, device=device), dim=0).T
     adj_np = np.array(torch.cat((indices, values), dim=1).cpu(), dtype=np.int64)
     return adj_np
 
@@ -261,6 +268,67 @@ def get_biased_connectivity_data(config, adj_tens):
         bias_threshold=0.4)
 
 
+def create_k_folded_local_dataset(k=6, dataset='ml-100k'):
+    interaction = np.loadtxt(f'dataset/{dataset}/{dataset}.inter', delimiter=' ', skiprows=1)
+    interaction = interaction[:, :3]  # get only user_id, item_id, rating columns
+    # if not all are 1, i.e. not processed yet
+    if np.all(interaction[:, 2] != 1):
+        # if all are 1, we need to binarize the ratings
+        interaction = interaction[interaction[:, 2] >= 4]  # get only ratings with 4 and above
+        interaction[:, 2] = 1  # binarize the ratings
+        # get only nodes with a degree of at least 10
+        user_degrees = np.bincount(interaction[:, 0].astype(int))
+        item_degrees = np.bincount(interaction[:, 1].astype(int))
+        valid_users = np.where(user_degrees >= 10)[0]
+        valid_items = np.where(item_degrees >= 10)[0]
+        interaction = interaction[np.isin(interaction[:, 0], valid_users) & np.isin(interaction[:, 1], valid_items)]
+
+        np.random.shuffle(interaction)
+    # split into k folds
+    fold_size = len(interaction) // k
+    for i in range(k):
+        start = i * fold_size
+        end = (i + 1) * fold_size if i != k - 1 else len(interaction)
+        fold = interaction[start:end]
+        np.savetxt(f'dataset/{dataset}/{dataset}_fold_{i}.csv', fold, fmt='%d')
+
+
+def load_folded_datasets(config, dataset_name, k, k_th_fold):
+    # TODO: re probably dot need this as we use create_dataset and adapt prepare_dataset for cross validation
+    '''
+    :param dataset_name:
+    :param k_th_fold: this is the valid dataset
+    '''
+    # train are fold 0-k_th_fold-1 excluding k_th_fold
+    # valid is fold k_th_fold
+    # test is fold k
+    train_indices = [i for i in range(k-1) if i != k_th_fold]
+    train_data = []
+    for i in train_indices:
+        train_data.append(np.loadtxt(f'dataset/{dataset_name}/{dataset_name}_fold_{i}.csv'))
+    valid_data = np.loadtxt(f'dataset/{dataset_name}/{dataset_name}_fold_{k_th_fold}.csv')
+    test_data = np.loadtxt(f'dataset/{dataset_name}/{dataset_name}_fold_{k}.csv')
+
+    inter_feat_columns = ['user_id', 'item_id', 'rating']
+
+    # make Train/Valid/TestDataLoader objects
+    # TODO: adapt the config to make Cross Validation work
+    # TODO: check what the dataset object is and how I can create it
+
+    return train_data, valid_data, test_data
+
+
+def get_datasets(config, args):
+    # train_data, valid_data, test_data = prepare_dataset(config)
+    # TODO: instead of prepare_dataset, load k-folds from local splits
+
+    if not os.path.exists(f'dataset/{args.dataset_name}/{args.dataset_name}_fold_0.csv'):
+        create_k_folded_local_dataset(k=6, dataset=args.dataset_name)
+
+    return load_folded_datasets(config=config, dataset_name=args.dataset_name,
+                                                             k_th_fold=args.k_th_fold)
+
+
 def main():
     # Set seed for reproducibility
     seed = 42
@@ -274,12 +342,14 @@ def main():
 
     config, logger = setup_config(args, device, seed)
 
-    train_data, valid_data, test_data = prepare_dataset(config)
+    train_data, valid_data, test_data = get_datasets(config=config, args=args, dataset_name=args.dataset_name, k_th_fold=args.k_th_fold)
 
     wandb_run = initialize_wandb(args, config_params, config)
 
-    adj_np = preprocess_train_data(train_data, device)
+    adj_np = get_adj_from_object(train_data, device)
 
+    # TODO: get community data from whole dataset for big runs
+    # TODO: mask out the community data for the test set
     get_community_data(
         config=config,
         adj_np=adj_np,

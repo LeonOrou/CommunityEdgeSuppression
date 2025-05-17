@@ -35,14 +35,14 @@ train_neg_sample_args:
 #eval_args:  # 5-fold cross-validation with a six-th fold being the test set
 #    group_by: user
 #    order: RO
-#    split: { 'KF': 6 }  # 6 folds total
+#    split: { 'Kfold': 5 }
 #    mode: full
 #    fold_info: [ 0, 1, 2, 3, 4, -1 ]  # Use folds 0-4 for cross-validation, fold 5 as test
-eval_args:
-    group_by: user
-    order: RO
-    split: {'RS': [0.6,0.2,0.2]}
-    mode: full
+#eval_args:
+#    group_by: user
+#    order: RO
+#    split: {'RS': [0.6,0.2,0.2]}
+#    mode: full
 
 metrics: ['Recall', 'MRR', 'NDCG', 'Hit', 'Precision', 'ItemCoverage', 'AveragePopularity', 'GiniIndex', 'ShannonEntropy', 'TailPercentage']
 topk: 10  # try 20, 50, 100
