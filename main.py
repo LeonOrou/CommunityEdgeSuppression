@@ -2,9 +2,9 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
-from models import LightGCN as PT_LightGCN
-from models import ItemKNN as PT_ItemKNN
-from models import MultiVAE as PT_MultiVAE
+from models import LightGCN
+from models import ItemKNN
+from models import MultiVAE
 from utils_functions import set_seed, plot_community_confidence, plot_community_connectivity_distribution, plot_degree_distributions
 from precompute import get_community_connectivity_matrix, get_community_labels, get_power_users_items, \
     get_biased_edges_mask, get_user_item_community_connectivity_matrices
@@ -18,6 +18,8 @@ from recbole.utils import init_seed
 import os
 import pandas as pd
 from sklearn.model_selection import KFold
+from eval_metrics import evaluate_model
+
 
 
 class InteractionDataset(Dataset):
@@ -73,6 +75,7 @@ def setup_device(try_gpu=True):
 def setup_config(args, device, seed):
     """Setup configuration."""
     config_dict = {
+        'dataset_name': args.dataset_name,
         'users_dec_perc_drop': args.users_dec_perc_drop,
         'items_dec_perc_drop': args.items_dec_perc_drop,
         'community_dropout_strength': args.community_dropout_strength,
@@ -84,6 +87,7 @@ def setup_config(args, device, seed):
         'reproducibility': True,
         'device': device,
         'k_th_fold': args.k_th_fold,
+        'learning_rate': 0.001,
     }
 
     if args.model_name == 'LightGCN':
@@ -164,9 +168,8 @@ def evaluate_model(model, data_loader, device):
             all_preds.extend(outputs.cpu().numpy().tolist())
             all_labels.extend(ratings.cpu().numpy().tolist())
     metrics = {'ndcg': 0, 'recall': 0, 'hit': 0, 'avg_popularity': 0, 'gini': 0, 'coverage': 0}
-    return metrics
 
-    return best_valid_score, best_valid_result, trainer
+    return metrics
 
 
 def get_biased_connectivity_data(config, adj_tens):
@@ -203,26 +206,26 @@ def get_biased_connectivity_data(config, adj_tens):
 def get_community_data(config, adj_np, device, users_top_percent, items_top_percent):
     """Get or load community labels and power nodes."""
     # Create directory if it doesn't exist
-    if not os.path.exists(f'dataset/{config.dataset}'):
-        os.makedirs(f'dataset/{config.dataset}')
+    if not os.path.exists(f'dataset/{config["dataset"]}'):
+        os.makedirs(f'dataset/{config["dataset"]}')
 
     # TODO: all community data has to be from whole dataset and masked for the subsets
     (config['user_com_labels'],
      config['item_com_labels']) = get_community_labels(
         config=config,
         adj_np=adj_np,
-        save_path=f'dataset/{config.dataset}',
+        save_path=f'dataset/{config["dataset"]}',
         get_probs=True)
 
     (config['power_users_ids'],
      config['power_items_ids']) = get_power_users_items(
         config=config,
         adj_tens=torch.tensor(adj_np, device=device),
-        user_com_labels=config.variable_config_dict['user_com_labels'],
-        item_com_labels=config.variable_config_dict['item_com_labels'],
+        user_com_labels=config['user_com_labels'],
+        item_com_labels=config['item_com_labels'],
         users_top_percent=users_top_percent,
         items_top_percent=items_top_percent,
-        save_path=f'dataset/{config.dataset}')
+        save_path=f'dataset/{config["dataset"]}')
 
 
 def calculate_community_metrics(config, adj_tens, device):
@@ -237,7 +240,7 @@ def calculate_community_metrics(config, adj_tens, device):
 
 def get_subset_masks(config, k_th_fold):
     """Get subset masks for community data."""
-    dataset_len = config.variable_config_dict['dataset_len']
+    dataset_len = config['dataset_len']
     fold_size = dataset_len / 6  # has to be int, calculated in create_k_folded_local_dataset!
     start = k_th_fold * fold_size
     end = (k_th_fold + 1) * fold_size if k_th_fold != 5 else dataset_len
@@ -256,11 +259,23 @@ def get_subset_masks(config, k_th_fold):
 
 def train_and_evaluate(config, model, train_dataset, test_dataset, device, args):
     optimizer = optim.Adam(model.parameters(), lr=config['learning_rate'])
+    # Create a learning rate scheduler that reduces LR on plateau
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        mode='max',  # Since we're monitoring NDCG which we want to maximize
+        factor=config.get('gamma', 0.5),
+        patience=config.get('patience', 2),
+        min_lr=config.get('min_lr', 1e-5),
+        verbose=True
+    )
+
     criterion = nn.BCEWithLogitsLoss()
     epochs = config['epochs']
     best_valid_score = -float('inf')
 
     kf = KFold(n_splits=5, shuffle=True)
+    results = {}
+
     for fold, (train_idx, valid_idx) in enumerate(kf.split(train_dataset)):
         print(f"Fold {fold + 1}")
         print("-------")
@@ -296,11 +311,20 @@ def train_and_evaluate(config, model, train_dataset, test_dataset, device, args)
                 epoch_loss += loss.item()
 
             metrics = evaluate_model(model, valid_loader, device)
+            results[fold] = metrics
+            # Update learning rate scheduler based on the validation metric
+            scheduler.step(metrics['ndcg'])
+
+            # Log current learning rate
+            current_lr = optimizer.param_groups[0]['lr']
+            wandb.log({"learning_rate": current_lr})
+
             if metrics['ndcg'] > best_valid_score:
                 best_valid_score = metrics['ndcg']
                 torch.save(model.state_dict(), f"{args.model_name}_{args.dataset_name}_best.pth")
 
             wandb.log({"epoch": epoch, "loss": epoch_loss, **metrics})
+    results_folds_averages_each_k = {k: {metric: sum(fold[k][metric] for fold in results.values()) / len(results) for metric in next(iter(results.values()))[k].keys()} for k in next(iter(results.values())).keys()}
     # test the finished model
     test_loader = DataLoader(
         dataset=test_dataset,
@@ -339,11 +363,11 @@ def main():
     device = setup_device(try_gpu=True)
     config, logger = setup_config(args, device, seed)
     config = dict(config)
-    config['learning_rate'] = config_params.get('learning_rate', 0.001)
 
     dataset_tensor = get_dataset_tensor(args.dataset_name, device)
-    train_dataset = InteractionDataset(dataset_tensor[:int(len(dataset_tensor) * 0.8)])
-    test_dataset = InteractionDataset(dataset_tensor[int(len(dataset_tensor) * 0.8):])
+    test_size = 0.2
+    train_dataset = InteractionDataset(dataset_tensor[:int(len(dataset_tensor) * (1-test_size))])
+    test_dataset = InteractionDataset(dataset_tensor[int(len(dataset_tensor) * (1-test_size)):])
 
     wandb_run = initialize_wandb(args, config_params, config)
 
@@ -358,11 +382,11 @@ def main():
     get_subset_masks(config=config, k_th_fold=args.k_th_fold)
 
     if args.model_name == 'LightGCN':
-        model = PT_LightGCN(config).to(device)
+        model = LightGCN(config).to(device)
     elif args.model_name == 'ItemKNN':
-        model = PT_ItemKNN(config).to(device)
+        model = ItemKNN(config).to(device)
     elif args.model_name == 'MultiVAE':
-        model = PT_MultiVAE(config).to(device)
+        model = MultiVAE(config).to(device)
     else:
         raise ValueError(f"Model {args.model_name} not supported")
 
@@ -380,3 +404,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
