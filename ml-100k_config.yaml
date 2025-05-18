@@ -12,7 +12,7 @@ val_interval:
 #threshold:
 #    rating: 4.0
 binarize: True  # do we really want just interaction matrix?
-#remove_negative_interactions: True
+remove_negative_interactions: True
 #filter_condition: rating > 4.0
 
 # environment settings
