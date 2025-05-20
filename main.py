@@ -3,8 +3,9 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 from torch_geometric.graphgym import train
-
-from models import LightGCN
+from LightGCN_PyTorch.code.model import LightGCN
+from RecSys_PyTorch.models import ItemKNN
+from vae_cf_pytorch.models import MultiVAE
 from models import ItemKNN
 from models import MultiVAE
 from utils_functions import set_seed, plot_community_confidence, plot_community_connectivity_distribution, \
@@ -21,8 +22,12 @@ from recbole.utils import init_seed
 import os
 import pandas as pd
 from sklearn.model_selection import KFold
-from eval_metrics import *
+from evaluation import evaluate_model, precalculate_average_popularity
 from utils_functions import power_node_edge_dropout
+import sys
+sys.path.append('/path/to/LightGCN_PyTorch')
+sys.path.append('/path/to/RecSys_PyTorch')
+
 
 
 class Config:
@@ -40,10 +45,6 @@ class Config:
         self.use_dropout = None
         self.k_th_fold = None
 
-        # Model-specific
-        self.reproducibility = True
-        self.learning_rate = 1e-3
-
         # Will be set during initialization
         self.device = None
         self.user_com_labels = None
@@ -56,15 +57,20 @@ class Config:
         self.item_community_connectivity_matrix_distribution = None
         self.biased_user_edges_mask = None
         self.biased_item_edges_mask = None
-
         self.train_mask = None
         self.valid_mask = None
         self.test_mask = None
         self.train_dataset_len = 0
 
+        # training parameters; lr-scheduler, optimizer, etc.
+        self.patience = 2
+        self.gamma = 0.5
+        self.min_lr = 1e-5
+        self.reproducibility = True
+        self.learning_rate = 1e-3
+        self.nr_items = None
+
         self.setup_device()
-        self.log_config()
-        self.setup_model_config()
 
     def update_from_args(self, args):
         """Update config from command line arguments."""
@@ -74,16 +80,22 @@ class Config:
     def setup_model_config(self):
         """Setup model-specific configurations."""
         if self.model_name == 'LightGCN':
-            self.train_batch_size = 256
-            self.eval_batch_size = 256
-            self.batch_size = 256  # For consistency
+            self.train_batch_size = 512
+            self.eval_batch_size = 512
+            self.batch_size = 512  # For consistency
             self.epochs = 200  # because it's different for each model
-            self.n_layers = 5
-            self.embedding_size = 256
+            self.num_layers = 5
+            self.emb_dim = 128
+            self.split = False
+            self.num_folds = 5
+            self.node_dropout = 0.0
+            self.reg = 1e-4
+            self.graph_dir = f'./dataset/{self.dataset_name}/lgcn_graphs'
         elif self.model_name == 'ItemKNN':
             self.epochs = 1
-            self.k = 250
+            self.item_knn_topk = 250
             self.shrink = 10
+            self.feature_weighting = 'bm25'
         elif self.model_name == 'MultiVAE':
             self.epochs = 200
             self.train_batch_size = 4096
@@ -91,10 +103,9 @@ class Config:
             self.batch_size = 4096  # For consistency
             self.hidden_dimension = 800
             self.latent_dimension = 200
-            self.patience = 2
-            self.gamma = 0.5
-            self.min_lr = 1e-5
-            self.dropout_prob = 0.7
+            self.q_dims = [self.hidden_dimension, self.latent_dimension]
+            self.p_dims = [self.latent_dimension, self.hidden_dimension, self.nr_items]
+            self.drop = 0.7
             self.anneal_cap = 0.3
             self.total_anneal_steps = 200000
 
@@ -179,19 +190,19 @@ def initialize_wandb(config):
 
     if config.model_name == 'LightGCN':
         wandb_config.update({
-            "embedding_size": config.embedding_size,
-            "n_layers": config.n_layers,
+            "emb_dim": config.emb_dim,
+            "num_layers": config.num_layers,
         })
     elif config.model_name == 'ItemKNN':
         wandb_config.update({
-            "k_ItemKNN": config.k,
+            "item_knn_topk": config.item_knn_topk,
             "shrink": config.shrink,
         })
     elif config.model_name == 'MultiVAE':
         wandb_config.update({
             "hidden_dimension": config.hidden_dimension,
             "latent_dimension": config.latent_dimension,
-            "dropout_prob": config.dropout_prob,
+            "VAE_dropout": config.drop,
             "anneal_cap": config.anneal_cap,
             "total_anneal_steps": config.total_anneal_steps,
         })
@@ -313,10 +324,9 @@ def get_subset_masks(config):
 
 def get_dataset_tensor(config):
     """Get dataset tensor using config object."""
-    interaction = np.loadtxt(f'dataset/{config.dataset_name}/{config.dataset_name}.inter', delimiter=' ', skiprows=1)
-    interaction = interaction[:, :3]  # get only user_id, item_id, rating columns
-    # if not all are 1, i.e. not processed yet
-    if np.all(interaction[:, 2] != 1):
+    if f'dataset/{config.dataset_name}/{config.dataset_name}_processed.inter' not in os.listdir(f'dataset/{config.dataset_name}'):
+        interaction = np.loadtxt(f'dataset/{config.dataset_name}/{config.dataset_name}.inter', delimiter=' ', skiprows=1)
+        interaction = interaction[:, :3]  # get only user_id, item_id, rating columns
         # if all are 1, we need to binarize the ratings
         interaction = interaction[interaction[:, 2] >= 4]  # get only ratings with 4 and above
         interaction[:, 2] = 1  # binarize the ratings
@@ -326,8 +336,12 @@ def get_dataset_tensor(config):
         valid_users = np.where(user_degrees >= 10)[0]
         valid_items = np.where(item_degrees >= 10)[0]
         interaction = interaction[np.isin(interaction[:, 0], valid_users) & np.isin(interaction[:, 1], valid_items)]
+        np.random.shuffle(interaction)
+        np.savetxt(f'dataset/{config.dataset_name}/{config.dataset_name}_processed.inter', interaction, fmt='%d', delimiter=' ')
 
-    np.random.shuffle(interaction)
+    else:
+        interaction = np.loadtxt(f'dataset/{config.dataset_name}/{config.dataset_name}_processed.inter', delimiter=' ', skiprows=1)
+
     config.train_dataset_len = len(interaction)
 
     return torch.tensor(interaction, dtype=torch.int32, device=config.device)
@@ -339,7 +353,7 @@ def train_and_evaluate(config, model, train_dataset, test_dataset):
     # Create a learning rate scheduler that reduces LR on plateau
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
-        mode='max',  # Since we're monitoring NDCG which we want to maximize
+        mode='max',  # max ndcg
         factor=config.gamma,
         patience=config.patience,
         min_lr=config.min_lr,
@@ -399,20 +413,20 @@ def train_and_evaluate(config, model, train_dataset, test_dataset):
                 optimizer.step()
                 epoch_loss += loss.item()
 
-            metrics = evaluate_model(model, valid_loader, config)
-            results[fold] = metrics
+            metrics_eval = evaluate_model(model=model, test_loader=valid_loader, device=config.device, item_popularity=avg_item_pop)
+            results[fold] = metrics_eval
             # Update learning rate scheduler based on the validation metric
-            scheduler.step(metrics['ndcg'])
+            scheduler.step(metrics_eval[10]['ndcg'])
 
             # Log current learning rate
             current_lr = optimizer.param_groups[0]['lr']
             wandb.log({"learning_rate": current_lr})
 
-            if metrics[10]['ndcg'] > best_valid_score:  # eval at ndcg@10
-                best_valid_score = metrics['ndcg']
+            if metrics_eval[10]['ndcg'] > best_valid_score:  # eval at ndcg@10
+                best_valid_score = metrics_eval['ndcg']
                 torch.save(model.state_dict(), f"{config.model_name}_{config.dataset_name}_best.pth")
 
-            wandb.log({"epoch": epoch, "loss": epoch_loss, **metrics})
+            wandb.log({"epoch": epoch, "loss": epoch_loss, **metrics_eval})
 
     results_folds_averages_each_k = {
         k: {metric: sum(fold[k][metric] for fold in results.values()) / len(results) for metric in
@@ -437,12 +451,15 @@ def main():
 
     args = parse_arguments()
     config.update_from_args(args)
+    config.setup_model_config()
+    config.log_config()
 
     dataset_tensor = get_dataset_tensor(config)
     test_size = 0.2  # 1 - 0.2 = 0.8 => 0.8 / 5 = 0.16 so whole numbers for 5 folds
     train_dataset = InteractionDataset(dataset_tensor[:int(len(dataset_tensor) * (1 - test_size))])
     test_dataset = InteractionDataset(dataset_tensor[int(len(dataset_tensor) * (1 - test_size)):])
     config.train_dataset_len = len(train_dataset)
+    config.nr_items = dataset_tensor[:, 1].max()
 
     # TODO: check community bias and connectivity if correct
     get_community_data(
@@ -460,11 +477,12 @@ def main():
     # Initialize model
     if config.model_name == 'LightGCN':
         # TODO: check if I should use dataloader, dataset and model from official LightGCN implementation
-        model = LightGCN(n_users=train_dataset.n_users, n_items=train_dataset.n_items, adj_matrix=train_dataset.adj).to(config.device)
+        # TODO: use DataLoader and Dataset object from RecSys_pytorch implementation
+        model = LightGCN(dataset=train_dataset, hyperparams=config, device=config.device).to(config.device)
     elif config.model_name == 'ItemKNN':
         model = ItemKNN(n_users=train_dataset.n_users, n_items=train_dataset.n_items).to(config.device)
-    elif config.model_name == 'MultiVAE':
-        model = MultiVAE(n_items=train_dataset.n_items).to(config.device)
+    elif config.model_name == 'MultVAE':
+        model = MultiVAE(dataset=train_dataset, hyperparams=config, device=config.device).to(config.device)
     else:
         raise ValueError(f"Model {config.model_name} not supported")
 
