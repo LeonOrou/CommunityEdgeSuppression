@@ -12,13 +12,13 @@ import os
 def get_community_labels(config, adj_np, algorithm='Leiden', save_path='dataset/ml-100k', get_probs=True, force_bipartite=True):
     # read and return them if already computed locally
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    if f'user_labels_{algorithm}_matrix_mask.csv' in os.listdir(f'dataset/{config.dataset}'):
+    if f'user_labels_{algorithm}_matrix_mask.csv' in os.listdir(f'dataset/{config.dataset_name}'):
         return torch.tensor(
-            np.loadtxt(f'dataset/{config.dataset}/user_labels_{algorithm}_matrix.csv', delimiter=','),
+            np.loadtxt(f'dataset/{config.dataset_name}/user_labels_{algorithm}_matrix.csv', delimiter=','),
             dtype=torch.int64,
             device=device
         ), torch.tensor(
-            np.loadtxt(f'dataset/{config.dataset}/item_labels_{algorithm}_matrix.csv', delimiter=','),
+            np.loadtxt(f'dataset/{config.dataset_name}/item_labels_{algorithm}_matrix.csv', delimiter=','),
             dtype=torch.int64,
             device=device
         )
@@ -120,14 +120,14 @@ def get_power_users_items(config, adj_tens, user_com_labels, item_com_labels,
     # read and return them if already computed locally
     device = adj_tens.device  # Get the device of the input tensor
     if f'power_user_ids_top{users_top_percent}.csv' in os.listdir(
-            f'dataset/{config.dataset}') and f'power_item_ids_top{items_top_percent}.csv' in os.listdir(
-            f'dataset/{config.dataset}'):
+            f'dataset/{config.dataset_name}') and f'power_item_ids_top{items_top_percent}.csv' in os.listdir(
+            f'dataset/{config.dataset_name}'):
         return torch.tensor(
-            np.loadtxt(f'dataset/{config.dataset}/power_user_ids_top{users_top_percent}.csv'),
+            np.loadtxt(f'dataset/{config.dataset_name}/power_user_ids_top{users_top_percent}.csv'),
             dtype=torch.int64,
             device=device
         ), torch.tensor(
-            np.loadtxt(f'dataset/{config.dataset}/power_item_ids_top{items_top_percent}.csv'),
+            np.loadtxt(f'dataset/{config.dataset_name}/power_item_ids_top{items_top_percent}.csv'),
             dtype=torch.int64,
             device=device)
 
