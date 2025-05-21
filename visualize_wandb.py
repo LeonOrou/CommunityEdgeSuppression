@@ -8,21 +8,21 @@ import numpy as np
 
 # Add this after your existing visualizations
 
-# Create plots specifically for community_dropout_strength impact
+# Create plots specifically for community_suppression impact
 def plot_community_dropout_strength_impact(df, output_dir):
     # Get all metrics (removed 'params' from the exclusion list)
     metric_cols = [col for col in df.columns]
 
-    # 1. Bar plots grouped by community_dropout_strength
-    dropout_values = sorted(df['community_dropout_strength'].unique())
+    # 1. Bar plots grouped by community_suppression
+    dropout_values = sorted(df['community_suppression'].unique())
     for metric in metric_cols:
         plt.figure(figsize=(12, 8))
 
         # Group by strength and calculate mean
-        strength_impact = df.groupby('community_dropout_strength').mean().reset_index()
+        strength_impact = df.groupby('community_suppression').mean().reset_index()
 
         # Create bar plot
-        ax = sns.barplot(x='community_dropout_strength', y=metric, data=strength_impact,
+        ax = sns.barplot(x='community_suppression', y=metric, data=strength_impact,
                          palette='viridis', order=dropout_values)
 
         # Add value labels on bars
@@ -40,12 +40,12 @@ def plot_community_dropout_strength_impact(df, output_dir):
         plt.savefig(output_dir / f"community_strength_impact_{metric}.png", dpi=300)
         plt.close()
 
-    # 2. Heatmaps showing interaction between community_dropout_strength and users_dec_perc_drop
+    # 2. Heatmaps showing interaction between community_suppression and users_dec_perc_drop
     for metric in metric_cols:
-        if len(df['community_dropout_strength'].unique()) > 1 and len(df['users_dec_perc_drop'].unique()) > 1:
+        if len(df['community_suppression'].unique()) > 1 and len(df['users_dec_perc_drop'].unique()) > 1:
             plt.figure(figsize=(10, 6))
             pivot = df.pivot_table(
-                index='community_dropout_strength',
+                index='community_suppression',
                 columns='users_dec_perc_drop',
                 values=metric,
                 aggfunc='mean'
@@ -58,12 +58,12 @@ def plot_community_dropout_strength_impact(df, output_dir):
             plt.savefig(output_dir / f"community_user_interaction_{metric}.png", dpi=300)
             plt.close()
 
-    # 3. Heatmaps showing interaction between community_dropout_strength and items_dec_perc_drop
+    # 3. Heatmaps showing interaction between community_suppression and items_dec_perc_drop
     for metric in metric_cols:
-        if len(df['community_dropout_strength'].unique()) > 1 and len(df['items_dec_perc_drop'].unique()) > 1:
+        if len(df['community_suppression'].unique()) > 1 and len(df['items_dec_perc_drop'].unique()) > 1:
             plt.figure(figsize=(10, 6))
             pivot = df.pivot_table(
-                index='community_dropout_strength',
+                index='community_suppression',
                 columns='items_dec_perc_drop',
                 values=metric,
                 aggfunc='mean'
@@ -76,10 +76,10 @@ def plot_community_dropout_strength_impact(df, output_dir):
             plt.savefig(output_dir / f"community_item_interaction_{metric}.png", dpi=300)
             plt.close()
 
-    # 4. Box plots to show distribution of metrics by community_dropout_strength
+    # 4. Box plots to show distribution of metrics by community_suppression
     for metric in metric_cols:
         plt.figure(figsize=(12, 8))
-        sns.boxplot(x='community_dropout_strength', y=metric, data=df, palette='viridis', order=dropout_values)
+        sns.boxplot(x='community_suppression', y=metric, data=df, palette='viridis', order=dropout_values)
         plt.title(f'Distribution of {metric} by Community Dropout Strength')
         plt.xlabel('Community Dropout Strength')
         plt.ylabel(metric)
@@ -130,7 +130,7 @@ def visualize_wandb_metrics():
             'model': run.config.get('model'),
             'users_dec_perc_drop': run.config.get('users_dec_perc_drop'),
             'items_dec_perc_drop': run.config.get('items_dec_perc_drop'),
-            'community_dropout_strength': run.config.get('community_dropout_strength'),
+            'community_suppression': run.config.get('community_suppression'),
         }
 
         # Extract final metrics
@@ -151,13 +151,13 @@ def visualize_wandb_metrics():
     # # 1. Bar plots for final metrics by run
     # metric_cols = [col for col in df.columns if col not in ['run_name', 'trial', 'model',
     #                                                         'users_dec_perc_drop', 'items_dec_perc_drop',
-    #                                                         'community_dropout_strength']]
+    #                                                         'community_suppression']]
     #
     # if metric_cols:
     #     # Create combined parameter labels
     #     df['params'] = df.apply(
     #         lambda
-    #             x: f"{x['model']}\nu{x['users_dec_perc_drop']}_i{x['items_dec_perc_drop']}_c{x['community_dropout_strength']}",
+    #             x: f"{x['model']}\nu{x['users_dec_perc_drop']}_i{x['items_dec_perc_drop']}_c{x['community_suppression']}",
     #         axis=1
     #     )
     #

@@ -5,9 +5,10 @@ from torch.utils.data import DataLoader, Dataset
 from torch_geometric.graphgym import train
 
 # from LightGCN_PyTorch.code.register import dataset
-# from LightGCN_PyTorch.code.model import LightGCN
-# from RecSys_PyTorch.models import ItemKNN
-# from vae_cf_pytorch.models import MultiVAE
+from recbole.data import create_dataset
+from LightGCN_PyTorch.code.model import LightGCN
+from RecSys_PyTorch.models import ItemKNN
+from vae_cf_pytorch.models import MultiVAE
 from utils_functions import set_seed, plot_community_confidence, plot_community_connectivity_distribution, \
     plot_degree_distributions, plot_connectivity, plot_confidence
 from precompute import get_community_connectivity_matrix, get_community_labels, get_power_users_items, \
@@ -29,7 +30,6 @@ import sys
 # sys.path.append('/path/to/RecSys_PyTorch')
 
 
-
 class Config:
     """Central configuration class to store all parameters."""
 
@@ -40,7 +40,7 @@ class Config:
         self.items_top_percent = None
         self.users_dec_perc_drop = None
         self.items_dec_perc_drop = None
-        self.community_dropout_strength = None
+        self.community_suppression = None
         self.drop_only_power_nodes = None
         self.use_dropout = None
         self.k_th_fold = None
@@ -153,7 +153,7 @@ def parse_arguments():
     parser.add_argument("--items_top_percent", type=float, default=0.05)
     parser.add_argument("--users_dec_perc_drop", type=float, default=0.05)
     parser.add_argument("--items_dec_perc_drop", type=float, default=0.05)
-    parser.add_argument("--community_dropout_strength", type=float, default=0.6)
+    parser.add_argument("--community_suppression", type=float, default=0.6)
     parser.add_argument("--drop_only_power_nodes", type=bool, default=True)
     parser.add_argument("--use_dropout", type=bool, default=True)
     parser.add_argument("--k_th_fold", type=int, default=0)
@@ -173,7 +173,7 @@ def initialize_wandb(config):
         "items_top_percent": config.items_top_percent,
         "users_dec_perc_drop": config.users_dec_perc_drop,
         "items_dec_perc_drop": config.items_dec_perc_drop,
-        "community_dropout_strength": config.community_dropout_strength,
+        "community_suppression": config.community_suppression,
         "use_dropout": config.use_dropout,
         "drop_only_power_nodes": config.drop_only_power_nodes,
         "k_th_fold": config.k_th_fold,
@@ -209,7 +209,7 @@ def initialize_wandb(config):
 
     return wandb.init(
         project="RecSys_PowerNodeEdgeDropout",
-        name=f"{config.model_name}_{config.dataset_name}_users_top_{config.users_top_percent}_com_drop_strength_{config.community_dropout_strength}",
+        name=f"{config.model_name}_{config.dataset_name}_users_top_{config.users_top_percent}_com_drop_strength_{config.community_suppression}",
         config=wandb_config
     )
 
@@ -325,20 +325,20 @@ def get_subset_masks(config):
 def get_dataset_tensor(config):
     """Get dataset tensor using config object."""
     if not os.path.exists(f'dataset/{config.dataset_name}/{config.dataset_name}_processed.inter'):
+        min_degree = 5 if 'ml' in config.dataset_name else 5  # 10 for lfm?
+        min_rating = 4 if 'ml' in config.dataset_name else 5  # in lfm rating is number of listening event
         interaction = np.loadtxt(f'dataset/{config.dataset_name}/{config.dataset_name}.inter', delimiter=' ', skiprows=1)
         interaction = interaction[:, :3]  # get only user_id, item_id, rating columns
         # if all are 1, we need to binarize the ratings
-        interaction = interaction[interaction[:, 2] >= 4]  # get only ratings with 4 and above
+        interaction = interaction[interaction[:, 2] >= min_rating]  # get only ratings with 4 and above
         interaction[:, 2] = 1  # binarize the ratings
-        # get only nodes with a degree of at least 10
         user_degrees = np.bincount(interaction[:, 0].astype(int))
         item_degrees = np.bincount(interaction[:, 1].astype(int))
-        valid_users = np.where(user_degrees >= 10)[0]
-        valid_items = np.where(item_degrees >= 10)[0]
+        valid_users = np.where(user_degrees >= min_degree)[0]
+        valid_items = np.where(item_degrees >= min_degree)[0]
         interaction = interaction[np.isin(interaction[:, 0], valid_users) & np.isin(interaction[:, 1], valid_items)]
         np.random.shuffle(interaction)
         np.savetxt(f'dataset/{config.dataset_name}/{config.dataset_name}_processed.inter', interaction, fmt='%d', delimiter=' ')
-
     else:
         interaction = np.loadtxt(f'dataset/{config.dataset_name}/{config.dataset_name}_processed.inter', delimiter=' ', skiprows=1)
 
@@ -387,7 +387,7 @@ def train_and_evaluate(config, model, train_dataset, test_dataset):
                 biased_user_edges_mask=config.biased_user_edges_mask,
                 biased_item_edges_mask=config.biased_item_edges_mask,
                 drop_only_power_nodes=config.drop_only_power_nodes,
-                community_dropout_strength=config.community_dropout_strength,
+                community_suppression=config.community_suppression,
                 users_dec_perc_drop=config.users_dec_perc_drop,
                 items_dec_perc_drop=config.items_dec_perc_drop
             )
@@ -454,6 +454,8 @@ def main():
     config.setup_model_config()
     config.log_config()
 
+    recbole_dataset = create_dataset(config.dataset_name)
+
     dataset_tensor = get_dataset_tensor(config)
     test_size = 0.2  # 1 - 0.2 = 0.8 => 0.8 / 5 = 0.16 so whole numbers for 5 folds
     train_dataset = InteractionDataset(dataset_tensor[:int(len(dataset_tensor) * (1 - test_size))])
@@ -469,15 +471,14 @@ def main():
 
     get_biased_connectivity_data(
         config=config,
-        adj_tens=torch.tensor(dataset_tensor.cpu().numpy(), device=config.device)
-    )
+        adj_tens=dataset_tensor, device=config.device)
+
     # plot_connectivity(config.user_community_connectivity_matrix, users_items='users', save_path='images', dataset_name="ml-100k")
     # plot_connectivity(config.item_community_connectivity_matrix, users_items='items', save_path='images', dataset_name='ml-100k')
-
-    user_probs = np.loadtxt(f'dataset/{config.dataset_name}/user_labels_Leiden_probs.csv', delimiter=',')
-    item_probs = np.loadtxt(f'dataset/{config.dataset_name}/item_labels_Leiden_probs.csv', delimiter=',')
-    plot_confidence(user_probs, save_path='images', dataset_name="ml100k", users_items='users')
-    plot_confidence(item_probs, save_path='images', dataset_name="ml100k", users_items='items')
+    # user_probs = np.loadtxt(f'dataset/{config.dataset_name}/user_labels_Leiden_probs.csv', delimiter=',')
+    # item_probs = np.loadtxt(f'dataset/{config.dataset_name}/item_labels_Leiden_probs.csv', delimiter=',')
+    # plot_confidence(user_probs, save_path='images', dataset_name="ml100k", users_items='users')
+    # plot_confidence(item_probs, save_path='images', dataset_name="ml100k", users_items='items')
     # TODO: how to make subset masks in training
     get_subset_masks(config)
 

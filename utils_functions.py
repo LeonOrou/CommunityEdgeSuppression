@@ -23,6 +23,79 @@ def set_seed(seed):
     # pandas.util.testing.rng = np.random.RandomState(seed)
 
 
+def power_node_edge_dropout(adj_tens, power_users_idx,
+                            power_items_idx,
+                            biased_user_edges_mask=None,
+                            biased_item_edges_mask=None,
+                            users_dec_perc_drop=0.05,
+                            items_dec_perc_drop=0.05,
+                            community_suppression=0.6,
+                            drop_only_power_nodes=True):
+    """
+    Drop edges from the adjacency tensor based on community labels and dropout rates.
+    :param adj_tens: torch.tensor, adjacency tensor with shape (n, 3) containing (user_id, item_id, rating)
+    :param power_users_idx: torch.tensor vector, adj_tens indices of power users
+    :param power_items_idx: torch.tensor vector, adj_tens indices of power items
+    :param biased_user_edges_mask: torch.tensor bool vector, adj_tens indices of biased user edges, i.e. edges they most interact with / in-community
+    :param biased_item_edges_mask: torch.tensor bool vector, adj_tens indices of biased item edges, i.e. edges they most interact with / in-community
+    :param users_dec_perc_drop: float [0, 1], dropout percentage of adj_tens for biased user edges
+    :param items_dec_perc_drop: float [0, 1], dropout percentage of adj_tens for biased item edges
+    :param community_suppression: float [0, 1]: float, strength of community dropout: [0, 1]; 0 means normal dropout, 1 only biased / in-community
+    :param drop_only_power_nodes: bool, whether to drop edges from power nodes or not
+    :return: adj_tens: torch.tensor, modified adjacency tensor without dropped edges (dropped via mask)
+    """
+
+    # Make a copy to avoid modifying the original tensor
+    adj_tens = adj_tens.clone()
+    device = adj_tens.device
+
+    # Create a boolean mask for tracking edges to drop (more efficient than concatenating tensors)
+    drop_mask = torch.zeros(adj_tens.shape[0], dtype=torch.bool, device=adj_tens.device)
+
+    if users_dec_perc_drop > 0.0:
+        user_edge_mask = torch.zeros(adj_tens.shape[0], dtype=torch.bool, device=device)
+        if drop_only_power_nodes:
+            for user_idx in power_users_idx:  # TODO: we could also precompute this and give as argument instead of power_users_idx
+                user_edge_mask |= (adj_tens[:, 0] == user_idx)
+        else:  # all users, not only power users
+            user_edge_mask = torch.nonzero(~user_edge_mask).squeeze(1)  # ~ to get ALL edges, not just power users
+
+        user_edge_indices = torch.nonzero(user_edge_mask).squeeze(1)
+        total_user_drop_count = int(adj_tens.shape[0] * users_dec_perc_drop)  # TODO: discuss from what the users_dec_perc_drop says to drop from; all edges, biased edges, power edges
+
+        in_com_user_indices = user_edge_indices[biased_user_edges_mask[user_edge_indices]]
+
+        in_com_user_drop_count = min(int(total_user_drop_count), in_com_user_indices.numel())
+
+        if in_com_user_drop_count > 0 and in_com_user_indices.numel() > 0:
+            perm = torch.randperm(in_com_user_indices.numel(), device=device)[:in_com_user_drop_count]
+            drop_mask[in_com_user_indices[perm]] = True
+
+    if items_dec_perc_drop > 0.0:
+        # Find all edges connected to power items
+        item_edge_mask = torch.zeros(adj_tens.shape[0], dtype=torch.bool, device=device)
+        if drop_only_power_nodes:
+            for item_idx in power_items_idx:
+                item_edge_mask |= (adj_tens[:, 1] == item_idx)
+        else:  # all items, not only power items
+            item_edge_mask = torch.nonzero(~item_edge_mask).squeeze(1)  # ~ to get ALL edges, not just power users
+
+        item_edge_indices = torch.nonzero(item_edge_mask).squeeze(1)
+
+        total_item_drop_count = int(adj_tens.shape[0] * items_dec_perc_drop)  # TODO: discuss from what the users_dec_perc_drop says to drop from; all edges, biased edges, power edges
+
+        in_com_item_indices = item_edge_indices[biased_item_edges_mask[item_edge_indices]]
+
+        in_com_item_drop_count = min(int(total_item_drop_count), in_com_item_indices.numel())
+
+        if in_com_item_drop_count > 0 and in_com_item_indices.numel() > 0:
+            perm = torch.randperm(in_com_item_indices.numel(), device=device)[:in_com_item_drop_count]
+            drop_mask[in_com_item_indices[perm]] = True  # TODO: handle cases where the dropped edges would overlap
+
+    adj_tens[drop_mask, 2] = community_suppression
+    return adj_tens
+
+
 # @profile
 def plot_community_confidence(user_probs_path=None, user_labels=None, algorithm='Leiden', force_bipartite=True,
                               save_path='images/', top_n_communities=10, dataset_name=''):
@@ -141,6 +214,7 @@ def plot_confidence(probs, save_path=None, dataset_name="", users_items='users')
     if save_path:
         plt.savefig(f"{save_path}/{dataset_name}_{users_items}_probs_confidence.png")
 
+
 def plot_community_connectivity_distribution(user_connectivity_matrix, top_n_communities=10, save_path=None, dataset_name=''):
     """
     Create a line plot showing the distribution of connections from each user community to item communities,
@@ -213,111 +287,6 @@ def plot_community_connectivity_distribution(user_connectivity_matrix, top_n_com
             concentration_top10pct = np.sum(sorted_values[:num_top_10_percent])
 
             print(f"Community {comm_idx}: {concentration_top10pct * 100:.1f}% of connections in top 10% of item communities")
-
-
-def power_node_edge_dropout(adj_tens, power_users_idx,
-                            power_items_idx,
-                            biased_user_edges_mask=None,
-                            biased_item_edges_mask=None,
-                            users_dec_perc_drop=0.1,
-                            items_dec_perc_drop=0.2,
-                            community_dropout_strength=0.6,
-                            drop_only_power_nodes=True):
-    """
-    Drop edges from the adjacency tensor based on community labels and dropout rates.
-    :param adj_tens: torch.tensor, adjacency tensor with shape (n, 3) containing (user_id, item_id, rating)
-    :param power_users_idx: torch.tensor vector, adj_tens indices of power users
-    :param power_items_idx: torch.tensor vector, adj_tens indices of power items
-    :param biased_user_edges_mask: torch.tensor bool vector, adj_tens indices of biased user edges, i.e. edges they most interact with / in-community
-    :param biased_item_edges_mask: torch.tensor bool vector, adj_tens indices of biased item edges, i.e. edges they most interact with / in-community
-    :param users_dec_perc_drop: float [0, 1], dropout percentage of adj_tens for biased user edges
-    :param items_dec_perc_drop: float [0, 1], dropout percentage of adj_tens for biased item edges
-    :param community_dropout_strength: float [0, 1]: float, strength of community dropout: [0, 1]; 0 means normal dropout, 1 only biased / in-community
-    :param drop_only_power_nodes: bool, whether to drop edges from power nodes or not
-    :return: adj_tens: torch.tensor, modified adjacency tensor without dropped edges (dropped via mask)
-    """
-
-    # Make a copy to avoid modifying the original tensor
-    adj_tens = adj_tens.clone()
-    device = adj_tens.device
-
-    # Create a boolean mask for tracking edges to drop (more efficient than concatenating tensors)
-    drop_mask = torch.zeros(adj_tens.shape[0], dtype=torch.bool, device=adj_tens.device)
-
-    if users_dec_perc_drop > 0.0:
-        user_edge_mask = torch.zeros(adj_tens.shape[0], dtype=torch.bool, device=device)
-        if drop_only_power_nodes:
-            for user_idx in power_users_idx:  # TODO: we could also precompute this and give as argument instead of power_users_idx
-                user_edge_mask |= (adj_tens[:, 0] == user_idx)
-        else:  # all users, not only power users
-            user_edge_mask = torch.nonzero(~user_edge_mask).squeeze(1)  # ~ to get ALL edges, not just power users
-
-        user_edge_indices = torch.nonzero(user_edge_mask).squeeze(1)
-        total_user_drop_count = int(adj_tens.shape[0] * users_dec_perc_drop)  # TODO: discuss from what the users_dec_perc_drop says to drop from; all edges, biased edges, power edges
-
-        # Find in-community edges (biased)
-        in_com_user_indices = user_edge_indices[biased_user_edges_mask[user_edge_indices]]
-        # Find out-of-community edges (unbiased)
-        out_com_user_indices = user_edge_indices[~biased_user_edges_mask[user_edge_indices]]
-
-        # Calculate how many edges to drop from in-community vs out-of-community
-        in_com_user_drop_rate = users_dec_perc_drop + community_dropout_strength * (1 - users_dec_perc_drop)
-        in_com_user_drop_count = min(int(total_user_drop_count * in_com_user_drop_rate),
-                                     in_com_user_indices.numel())
-        out_com_user_drop_count = min(total_user_drop_count - in_com_user_drop_count,
-                                      out_com_user_indices.numel())
-
-        # Drop in-community edges
-        if in_com_user_drop_count > 0 and in_com_user_indices.numel() > 0:
-            perm = torch.randperm(in_com_user_indices.numel(), device=device)[:in_com_user_drop_count]
-            drop_mask[in_com_user_indices[perm]] = True
-
-        # Drop out-of-community edges
-        if out_com_user_drop_count > 0 and out_com_user_indices.numel() > 0:
-            perm = torch.randperm(out_com_user_indices.numel(), device=device)[:out_com_user_drop_count]
-            drop_mask[out_com_user_indices[perm]] = True
-
-    if items_dec_perc_drop > 0.0:
-        # Find all edges connected to power items
-        item_edge_mask = torch.zeros(adj_tens.shape[0], dtype=torch.bool, device=device)
-        if drop_only_power_nodes:
-            for item_idx in power_items_idx:
-                item_edge_mask |= (adj_tens[:, 1] == item_idx)
-        else:  # all items, not only power items
-            item_edge_mask = torch.nonzero(~item_edge_mask).squeeze(1)  # ~ to get ALL edges, not just power users
-
-        item_edge_indices = torch.nonzero(item_edge_mask).squeeze(1)
-
-        # Calculate number of edges to drop
-        total_item_drop_count = int(adj_tens.shape[0] * items_dec_perc_drop)  # TODO: discuss from what the users_dec_perc_drop says to drop from; all edges, biased edges, power edges
-
-        # Find in-community edges (biased)
-        in_com_item_indices = item_edge_indices[biased_item_edges_mask[item_edge_indices]]
-        # Find out-of-community edges (unbiased)
-        out_com_item_indices = item_edge_indices[~biased_item_edges_mask[item_edge_indices]]
-
-        # Calculate how many edges to drop from in-community vs out-of-community
-        in_com_item_drop_rate = items_dec_perc_drop + community_dropout_strength * (1 - items_dec_perc_drop)
-        in_com_item_drop_count = min(int(total_item_drop_count * in_com_item_drop_rate),
-                                     in_com_item_indices.numel())
-        out_com_item_drop_count = min(total_item_drop_count - in_com_item_drop_count,
-                                      out_com_item_indices.numel())
-
-        # Drop in-community edges
-        if in_com_item_drop_count > 0 and in_com_item_indices.numel() > 0:
-            perm = torch.randperm(in_com_item_indices.numel(), device=device)[:in_com_item_drop_count]
-            drop_mask[in_com_item_indices[perm]] = True  # TODO: handle cases where the dropped edges would overlap
-
-        # Drop out-of-community edges
-        if out_com_item_drop_count > 0 and out_com_item_indices.numel() > 0:
-            perm = torch.randperm(out_com_item_indices.numel(), device=device)[:out_com_item_drop_count]
-            drop_mask[out_com_item_indices[perm]] = True
-
-    adj_tens[drop_mask, 2] = 0
-
-    adj_tens = adj_tens[adj_tens[:, 2] != 0]
-
-    return adj_tens
 
 
 # via euclidean distance between user/item community connectivity matrices and uniform distribution
