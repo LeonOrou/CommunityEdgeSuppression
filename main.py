@@ -9,7 +9,7 @@ from torch_geometric.graphgym import train
 # from RecSys_PyTorch.models import ItemKNN
 # from vae_cf_pytorch.models import MultiVAE
 from utils_functions import set_seed, plot_community_confidence, plot_community_connectivity_distribution, \
-    plot_degree_distributions, plot_connectivity
+    plot_degree_distributions, plot_connectivity, plot_confidence
 from precompute import get_community_connectivity_matrix, get_community_labels, get_power_users_items, \
     get_biased_edges_mask, get_user_item_community_connectivity_matrices
 import wandb
@@ -471,8 +471,13 @@ def main():
         config=config,
         adj_tens=torch.tensor(dataset_tensor.cpu().numpy(), device=config.device)
     )
-    plot_connectivity(config.user_community_connectivity_matrix, users_items='users', save_path='images', dataset_name="ml-100k")
-    plot_connectivity(config.item_community_connectivity_matrix, users_items='items', save_path='images', dataset_name='ml-100k')
+    # plot_connectivity(config.user_community_connectivity_matrix, users_items='users', save_path='images', dataset_name="ml-100k")
+    # plot_connectivity(config.item_community_connectivity_matrix, users_items='items', save_path='images', dataset_name='ml-100k')
+
+    user_probs = np.loadtxt(f'dataset/{config.dataset_name}/user_labels_Leiden_probs.csv', delimiter=',')
+    item_probs = np.loadtxt(f'dataset/{config.dataset_name}/item_labels_Leiden_probs.csv', delimiter=',')
+    plot_confidence(user_probs, save_path='images', dataset_name="ml100k", users_items='users')
+    plot_confidence(item_probs, save_path='images', dataset_name="ml100k", users_items='items')
     # TODO: how to make subset masks in training
     get_subset_masks(config)
 
