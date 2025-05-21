@@ -3,13 +3,13 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 from torch_geometric.graphgym import train
-from LightGCN_PyTorch.code.model import LightGCN
-from RecSys_PyTorch.models import ItemKNN
-from vae_cf_pytorch.models import MultiVAE
-from models import ItemKNN
-from models import MultiVAE
+
+# from LightGCN_PyTorch.code.register import dataset
+# from LightGCN_PyTorch.code.model import LightGCN
+# from RecSys_PyTorch.models import ItemKNN
+# from vae_cf_pytorch.models import MultiVAE
 from utils_functions import set_seed, plot_community_confidence, plot_community_connectivity_distribution, \
-    plot_degree_distributions
+    plot_degree_distributions, plot_connectivity
 from precompute import get_community_connectivity_matrix, get_community_labels, get_power_users_items, \
     get_biased_edges_mask, get_user_item_community_connectivity_matrices
 import wandb
@@ -25,8 +25,8 @@ from sklearn.model_selection import KFold
 from evaluation import evaluate_model, precalculate_average_popularity
 from utils_functions import power_node_edge_dropout
 import sys
-sys.path.append('/path/to/LightGCN_PyTorch')
-sys.path.append('/path/to/RecSys_PyTorch')
+# sys.path.append('/path/to/LightGCN_PyTorch')
+# sys.path.append('/path/to/RecSys_PyTorch')
 
 
 
@@ -324,7 +324,7 @@ def get_subset_masks(config):
 
 def get_dataset_tensor(config):
     """Get dataset tensor using config object."""
-    if f'dataset/{config.dataset_name}/{config.dataset_name}_processed.inter' not in os.listdir(f'dataset/{config.dataset_name}'):
+    if not os.path.exists(f'dataset/{config.dataset_name}/{config.dataset_name}_processed.inter'):
         interaction = np.loadtxt(f'dataset/{config.dataset_name}/{config.dataset_name}.inter', delimiter=' ', skiprows=1)
         interaction = interaction[:, :3]  # get only user_id, item_id, rating columns
         # if all are 1, we need to binarize the ratings
@@ -471,6 +471,8 @@ def main():
         config=config,
         adj_tens=torch.tensor(dataset_tensor.cpu().numpy(), device=config.device)
     )
+    plot_connectivity(config.user_community_connectivity_matrix, users_items='users', save_path='images', dataset_name="ml-100k")
+    plot_connectivity(config.item_community_connectivity_matrix, users_items='items', save_path='images', dataset_name='ml-100k')
     # TODO: how to make subset masks in training
     get_subset_masks(config)
 

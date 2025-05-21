@@ -24,6 +24,180 @@ def set_seed(seed):
 
 
 # @profile
+def plot_community_confidence(user_probs_path=None, user_labels=None, algorithm='Leiden', force_bipartite=True,
+                              save_path='images/', top_n_communities=10, dataset_name=''):
+    """
+    Create a line plot showing community assignment confidence for each user community.
+
+    :param user_probs_path: Path to pre-saved user probabilities CSV, or None to load based on other parameters
+    :param user_labels: User community labels tensor, or None to load from save_path
+    :param algorithm: Community detection algorithm used ('Leiden' or 'Louvain')
+    :param force_bipartite: Whether bipartite structure was enforced
+    :param save_path: Directory containing saved files
+    :param top_n_communities: Number of top communities to display
+    :param dataset_name: Name of the dataset for saving figures
+    """
+
+    # Load user probabilities and labels if not provided
+    if user_probs_path is None:
+        user_probs_path = f'{save_path}/user_labels_{algorithm}_probs.csv'
+
+    if user_labels is None:
+        user_labels = np.loadtxt(f'{save_path}/user_labels_{algorithm}.csv')
+    elif isinstance(user_labels, torch.Tensor):
+        user_labels = user_labels.cpu().numpy()
+
+    # Load probability data
+    user_probs = np.loadtxt(user_probs_path, delimiter=',')
+
+    # Extract maximum probability for each user (confidence in assigned community)
+    max_probs = np.max(user_probs, axis=1)
+
+    # Group max probabilities by community
+    unique_communities = np.unique(user_labels)
+    community_confidence = {}
+
+    for comm in unique_communities:
+        # Get indices of users in this community
+        comm_indices = np.where(user_labels == comm)[0]
+
+        # Get confidence scores for these users
+        if len(comm_indices) > 0:
+            conf_scores = max_probs[comm_indices]
+            community_confidence[comm] = conf_scores
+
+    # Get communities by size (number of users)
+    community_sizes = {comm: len(probs) for comm, probs in community_confidence.items()}
+    top_communities = sorted(community_sizes.items(), key=lambda x: x[1], reverse=True)[:top_n_communities]
+
+    # Plot confidence distributions
+    plt.figure(figsize=(12, 8))
+
+    for comm, _ in top_communities:
+        # Get confidence values
+        conf_values = community_confidence[comm]
+        # Create normalized x-axis (percentage of users in community)
+        x_vals = np.linspace(0, 1, len(conf_values))
+        plt.plot(x_vals, conf_values, label=f'Community {comm} (n={len(conf_values)})')
+
+    plt.xlabel('Item community X')
+    # assign x-axis labels 1 to 4
+    plt.xticks([0, 1, 2, 3], ['0', '1', '2', '3'])
+    plt.ylabel('Community Assignment Confidence')
+    plt.title('User Community Assignment Confidence')
+    plt.legend()
+    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.tight_layout()
+    plt.show()
+
+    # Print average confidence by community
+    print("\nAverage confidence by community:")
+    for comm, size in top_communities:
+        avg_conf = np.mean(community_confidence[comm])
+        print(f"Community {comm}: {avg_conf:.4f} (n={size})")
+
+    if save_path:
+        plt.savefig(f"{save_path}/{dataset_name}_community_confidence_distribution.png")
+
+
+def plot_connectivity(connectivity_matrix, save_path=None, dataset_name="", users_items='users'):
+    # boxplot the connectivity columns, one boxplot for each column
+    plt.figure(figsize=(12, 8))
+    connectivity_matrix = connectivity_matrix[1:, :]
+    # get row wise distributions
+    connectivity_matrix_distribution = connectivity_matrix / connectivity_matrix.sum(axis=1, keepdims=True)
+    avg_each_com = connectivity_matrix_distribution.mean(axis=0)
+    std_each_com = connectivity_matrix_distribution.std(axis=0)
+    # plot boxplot
+    plt.boxplot(connectivity_matrix, labels=[str(i) for i in range(connectivity_matrix.shape[1])], vert=True)
+    plt.xlabel(f'{users_items} Community')
+    plt.title('Connectivity Strength Distribution')
+    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.tight_layout()
+
+    # also write a legend of how many connections each community has
+
+    plt.legend([f'Community {i} (n={int(connectivity_matrix[:, i].sum())})' for i in range(connectivity_matrix.shape[1])])
+    plt.show()
+    if save_path:
+        plt.savefig(f"{save_path}/{dataset_name}_{users_items}_connectivity_box_absolute.png")
+
+
+
+def plot_community_connectivity_distribution(user_connectivity_matrix, top_n_communities=10, save_path=None, dataset_name=''):
+    """
+    Create a line plot showing the distribution of connections from each user community to item communities,
+    sorted in decreasing order.
+
+    :param user_connectivity_matrix: torch.tensor, matrix showing connections between user communities (rows)
+                                and item communities (columns)
+    :param top_n_communities: int, number of top user communities to display
+    :param save_path: str, path to save the figure, or None to display
+    :param dataset_name: str, name of the dataset for saving figures
+    """
+
+    # Convert to numpy if tensor
+    if isinstance(user_connectivity_matrix, torch.Tensor):
+        user_connectivity_matrix = user_connectivity_matrix.cpu().numpy()
+
+    # Calculate total interactions per user community for sorting
+    user_community_totals = user_connectivity_matrix.sum(axis=1).T
+
+    # Sort user communities by total interaction volume (descending)
+    sorted_indices = np.argsort(user_community_totals)[::-1]
+
+    # Select top n user communities
+    top_n = min(top_n_communities, len(sorted_indices))
+    top_user_communities = np.arange(user_connectivity_matrix.shape(1))
+
+    # Create plot
+    plt.figure(figsize=(12, 8))
+
+    for i, comm_idx in enumerate(top_user_communities):
+        # Skip empty communities
+        if user_community_totals[comm_idx] == 0:
+            continue
+        # Normalize row to get proportion of interactions
+        row_total = user_community_totals[comm_idx]
+        if row_total > 0:
+            normalized_row = user_connectivity_matrix[comm_idx, :] / row_total
+
+            # # Sort values in decreasing order
+            # sorted_values = np.sort(normalized_row)[::-1]
+
+            # x vals are the indices of the item communities (integers)
+            x_vals = np.linspace(0, 3, len(normalized_row))
+
+            # Plot line
+            plt.plot(x_vals, normalized_row,
+                     label=f'Community {comm_idx} (n={int(user_community_totals[comm_idx])})')
+
+    plt.xlabel('')
+    # assign x-axis labels 1 to 4
+    plt.xticks(np.arange(len(top_user_communities)), [str(i) for i in range(len(top_user_communities))])
+    plt.ylabel('Connection Strength (normalized)')
+    plt.title('User Community Connectivity Distribution for each item community')
+    plt.legend()
+    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(f"{save_path}/{dataset_name}_community_connectivity_distribution.png")
+    plt.show()
+
+    # Calculate concentration metrics
+    print("Community concentration metrics:")
+    for i, comm_idx in enumerate(top_user_communities):
+        if user_community_totals[comm_idx] > 0:
+            normalized_row = user_connectivity_matrix[comm_idx, :] / user_community_totals[comm_idx]
+            sorted_values = np.sort(normalized_row)[::-1]
+
+            # Calculate percentage of connections in top 10% of communities
+            num_top_10_percent = max(1, int(0.1 * len(sorted_values)))
+            concentration_top10pct = np.sum(sorted_values[:num_top_10_percent])
+
+            print(f"Community {comm_idx}: {concentration_top10pct * 100:.1f}% of connections in top 10% of item communities")
+
+
 def power_node_edge_dropout(adj_tens, power_users_idx,
                             power_items_idx,
                             biased_user_edges_mask=None,
@@ -127,149 +301,6 @@ def power_node_edge_dropout(adj_tens, power_users_idx,
     adj_tens = adj_tens[adj_tens[:, 2] != 0]
 
     return adj_tens
-
-
-def plot_community_connectivity_distribution(connectivity_matrix, top_n_communities=10, save_path=None, dataset_name=''):
-    """
-    Create a line plot showing the distribution of connections from each user community to item communities,
-    sorted in decreasing order.
-
-    :param connectivity_matrix: torch.tensor, matrix showing connections between user communities (rows)
-                                and item communities (columns)
-    :param top_n_communities: int, number of top user communities to display
-    :param save_path: str, path to save the figure, or None to display
-    :param dataset_name: str, name of the dataset for saving figures
-    """
-
-    # Convert to numpy if tensor
-    if isinstance(connectivity_matrix, torch.Tensor):
-        connectivity_matrix = connectivity_matrix.cpu().numpy()
-
-    # Calculate total interactions per user community for sorting
-    user_community_totals = connectivity_matrix.sum(axis=1)
-
-    # Sort user communities by total interaction volume (descending)
-    sorted_indices = np.argsort(user_community_totals)[::-1]
-
-    # Select top n user communities
-    top_n = min(top_n_communities, len(sorted_indices))
-    top_user_communities = sorted_indices[:top_n]
-
-    # Create plot
-    plt.figure(figsize=(12, 8))
-
-    for i, comm_idx in enumerate(top_user_communities):
-        # Normalize row to get proportion of interactions
-        row_total = user_community_totals[comm_idx]
-        if row_total > 0:
-            normalized_row = connectivity_matrix[comm_idx, :] / row_total
-
-            # Sort values in decreasing order
-            sorted_values = np.sort(normalized_row)[::-1]
-
-            # Create x-axis as percentage of item communities
-            x_vals = np.linspace(0, 1, len(sorted_values))
-
-            # Plot line
-            plt.plot(x_vals, sorted_values,
-                     label=f'Community {comm_idx} (n={int(user_community_totals[comm_idx])})')
-
-    plt.xlabel('Proportion of Item Communities (sorted)')
-    plt.ylabel('Connection Strength (normalized)')
-    plt.title('User Community Connectivity Distribution (Decreasing Order)')
-    plt.legend()
-    plt.grid(True, linestyle='--', alpha=0.7)
-    plt.tight_layout()
-    if save_path:
-        plt.savefig(f"{save_path}/{dataset_name}_community_connectivity_distribution.png")
-    plt.show()
-
-    # Calculate concentration metrics
-    print("Community concentration metrics:")
-    for i, comm_idx in enumerate(top_user_communities):
-        if user_community_totals[comm_idx] > 0:
-            normalized_row = connectivity_matrix[comm_idx, :] / user_community_totals[comm_idx]
-            sorted_values = np.sort(normalized_row)[::-1]
-
-            # Calculate percentage of connections in top 10% of communities
-            num_top_10_percent = max(1, int(0.1 * len(sorted_values)))
-            concentration_top10pct = np.sum(sorted_values[:num_top_10_percent])
-
-            print(f"Community {comm_idx}: {concentration_top10pct * 100:.1f}% of connections in top 10% of item communities")
-
-
-def plot_community_confidence(user_probs_path=None, user_labels=None, algorithm='Leiden', force_bipartite=True,
-                              save_path='images/', top_n_communities=10, dataset_name=''):
-    """
-    Create a line plot showing community assignment confidence for each user community.
-
-    :param user_probs_path: Path to pre-saved user probabilities CSV, or None to load based on other parameters
-    :param user_labels: User community labels tensor, or None to load from save_path
-    :param algorithm: Community detection algorithm used ('Leiden' or 'Louvain')
-    :param force_bipartite: Whether bipartite structure was enforced
-    :param save_path: Directory containing saved files
-    :param top_n_communities: Number of top communities to display
-    :param dataset_name: Name of the dataset for saving figures
-    """
-
-    # Load user probabilities and labels if not provided
-    if user_probs_path is None:
-        user_probs_path = f'{save_path}/user_labels_{algorithm}_probs.csv'
-
-    if user_labels is None:
-        user_labels = np.loadtxt(f'{save_path}/user_labels_{algorithm}.csv')
-    elif isinstance(user_labels, torch.Tensor):
-        user_labels = user_labels.cpu().numpy()
-
-    # Load probability data
-    user_probs = np.loadtxt(user_probs_path, delimiter=',')
-
-    # Extract maximum probability for each user (confidence in assigned community)
-    max_probs = np.max(user_probs, axis=1)
-
-    # Group max probabilities by community
-    unique_communities = np.unique(user_labels)
-    community_confidence = {}
-
-    for comm in unique_communities:
-        # Get indices of users in this community
-        comm_indices = np.where(user_labels == comm)[0]
-
-        # Get confidence scores for these users
-        if len(comm_indices) > 0:
-            conf_scores = max_probs[comm_indices]
-            community_confidence[comm] = np.sort(conf_scores)[::-1]  # Sort in decreasing order
-
-    # Get communities by size (number of users)
-    community_sizes = {comm: len(probs) for comm, probs in community_confidence.items()}
-    top_communities = sorted(community_sizes.items(), key=lambda x: x[1], reverse=True)[:top_n_communities]
-
-    # Plot confidence distributions
-    plt.figure(figsize=(12, 8))
-
-    for comm, _ in top_communities:
-        # Get confidence values
-        conf_values = community_confidence[comm]
-        # Create normalized x-axis (percentage of users in community)
-        x_vals = np.linspace(0, 1, len(conf_values))
-        plt.plot(x_vals, conf_values, label=f'Community {comm} (n={len(conf_values)})')
-
-    plt.xlabel('Proportion of Users in Community (sorted)')
-    plt.ylabel('Community Assignment Confidence')
-    plt.title('User Community Assignment Confidence (Decreasing Order)')
-    plt.legend()
-    plt.grid(True, linestyle='--', alpha=0.7)
-    plt.tight_layout()
-    plt.show()
-
-    # Print average confidence by community
-    print("\nAverage confidence by community:")
-    for comm, size in top_communities:
-        avg_conf = np.mean(community_confidence[comm])
-        print(f"Community {comm}: {avg_conf:.4f} (n={size})")
-
-    if save_path:
-        plt.savefig(f"{save_path}/{dataset_name}_community_confidence_distribution.png")
 
 
 # via euclidean distance between user/item community connectivity matrices and uniform distribution
