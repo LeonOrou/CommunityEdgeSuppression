@@ -6,16 +6,15 @@ from torch_geometric.graphgym import train
 
 # from LightGCN_PyTorch.code.register import dataset
 from recbole.data import create_dataset
-from LightGCN_PyTorch.code.model import LightGCN
-from RecSys_PyTorch.models import ItemKNN
-from vae_cf_pytorch.models import MultiVAE
+# from LightGCN_PyTorch.code.model import LightGCN
+# from RecSys_PyTorch.models import ItemKNN
+# from vae_cf_pytorch.models import MultiVAE
 from utils_functions import set_seed, plot_community_confidence, plot_community_connectivity_distribution, \
     plot_degree_distributions, plot_connectivity, plot_confidence
 from precompute import get_community_connectivity_matrix, get_community_labels, get_power_users_items, \
     get_biased_edges_mask, get_user_item_community_connectivity_matrices
 import wandb
 from argparse import ArgumentParser
-import yaml
 import logging
 from logging import getLogger
 import numpy as np
@@ -324,10 +323,15 @@ def get_subset_masks(config):
 
 def get_dataset_tensor(config):
     """Get dataset tensor using config object."""
-    if not os.path.exists(f'dataset/{config.dataset_name}/{config.dataset_name}_processed.inter'):
+    if not os.path.exists(f'dataset/{config.dataset_name}/{config.dataset_name}_processed.npy'):
         min_degree = 5 if 'ml' in config.dataset_name else 5  # 10 for lfm?
         min_rating = 4 if 'ml' in config.dataset_name else 5  # in lfm rating is number of listening event
-        interaction = np.loadtxt(f'dataset/{config.dataset_name}/{config.dataset_name}.inter', delimiter=' ', skiprows=1)
+        if os.path.exists(f'dataset/{config.dataset_name}/{config.dataset_name}.inter'):
+            interaction = np.loadtxt(f'dataset/{config.dataset_name}/{config.dataset_name}.inter', delimiter=' ', skiprows=1)
+        elif os.path.exists(f'dataset/{config.dataset_name}/{config.dataset_name}.data'):
+            interaction = np.loadtxt(f'dataset/{config.dataset_name}/{config.dataset_name}.data', delimiter='\t', skiprows=0)
+        else:
+            raise FileNotFoundError(f"Dataset file not found in dataset/{config.dataset_name}")
         interaction = interaction[:, :3]  # get only user_id, item_id, rating columns
         # if all are 1, we need to binarize the ratings
         interaction = interaction[interaction[:, 2] >= min_rating]  # get only ratings with 4 and above
@@ -338,9 +342,10 @@ def get_dataset_tensor(config):
         valid_items = np.where(item_degrees >= min_degree)[0]
         interaction = interaction[np.isin(interaction[:, 0], valid_users) & np.isin(interaction[:, 1], valid_items)]
         np.random.shuffle(interaction)
-        np.savetxt(f'dataset/{config.dataset_name}/{config.dataset_name}_processed.inter', interaction, fmt='%d', delimiter=' ')
+        interaction = np.array(interaction, dtype=np.int32)
+        np.save(f'dataset/{config.dataset_name}/{config.dataset_name}_processed.npy', interaction)
     else:
-        interaction = np.loadtxt(f'dataset/{config.dataset_name}/{config.dataset_name}_processed.inter', delimiter=' ', skiprows=1)
+        interaction = np.load(f'dataset/{config.dataset_name}/{config.dataset_name}_processed.npy', mmap_mode='r')
 
     config.train_dataset_len = len(interaction)
 
@@ -454,8 +459,6 @@ def main():
     config.setup_model_config()
     config.log_config()
 
-    recbole_dataset = create_dataset(config.dataset_name)
-
     dataset_tensor = get_dataset_tensor(config)
     test_size = 0.2  # 1 - 0.2 = 0.8 => 0.8 / 5 = 0.16 so whole numbers for 5 folds
     train_dataset = InteractionDataset(dataset_tensor[:int(len(dataset_tensor) * (1 - test_size))])
@@ -471,7 +474,7 @@ def main():
 
     get_biased_connectivity_data(
         config=config,
-        adj_tens=dataset_tensor, device=config.device)
+        adj_tens=dataset_tensor)
 
     # plot_connectivity(config.user_community_connectivity_matrix, users_items='users', save_path='images', dataset_name="ml-100k")
     # plot_connectivity(config.item_community_connectivity_matrix, users_items='items', save_path='images', dataset_name='ml-100k')
