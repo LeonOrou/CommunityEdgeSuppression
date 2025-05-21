@@ -110,7 +110,8 @@ def plot_connectivity(connectivity_matrix, save_path=None, dataset_name="", user
     std_each_com = connectivity_matrix_distribution.std(axis=0)
     # plot boxplot
     plt.boxplot(connectivity_matrix, labels=[str(i) for i in range(connectivity_matrix.shape[1])], vert=True)
-    plt.xlabel(f'{users_items} Community')
+    communities = 'items' if users_items == 'users' else 'users'  # reverse the labels as the users's connectivity is to item communities
+    plt.xlabel(f'{communities} Community')
     plt.title('Connectivity Strength Distribution')
     plt.grid(True, linestyle='--', alpha=0.7)
     plt.tight_layout()
@@ -123,6 +124,22 @@ def plot_connectivity(connectivity_matrix, save_path=None, dataset_name="", user
         plt.savefig(f"{save_path}/{dataset_name}_{users_items}_connectivity_box_absolute.png")
 
 
+def plot_confidence(probs, save_path=None, dataset_name="", users_items='users'):
+    # boxplot the connectivity columns, one boxplot for each column
+    plt.figure(figsize=(12, 8))
+    # plot boxplot
+    plt.boxplot(probs, labels=[str(i) for i in range(probs.shape[1])], vert=True)
+    # communities = 'items' if users_items == 'users' else 'users'  # reverse the labels as the users's connectivity is to item communities
+    plt.xlabel(f'{users_items} Community')
+    plt.title('Community confidence')
+    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.tight_layout()
+
+    # also write a legend of how many connections each community has
+
+    plt.show()
+    if save_path:
+        plt.savefig(f"{save_path}/{dataset_name}_{users_items}_probs_confidence.png")
 
 def plot_community_connectivity_distribution(user_connectivity_matrix, top_n_communities=10, save_path=None, dataset_name=''):
     """
