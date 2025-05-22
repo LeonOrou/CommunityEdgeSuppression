@@ -342,27 +342,26 @@ def get_biased_edges_mask(adj_tens, user_com_labels_mask, item_com_labels_mask,
     users_com_labels_mask_rows = torch.any(user_com_labels_mask > 0, dim=1)
     items_com_labels_mask_rows = torch.any(item_com_labels_mask > 0, dim=1)
 
-    idx_user_label_mask = users_com_labels_mask_rows[adj_tens[:, 0]]
+    user_label_mask = users_com_labels_mask_rows[adj_tens[:, 0]]
     idx_item_label_mask = items_com_labels_mask_rows[adj_tens[:, 1]]
 
-    # get edges from adj_tens where idx_user_label_mask and idx_item_label_mask are True, but keeping adj_tens shape
-    idx_biased_user_nodes = adj_tens[idx_user_label_mask][:, 0]
-    idx_biased_user_nodes_items = adj_tens[idx_user_label_mask][:, 1]
+    idx_biased_user_nodes = adj_tens[user_label_mask][:, 0]
+    idx_biased_user_nodes_items = adj_tens[user_label_mask][:, 1]
     idx_biased_item_nodes = adj_tens[idx_item_label_mask][:, 1]
     idx_biased_item_nodes_users = adj_tens[idx_item_label_mask][:, 0]
 
     biased_user_nodes_item_com_con = users_com_connectivity_mask[idx_biased_user_nodes]
     biased_item_nodes_user_com_con = items_com_connectivity_mask[idx_biased_item_nodes]
 
-    biased_item_nodes_communities = item_com_labels_mask[idx_biased_user_nodes_items]
-    biased_user_nodes_communities = user_com_labels_mask[idx_biased_item_nodes_users]
+    biased_item_nodes_communities = item_com_labels_mask[idx_biased_user_nodes_items].bool()
+    biased_user_nodes_communities = user_com_labels_mask[idx_biased_item_nodes_users].bool()
 
-    user_com_mask_nonzero_idx = idx_user_label_mask.nonzero(as_tuple=True)[0]
+    user_com_mask_nonzero_idx = user_label_mask.nonzero(as_tuple=True)[0]
     item_com_mask_nonzero_idx = idx_item_label_mask.nonzero(as_tuple=True)[0]
 
     # get indices where rows of biased_item_nodes_user_com_con and biased_user_nodes_communities both have at least one True value at the same position
-    true_user_indices = torch.where(biased_item_nodes_user_com_con & biased_user_nodes_communities)[0]
-    true_item_indices = torch.where(biased_user_nodes_item_com_con & biased_item_nodes_communities)[0]
+    true_user_indices = torch.any(biased_user_nodes_item_com_con & biased_item_nodes_communities, dim=1)
+    true_item_indices = torch.any(biased_item_nodes_user_com_con & biased_user_nodes_communities, dim=1)
 
     biased_user_edges_mask = torch.zeros(adj_tens.shape[0], dtype=torch.bool, device=adj_tens.device)
     biased_item_edges_mask = torch.zeros(adj_tens.shape[0], dtype=torch.bool, device=adj_tens.device)
