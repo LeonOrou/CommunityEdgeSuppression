@@ -36,6 +36,12 @@ class LightGCNDataset(Dataset):
 
         return user, pos_item, neg_item
 
+    def getSparseGraph(self):
+        """Get sparse graph representation of the dataset."""
+        user_item_pairs = self.interaction[:, :2]
+        user_item_pairs = np.unique(user_item_pairs, axis=0)
+        return user_item_pairs
+
 
 def get_train_loader(dataset, batch_size):
     users = torch.tensor([sample[0] for sample in dataset], dtype=torch.long).to('cuda')
@@ -69,6 +75,7 @@ def get_dataset_tensor(config):
         interaction = interaction[np.isin(interaction[:, 0], valid_users) & np.isin(interaction[:, 1], valid_items)]
 
         # Create mappings for user IDs
+        # TODO: reindex also genre label item id's
         unique_users = np.unique(interaction[:, 0])
         user_id_map = {old_id: new_id for new_id, old_id in enumerate(unique_users, start=1)}
         # Create mappings for item IDs

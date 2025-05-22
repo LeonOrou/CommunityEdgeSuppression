@@ -25,7 +25,7 @@ from sklearn.model_selection import KFold
 from evaluation import evaluate_model, precalculate_average_popularity
 from utils_functions import power_node_edge_dropout
 from config import Config
-from dataset import InteractionDataset, get_dataset_tensor
+from dataset import get_dataset_tensor, LightGCNDataset
 from training import train_and_evaluate
 import sys
 # sys.path.append('/path/to/LightGCN_PyTorch')
@@ -102,22 +102,7 @@ def initialize_wandb(config):
     )
 
 
-def evaluate_model(model, data_loader, config):
-    model.eval()
-    all_preds = []
-    all_labels = []
-    with torch.no_grad():
-        for users, items, ratings in data_loader:
-            users = users.to(config.device)
-            items = items.to(config.device)
-            outputs = model(users, items)
-            all_preds.extend(outputs.cpu().numpy().tolist())
-            all_labels.extend(ratings.cpu().numpy().tolist())
 
-    # TODO: call evaluate_model and pass metrics to k_th_folded dict
-    metrics = {'ndcg': 0, 'recall': 0, 'hit': 0, 'avg_popularity': 0, 'gini': 0, 'coverage': 0}
-
-    return metrics
 
 
 def get_biased_connectivity_data(config, adj_tens):
@@ -224,9 +209,10 @@ def main():
     config.log_config()
 
     dataset_tensor = get_dataset_tensor(config)
+    dataset_all = LightGCNDataset(dataset_tensor)
     test_size = 0.2  # 1 - 0.2 = 0.8 => 0.8 / 5 = 0.16 so whole numbers for 5 folds
-    train_dataset = InteractionDataset(dataset_tensor[:int(len(dataset_tensor) * (1 - test_size))])
-    test_dataset = InteractionDataset(dataset_tensor[int(len(dataset_tensor) * (1 - test_size)):])
+    train_dataset = LightGCNDataset(dataset_tensor[:int(len(dataset_tensor) * (1 - test_size))])
+    test_dataset = LightGCNDataset(dataset_tensor[int(len(dataset_tensor) * (1 - test_size)):])
     config.train_dataset_len = len(train_dataset)
     config.nr_items = dataset_tensor[:, 1].max()
 
@@ -253,7 +239,7 @@ def main():
     if config.model_name == 'LightGCN':
         # TODO: check if I should use dataloader, dataset and model from official LightGCN implementation
         # TODO: use DataLoader and Dataset object from RecSys_pytorch implementation
-        model = LightGCN(dataset=train_dataset, hyperparams=config, device=config.device).to(config.device)
+        model = LightGCN(dataset=dataset_all, config=vars(config)).to(config.device)
     elif config.model_name == 'ItemKNN':
         model = ItemKNN(n_users=train_dataset.n_users, n_items=train_dataset.n_items).to(config.device)
     elif config.model_name == 'MultVAE':
