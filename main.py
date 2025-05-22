@@ -5,10 +5,10 @@ from torch.utils.data import DataLoader, Dataset
 from torch_geometric.graphgym import train
 
 # from LightGCN_PyTorch.code.register import dataset
-from recbole.data import create_dataset
-# from LightGCN_PyTorch.code.model import LightGCN
-# from RecSys_PyTorch.models import ItemKNN
-# from vae_cf_pytorch.models import MultiVAE
+# from recbole.data import create_dataset
+from LightGCN_PyTorch.code.model import LightGCN
+from RecSys_PyTorch.models import ItemKNN
+from vae_cf_pytorch.models import MultiVAE
 from utils_functions import set_seed, plot_community_confidence, plot_community_connectivity_distribution, \
     plot_degree_distributions, plot_connectivity, plot_confidence
 from precompute import get_community_connectivity_matrix, get_community_labels, get_power_users_items, \
@@ -24,123 +24,12 @@ import pandas as pd
 from sklearn.model_selection import KFold
 from evaluation import evaluate_model, precalculate_average_popularity
 from utils_functions import power_node_edge_dropout
+from config import Config
+from dataset import InteractionDataset, get_dataset_tensor
+from training import train_and_evaluate
 import sys
 # sys.path.append('/path/to/LightGCN_PyTorch')
 # sys.path.append('/path/to/RecSys_PyTorch')
-
-
-class Config:
-    """Central configuration class to store all parameters."""
-
-    def __init__(self):
-        self.model_name = None
-        self.dataset_name = None
-        self.users_top_percent = None
-        self.items_top_percent = None
-        self.users_dec_perc_drop = None
-        self.items_dec_perc_drop = None
-        self.community_suppression = None
-        self.drop_only_power_nodes = None
-        self.use_dropout = None
-        self.k_th_fold = None
-
-        # Will be set during initialization
-        self.device = None
-        self.user_com_labels = None
-        self.item_com_labels = None
-        self.power_users_ids = None
-        self.power_items_ids = None
-        self.user_community_connectivity_matrix = None
-        self.item_community_connectivity_matrix = None
-        self.user_community_connectivity_matrix_distribution = None
-        self.item_community_connectivity_matrix_distribution = None
-        self.biased_user_edges_mask = None
-        self.biased_item_edges_mask = None
-        self.train_mask = None
-        self.valid_mask = None
-        self.test_mask = None
-        self.train_dataset_len = 0
-
-        # training parameters; lr-scheduler, optimizer, etc.
-        self.patience = 2
-        self.gamma = 0.5
-        self.min_lr = 1e-5
-        self.reproducibility = True
-        self.learning_rate = 1e-3
-        self.nr_items = None
-
-        self.setup_device()
-
-    def update_from_args(self, args):
-        """Update config from command line arguments."""
-        for key, value in vars(args).items():
-            setattr(self, key, value)
-
-    def setup_model_config(self):
-        """Setup model-specific configurations."""
-        if self.model_name == 'LightGCN':
-            self.train_batch_size = 512
-            self.eval_batch_size = 512
-            self.batch_size = 512  # For consistency
-            self.epochs = 200  # because it's different for each model
-            self.num_layers = 5
-            self.emb_dim = 128
-            self.split = False
-            self.num_folds = 5
-            self.node_dropout = 0.0
-            self.reg = 1e-4
-            self.graph_dir = f'./dataset/{self.dataset_name}/lgcn_graphs'
-        elif self.model_name == 'ItemKNN':
-            self.epochs = 1
-            self.item_knn_topk = 250
-            self.shrink = 10
-            self.feature_weighting = 'bm25'
-        elif self.model_name == 'MultiVAE':
-            self.epochs = 200
-            self.train_batch_size = 4096
-            self.eval_batch_size = 4096
-            self.batch_size = 4096  # For consistency
-            self.hidden_dimension = 800
-            self.latent_dimension = 200
-            self.q_dims = [self.hidden_dimension, self.latent_dimension]
-            self.p_dims = [self.latent_dimension, self.hidden_dimension, self.nr_items]
-            self.drop = 0.7
-            self.anneal_cap = 0.3
-            self.total_anneal_steps = 200000
-
-    def setup_device(self, try_gpu=True):
-        """Setup computation device."""
-        if try_gpu:
-            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        else:
-            self.device = torch.device('cpu')
-        return self.device
-
-    def log_config(self):
-        """Log current configuration."""
-        logger = getLogger()
-        c_handler = logging.StreamHandler()
-        c_handler.setLevel(logging.INFO)
-        logger.addHandler(c_handler)
-        logger.info(vars(self))
-        return logger
-
-
-class InteractionDataset(Dataset):
-    def __init__(self, adj):
-        self.adj = adj  # store DataFrame for later dropout updates
-        self.users = torch.tensor(adj[:, 0], dtype=torch.int32)
-        self.items = torch.tensor(adj[:, 1], dtype=torch.int32)
-        self.ratings = torch.tensor(adj[:, 2], dtype=torch.int8)
-
-        self.n_users = int(adj[:, 0].max()) + 1
-        self.n_items = int(adj[:, 1].max()) + 1
-
-    def __len__(self):
-        return len(self.users)
-
-    def __getitem__(self, idx):
-        return self.users[idx], self.items[idx], self.ratings[idx]
 
 
 def parse_arguments():
@@ -242,15 +131,17 @@ def get_biased_connectivity_data(config, adj_tens):
     config.user_community_connectivity_matrix = user_community_connectivity_matrix
     config.item_community_connectivity_matrix = item_community_connectivity_matrix
 
+    user_community_connectivity_matrix[0] = torch.zeros(user_community_connectivity_matrix.shape[1],
+                                                        device=config.device)  # node indices start at 1, so we just set a value to be not nan
+    item_community_connectivity_matrix[0] = torch.zeros(item_community_connectivity_matrix.shape[1],
+                                                        device=config.device)
+
     config.user_community_connectivity_matrix_distribution = user_community_connectivity_matrix / torch.sum(
         user_community_connectivity_matrix, dim=1, keepdim=True)
     config.item_community_connectivity_matrix_distribution = item_community_connectivity_matrix / torch.sum(
         item_community_connectivity_matrix, dim=1, keepdim=True)
 
-    user_community_connectivity_matrix[0] = torch.zeros(user_community_connectivity_matrix.shape[1],
-                                                        device=config.device)  # node indices start at 1, so we just set a value to be not nan
-    item_community_connectivity_matrix[0] = torch.zeros(item_community_connectivity_matrix.shape[1],
-                                                        device=config.device)
+
 
     user_labels_Leiden_matrix_mask = np.loadtxt(f'dataset/{config.dataset_name}/user_labels_Leiden_matrix_mask.csv',
                                                 delimiter=',')
@@ -262,8 +153,8 @@ def get_biased_connectivity_data(config, adj_tens):
         adj_tens=adj_tens,
         user_com_labels_mask=torch.tensor(user_labels_Leiden_matrix_mask, device=config.device),
         item_com_labels_mask=torch.tensor(item_labels_Leiden_matrix_mask, device=config.device),
-        user_community_connectivity_matrix_distribution=user_community_connectivity_matrix,
-        item_community_connectivity_matrix_distribution=item_community_connectivity_matrix,
+        user_community_connectivity_matrix_distribution=config.user_community_connectivity_matrix_distribution,
+        item_community_connectivity_matrix_distribution=config.item_community_connectivity_matrix_distribution,
         bias_threshold=0.4)
 
 
@@ -319,133 +210,6 @@ def get_subset_masks(config):
     config.train_mask = train_mask
     config.valid_mask = valid_mask
     config.test_mask = test_mask
-
-
-def get_dataset_tensor(config):
-    """Get dataset tensor using config object."""
-    if not os.path.exists(f'dataset/{config.dataset_name}/{config.dataset_name}_processed.npy'):
-        min_degree = 5 if 'ml' in config.dataset_name else 5  # 10 for lfm?
-        min_rating = 4 if 'ml' in config.dataset_name else 5  # in lfm rating is number of listening event
-        if os.path.exists(f'dataset/{config.dataset_name}/{config.dataset_name}.inter'):
-            interaction = np.loadtxt(f'dataset/{config.dataset_name}/{config.dataset_name}.inter', delimiter=' ', skiprows=1)
-        elif os.path.exists(f'dataset/{config.dataset_name}/{config.dataset_name}.data'):
-            interaction = np.loadtxt(f'dataset/{config.dataset_name}/{config.dataset_name}.data', delimiter='\t', skiprows=0)
-        else:
-            raise FileNotFoundError(f"Dataset file not found in dataset/{config.dataset_name}")
-        interaction = interaction[:, :3]  # get only user_id, item_id, rating columns
-        # if all are 1, we need to binarize the ratings
-        interaction = interaction[interaction[:, 2] >= min_rating]  # get only ratings with 4 and above
-        interaction[:, 2] = 1  # binarize the ratings
-        user_degrees = np.bincount(interaction[:, 0].astype(int))
-        item_degrees = np.bincount(interaction[:, 1].astype(int))
-        valid_users = np.where(user_degrees >= min_degree)[0]
-        valid_items = np.where(item_degrees >= min_degree)[0]
-        interaction = interaction[np.isin(interaction[:, 0], valid_users) & np.isin(interaction[:, 1], valid_items)]
-        np.random.shuffle(interaction)
-        interaction = np.array(interaction, dtype=np.int32)
-        np.save(f'dataset/{config.dataset_name}/{config.dataset_name}_processed.npy', interaction)
-    else:
-        interaction = np.load(f'dataset/{config.dataset_name}/{config.dataset_name}_processed.npy', mmap_mode='r')
-
-    config.train_dataset_len = len(interaction)
-
-    return torch.tensor(interaction, dtype=torch.int32, device=config.device)
-
-
-def train_and_evaluate(config, model, train_dataset, test_dataset):
-    """Train and evaluate model using config for all parameters"""
-    optimizer = optim.Adam(model.parameters(), lr=config.learning_rate)
-    # Create a learning rate scheduler that reduces LR on plateau
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer,
-        mode='max',  # max ndcg
-        factor=config.gamma,
-        patience=config.patience,
-        min_lr=config.min_lr,
-        verbose=True
-    )
-
-    criterion = nn.BCEWithLogitsLoss()
-    best_valid_score = -float('inf')
-
-    kf = KFold(n_splits=5, shuffle=True)
-    results = {}
-    # calculate average popularity dict
-    avg_item_pop = precalculate_average_popularity(train_dataset.adj)
-
-    for fold, (train_idx, valid_idx) in enumerate(kf.split(train_dataset)):
-        print(f"Fold {fold + 1}")
-        print("-------")
-
-        valid_loader = DataLoader(
-            dataset=train_dataset,
-            batch_size=config.batch_size,
-            sampler=torch.utils.data.SubsetRandomSampler(valid_idx),
-        )
-
-        for epoch in range(config.epochs):
-            model.train()
-            train_adj_i = power_node_edge_dropout(
-                train_dataset.adj,
-                power_users_idx=config.power_users_ids,
-                power_items_idx=config.power_items_ids,
-                biased_user_edges_mask=config.biased_user_edges_mask,
-                biased_item_edges_mask=config.biased_item_edges_mask,
-                drop_only_power_nodes=config.drop_only_power_nodes,
-                community_suppression=config.community_suppression,
-                users_dec_perc_drop=config.users_dec_perc_drop,
-                items_dec_perc_drop=config.items_dec_perc_drop
-            )
-            train_dataset_epoch_i = InteractionDataset(train_adj_i)
-
-            # we make the loader after the dropout to not edit the loader
-            train_loader = DataLoader(
-                dataset=train_dataset_epoch_i,
-                batch_size=config.batch_size,
-                sampler=torch.utils.data.SubsetRandomSampler(train_idx),
-                pin_memory=True,  # for faster data transfer to GPU
-            )
-
-            epoch_loss = 0.0
-            for users, items, ratings in train_loader:
-                users = users.to(config.device)
-                items = items.to(config.device)
-                ratings = ratings.to(config.device)
-                optimizer.zero_grad()
-                outputs = model(users, items)
-                loss = criterion(outputs.squeeze(), ratings)
-                loss.backward()
-                optimizer.step()
-                epoch_loss += loss.item()
-
-            metrics_eval = evaluate_model(model=model, test_loader=valid_loader, device=config.device, item_popularity=avg_item_pop)
-            results[fold] = metrics_eval
-            # Update learning rate scheduler based on the validation metric
-            scheduler.step(metrics_eval[10]['ndcg'])
-
-            # Log current learning rate
-            current_lr = optimizer.param_groups[0]['lr']
-            wandb.log({"learning_rate": current_lr})
-
-            if metrics_eval[10]['ndcg'] > best_valid_score:  # eval at ndcg@10
-                best_valid_score = metrics_eval['ndcg']
-                torch.save(model.state_dict(), f"{config.model_name}_{config.dataset_name}_best.pth")
-
-            wandb.log({"epoch": epoch, "loss": epoch_loss, **metrics_eval})
-
-    results_folds_averages_each_k = {
-        k: {metric: sum(fold[k][metric] for fold in results.values()) / len(results) for metric in
-            next(iter(results.values()))[k].keys()} for k in next(iter(results.values())).keys()}
-
-    # test the finished model
-    test_loader = DataLoader(
-        dataset=test_dataset,
-        batch_size=config.eval_batch_size,
-        shuffle=False,
-        pin_memory=True,
-    )
-    test_metrics = evaluate_model(model, test_loader, config)
-    return best_valid_score, test_metrics
 
 
 def main():
