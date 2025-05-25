@@ -7,8 +7,9 @@ from torch_geometric.graphgym import train
 # from LightGCN_PyTorch.code.register import dataset
 # from recbole.data import create_dataset
 from LightGCN_PyTorch.code.model import LightGCN
-from RecSys_PyTorch.models import ItemKNN
-from vae_cf_pytorch.models import MultiVAE
+from LightGCN_PyTorch.code.dataloader import Movielens100k
+# from RecSys_PyTorch.models import ItemKNN
+# from vae_cf_pytorch.models import MultiVAE
 from utils_functions import set_seed, plot_community_confidence, plot_community_connectivity_distribution, \
     plot_degree_distributions, plot_connectivity, plot_confidence
 from precompute import get_community_connectivity_matrix, get_community_labels, get_power_users_items, \
@@ -78,8 +79,8 @@ def initialize_wandb(config):
 
     if config.model_name == 'LightGCN':
         wandb_config.update({
-            "emb_dim": config.emb_dim,
-            "num_layers": config.num_layers,
+            "emb_dim": config.latent_dim_rec,
+            "num_layers": config.lightGCN_n_layers,
         })
     elif config.model_name == 'ItemKNN':
         wandb_config.update({
@@ -100,9 +101,6 @@ def initialize_wandb(config):
         name=f"{config.model_name}_{config.dataset_name}_users_top_{config.users_top_percent}_com_drop_strength_{config.community_suppression}",
         config=wandb_config
     )
-
-
-
 
 
 def get_biased_connectivity_data(config, adj_tens):
@@ -209,11 +207,14 @@ def main():
     config.log_config()
 
     dataset_tensor = get_dataset_tensor(config)
-    dataset_all = LightGCNDataset(dataset_tensor)
+
     test_size = 0.2  # 1 - 0.2 = 0.8 => 0.8 / 5 = 0.16 so whole numbers for 5 folds
-    train_dataset = LightGCNDataset(dataset_tensor[:int(len(dataset_tensor) * (1 - test_size))])
-    test_dataset = LightGCNDataset(dataset_tensor[int(len(dataset_tensor) * (1 - test_size)):])
-    config.train_dataset_len = len(train_dataset)
+    train_dataset_len = int(len(dataset_tensor) * (1 - test_size))  # 80% for training/validation, 20% for testing
+    validation_indices = np.arange(config.k_th_fold * (train_dataset_len // 5),
+                                   (config.k_th_fold + 1) * (train_dataset_len // 5), dtype=np.int64)
+
+    dataset_all = Movielens100k(validation_indices=validation_indices)
+    config.train_dataset_len = train_dataset_len
     config.nr_items = dataset_tensor[:, 1].max()
 
     # TODO: check community bias and connectivity if correct

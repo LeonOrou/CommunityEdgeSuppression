@@ -317,4 +317,3 @@ class ItemKNN:
         return predictions
 
 
-class MultiVAE(nn

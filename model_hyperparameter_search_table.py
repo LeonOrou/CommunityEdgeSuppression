@@ -152,7 +152,7 @@ def display_results(results):
         print(tabulate(df[display_cols].head(10), headers='keys', tablefmt='github', floatfmt=".4f"))
 
         # Save to CSV
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%n_categories%S")
         # Create directory if it doesn't exist
         os.makedirs("results", exist_ok=True)
         filename = f"results/{model_name}_results_{timestamp}.csv"

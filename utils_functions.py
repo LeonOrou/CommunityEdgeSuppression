@@ -6,7 +6,7 @@ import torch_geometric
 import matplotlib
 matplotlib.use('agg')
 import matplotlib.pyplot as plt
-from precompute import get_user_item_community_connectivity_matrices
+from scipy.stats import binom
 
 
 # set seed function for all libraries used in the project
@@ -94,6 +94,29 @@ def power_node_edge_dropout(adj_tens, power_users_idx,
 
     adj_tens[drop_mask, 2] = community_suppression
     return adj_tens
+
+
+def binomial_significance_threshold(n_iteractions, n_categories, alpha=0.05):
+    """
+    Returns the smallest count T such that P(X >= T) <= alpha/n_categories,
+    where X ~ Binomial(n_iteractions, 1/n_categories)
+
+    Parameters:
+    - n_iteractions: total number of trials (e.g. total user interactions)
+    - n_categories: number of categories (assumes uniform distribution over n_categories)
+    - alpha: desired significance level (default = 0.05)
+
+    Returns:
+    - threshold: smallest integer T satisfying the inequality
+    - threshold_proportion: T / n_iteractions as a float
+    """
+    p = 1 / n_categories
+    alpha_per_test = alpha / n_categories
+    for T in range(n_iteractions + 1):
+        p_val = binom.sf(T - 1, n_iteractions, p)  # sf = P(X >= T)
+        if p_val <= alpha_per_test:
+            return T, T / n_iteractions
+    return n_iteractions, 1.0  # fallback if no value found
 
 
 # @profile

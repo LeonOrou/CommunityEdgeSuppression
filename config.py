@@ -1,6 +1,7 @@
 import torch
 import logging
 
+
 class Config:
     """Central configuration class to store all parameters."""
 
@@ -55,9 +56,12 @@ class Config:
             self.eval_batch_size = 512
             self.batch_size = 512  # For consistency
             self.epochs = 200  # because it's different for each model
-            self.num_layers = 5
-            self.emb_dim = 128
-            self.split = False
+            self.lightGCN_n_layers = 5
+            self.latent_dim_rec = 128
+            self.A_split = False
+            self.keep_prob = 0.0  # dropout rate
+            self.dropout = False
+            self.pretrain = 0
             self.num_folds = 5
             self.node_dropout = 0.0
             self.reg = 1e-4
