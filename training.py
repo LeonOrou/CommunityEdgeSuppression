@@ -8,7 +8,7 @@ from LightGCN_PyTorch.code.utils import minibatch
 from evaluation import evaluate_model
 from evaluation import precalculate_average_popularity
 from utils_functions import power_node_edge_dropout
-from dataset import LightGCNDataset
+from dataset import get_train_loader
 import wandb
 
 
@@ -40,16 +40,16 @@ def get_train_loader(dataset, batch_size, device):
     Returns:
         Batched data loader for training
     """
-    users = torch.tensor([sample[0] for sample in dataset], dtype=torch.long).to(device)
-    pos_items = torch.tensor([sample[1] for sample in dataset], dtype=torch.long).to(device)
-    neg_items = torch.tensor([sample[2] for sample in dataset], dtype=torch.long).to(device)
+    users = torch.tensor(dataset[:, 0], dtype=torch.long).to(device)
+    pos_items = torch.tensor(dataset[:, 1], dtype=torch.long).to(device)
+    neg_items = torch.tensor(dataset[:, 2], dtype=torch.long).to(device)
 
     # Using the minibatch function from utils.py
     train_loader = minibatch(users, pos_items, neg_items, batch_size=batch_size)
     return train_loader
 
 
-def train_and_evaluate(config, model, train_dataset, test_dataset):
+def train_and_evaluate(config, model, dataset, test_dataset):
     """Train and evaluate model using config for all parameters"""
     optimizer = optim.Adam(model.parameters(), lr=config.learning_rate)
     # Create a learning rate scheduler that reduces LR on plateau
@@ -61,30 +61,38 @@ def train_and_evaluate(config, model, train_dataset, test_dataset):
         min_lr=config.min_lr,
     )
 
-    criterion = nn.BCEWithLogitsLoss()
     best_valid_score = -float('inf')
 
     kf = KFold(n_splits=5, shuffle=True)
     results = {}
     # calculate average popularity dict
-    avg_item_pop = precalculate_average_popularity(train_dataset.adj)
+    positive_train_items = dataset.getUserPosItems(dataset.trainUser)
+    negative_train_items = dataset.getUserNegItems(dataset.trainUser)
+    pos_neg_train_dataset = torch.stack((dataset.trainUser, positive_train_items, negative_train_items))
+    train_dataset = get_train_loader(pos_neg_train_dataset, config.batch_size, config.device)
 
-    for fold, (train_idx, valid_idx) in enumerate(kf.split(train_dataset)):
+    positive_test_items = test_dataset.getUserPosItems(test_dataset.testUser)
+    negative_test_items = test_dataset.getUserNegItems(test_dataset.testUser)
+    pos_neg_test_dataset = torch.stack((test_dataset.testUser, positive_test_items, negative_test_items))
+    test_dataset = get_train_loader(pos_neg_test_dataset, config.eval_batch_size, config.device)
+    avg_item_pop = precalculate_average_popularity(dataset.train_interaction)
+
+    for fold, (train_idx, valid_idx) in enumerate(kf.split(dataset)):
         print(f"Fold {fold + 1}")
         print("-------")
 
         # TODO: make custom dataloaders for each model
         # TODO: make custom training for each model
-        valid_loader = DataLoader(
-            dataset=train_dataset,
+        valid_loader = get_train_loader(
+            dataset=pos_neg_train_dataset[valid_idx],
             batch_size=config.batch_size,
-            sampler=torch.utils.data.SubsetRandomSampler(valid_idx),
+            device=config.device
         )
 
         for epoch in range(config.epochs):
             model.train()
-            train_adj_i = power_node_edge_dropout(
-                train_dataset.adj,
+            new_train_interaction_i = power_node_edge_dropout(
+                adj_tens=dataset.train_interaction,
                 power_users_idx=config.power_users_ids,
                 power_items_idx=config.power_items_ids,
                 biased_user_edges_mask=config.biased_user_edges_mask,
@@ -94,7 +102,10 @@ def train_and_evaluate(config, model, train_dataset, test_dataset):
                 users_dec_perc_drop=config.users_dec_perc_drop,
                 items_dec_perc_drop=config.items_dec_perc_drop
             )
-            train_dataset_epoch_i = LightGCNDataset(train_adj_i)
+            positive_train_items = dataset.getUserPosItems(dataset.trainUser[train_adj_i_mask])
+            negative_train_items = dataset.getUserNegItems(dataset.trainUser[train_adj_i_mask])
+            pos_neg_train_dataset = torch.stack((dataset.trainUser[train_adj_i_mask], positive_train_items, negative_train_items))
+            train_dataset = get_train_loader(pos_neg_train_dataset, config.batch_size, config.device)
 
             # we make the loader after the dropout to not edit the loader
             train_loader = get_train_loader(train_dataset_epoch_i, config.batch_size, config.device)

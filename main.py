@@ -8,6 +8,7 @@ from torch_geometric.graphgym import train
 # from recbole.data import create_dataset
 from LightGCN_PyTorch.code.model import LightGCN
 from LightGCN_PyTorch.code.dataloader import Movielens100k
+# from LightGCN_PyTorch.code.utils import minibatch, UniformSample_original
 # from RecSys_PyTorch.models import ItemKNN
 # from vae_cf_pytorch.models import MultiVAE
 from utils_functions import set_seed, plot_community_confidence, plot_community_connectivity_distribution, \
@@ -26,7 +27,7 @@ from sklearn.model_selection import KFold
 from evaluation import evaluate_model, precalculate_average_popularity
 from utils_functions import power_node_edge_dropout
 from config import Config
-from dataset import get_dataset_tensor, LightGCNDataset
+from dataset import get_dataset_tensor
 from training import train_and_evaluate
 import sys
 # sys.path.append('/path/to/LightGCN_PyTorch')
@@ -254,8 +255,7 @@ def main():
     best_valid_score, test_metrics = train_and_evaluate(
         config=config,
         model=model,
-        train_dataset=train_dataset,
-        test_dataset=test_dataset
+        dataset=dataset_all
     )
 
     # Finalize wandb
