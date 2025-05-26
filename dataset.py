@@ -8,7 +8,7 @@ from LightGCN_PyTorch.code.utils import minibatch
 class LightGCNDataset(Dataset):
     def __init__(self, interaction_data):
         self.interaction = interaction_data  # Numpy array of [user, item, rating]
-        self.n_users = int(interaction_data[:, 0].max()) + 1
+        self.n_users = int(interaction_data[:, 0].max()) + 1  # +1 if IDs start from 0
         self.n_items = int(interaction_data[:, 1].max()) + 1
 
         # Build positive item dictionary for each user
@@ -59,7 +59,7 @@ def get_dataset_tensor(config):
         min_degree = 10 if 'ml' in config.dataset_name else 5  # 10 for lfm?
         min_rating = 4 if 'ml' in config.dataset_name else 5  # in lfm rating is number of listening event
         if os.path.exists(f'dataset/{config.dataset_name}/{config.dataset_name}.inter'):
-            interaction = np.loadtxt(f'dataset/{config.dataset_name}/{config.dataset_name}.inter', delimiter=' ', skiprows=1)
+            interaction = np.loadtxt(f'dataset/{config.dataset_name}/{config.dataset_name}.inter', delimiter='\t', skiprows=1)
         elif os.path.exists(f'dataset/{config.dataset_name}/{config.dataset_name}.data'):
             interaction = np.loadtxt(f'dataset/{config.dataset_name}/{config.dataset_name}.data', delimiter='\t', skiprows=0)
         else:
@@ -77,10 +77,10 @@ def get_dataset_tensor(config):
         # Create mappings for user IDs
         # TODO: reindex also genre label item id's
         unique_users = np.unique(interaction[:, 0])
-        user_id_map = {old_id: new_id for new_id, old_id in enumerate(unique_users, start=1)}
+        user_id_map = {old_id: new_id for new_id, old_id in enumerate(unique_users, start=0)}
         # Create mappings for item IDs
         unique_items = np.unique(interaction[:, 1])
-        item_id_map = {old_id: new_id for new_id, old_id in enumerate(unique_items, start=1)}
+        item_id_map = {old_id: new_id for new_id, old_id in enumerate(unique_items, start=0)}
         # Create reindexed array
         reindexed = interaction.copy()
         reindexed[:, 0] = np.array([user_id_map[uid] for uid in interaction[:, 0]])
@@ -94,6 +94,11 @@ def get_dataset_tensor(config):
         interaction = np.load(f'dataset/{config.dataset_name}/{config.dataset_name}_processed.npy', mmap_mode='r')
 
     config.train_dataset_len = len(interaction)
+
+    user_degrees = np.bincount(interaction[:, 0].astype(int))
+    item_degrees = np.bincount(interaction[:, 1].astype(int))
+    config.user_degrees = user_degrees
+    config.item_degrees = item_degrees
 
     return torch.tensor(interaction, dtype=torch.int64, device=config.device)
 
