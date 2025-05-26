@@ -25,7 +25,7 @@ import os
 import pandas as pd
 from sklearn.model_selection import KFold
 from evaluation import evaluate_model, precalculate_average_popularity
-from utils_functions import power_node_edge_dropout
+from utils_functions import community_edge_dropout
 from config import Config
 from dataset import get_dataset_tensor
 from training import train_and_evaluate
@@ -109,9 +109,6 @@ def get_biased_connectivity_data(config, adj_tens):
         config=config,
         adj_tens=adj_tens)
 
-
-    # user/item id 0 is never used / nan as labels start at 1 and we use them for indexing
-    # normalize as distribution along the rows
     config.user_community_connectivity_matrix = user_community_connectivity_matrix
     config.item_community_connectivity_matrix = item_community_connectivity_matrix
 
@@ -119,8 +116,6 @@ def get_biased_connectivity_data(config, adj_tens):
         user_community_connectivity_matrix, dim=1, keepdim=True)
     config.item_community_connectivity_matrix_distribution = item_community_connectivity_matrix / torch.sum(
         item_community_connectivity_matrix, dim=1, keepdim=True)
-
-
 
     user_labels_Leiden_matrix_mask = np.loadtxt(f'dataset/{config.dataset_name}/user_labels_Leiden_matrix_mask.csv',
                                                 delimiter=',')
@@ -204,20 +199,14 @@ def main():
 
     dataset_tensor = get_dataset_tensor(config)
 
-    test_size = 0.2  # 1 - 0.2 = 0.8 => 0.8 / 5 = 0.16 so whole numbers for 5 folds
-    train_dataset_len = int(len(dataset_tensor) * (1 - test_size))  # 80% for training/validation, 20% for testing
-    validation_indices = np.arange(config.k_th_fold * (train_dataset_len // 5),
-                                   (config.k_th_fold + 1) * (train_dataset_len // 5), dtype=np.int64)
-
-    dataset_all = Movielens(dataset_name=config.dataset_name, validation_indices=validation_indices)
-    config.train_dataset_len = train_dataset_len
+    dataset_all = Movielens(dataset_name=config.dataset_name)
+    config.train_dataset_len = int(len(dataset_tensor) * 0.8)
     config.nr_items = Movielens.m_items
 
     # TODO: check community bias and connectivity if correct
     get_community_data(
         config=config,
-        adj_np=dataset_tensor.cpu().numpy()
-    )
+        adj_np=dataset_tensor.cpu().numpy())
 
     get_biased_connectivity_data(
         config=config,
@@ -250,8 +239,7 @@ def main():
     best_valid_score, test_metrics = train_and_evaluate(
         config=config,
         model=model,
-        dataset=dataset_all
-    )
+        dataset=dataset_all)
 
     # Finalize wandb
     wandb.log({"final_test_metrics": test_metrics})

@@ -60,11 +60,12 @@ def get_community_labels(config, adj_np, algorithm='Leiden', save_path='dataset/
 
     # user_community_thresholds = user_probs.shape[1] ** (-2/3)  # TODO: introduce statistical significance test instead of **(-2/3)
     # item_community_thresholds = item_probs.shape[1] ** (-2/3)
-    user_community_thresholds = binomial_significance_threshold(n_interactions=config.user_degrees, n_categories=user_probs.shape[1], alpha=0.05)
-    item_community_thresholds = binomial_significance_threshold(n_interactions=config.item_degrees, n_categories=item_probs.shape[1], alpha=0.05)
+    counts_users, user_community_thresholds = binomial_significance_threshold(n_interactions=config.user_degrees, n_categories=user_probs.shape[1], alpha=0.05)
+    counts_items, item_community_thresholds = binomial_significance_threshold(n_interactions=config.item_degrees, n_categories=item_probs.shape[1], alpha=0.05)
 
-    user_labels[user_probs_sorted[:, 0] < user_community_thresholds] = -1
-    item_labels[item_probs_sorted[:, 0] < item_community_thresholds] = -1
+    # Replace -1 with another value (e.g., 0 or a special flag like -99)
+    user_labels = np.where(user_probs_sorted[:, 0] < user_community_thresholds, -1, user_labels)
+    item_labels = np.where(item_probs_sorted[:, 0] < item_community_thresholds, -1, item_labels)
 
     user_labels_sorted_matrix = np.full((user_labels.shape[0], user_probs_sorted.shape[1]), fill_value=-1, dtype=np.int64)
     item_labels_sorted_matrix = np.full((item_labels.shape[0], item_probs_sorted.shape[1]), fill_value=-1, dtype=np.int64)

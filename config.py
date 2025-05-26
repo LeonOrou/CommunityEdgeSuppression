@@ -65,6 +65,7 @@ class Config:
             self.num_folds = 5
             self.node_dropout = 0.0
             self.reg = 1e-4
+            self.weight_decay = 1
             self.graph_dir = f'./dataset/{self.dataset_name}/lgcn_graphs'
         elif self.model_name == 'ItemKNN':
             self.epochs = 1

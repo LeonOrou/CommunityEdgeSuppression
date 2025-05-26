@@ -8,7 +8,7 @@ from recbole.utils import (
     set_color,
 )
 import torch
-from utils_functions import power_node_edge_dropout
+from utils_functions import community_edge_dropout
 import os
 import numpy as np
 import copy
@@ -73,15 +73,15 @@ class PowerDropoutTrainer(Trainer):
             adj_tens = torch.cat((indices, values), dim=1).to(torch.int64)
             del train_data_coo, indices, values
 
-            new_inter_feat = power_node_edge_dropout(adj_tens=adj_tens,
-                                                     power_users_idx=self.config.variable_config_dict['power_users_ids'],
-                                                     power_items_idx=self.config.variable_config_dict['power_items_ids'],
-                                                     biased_user_edges_mask=self.config.variable_config_dict['biased_user_edges_mask'],
-                                                     biased_item_edges_mask=self.config.variable_config_dict['biased_item_edges_mask'],
-                                                     users_dec_perc_drop=self.config.variable_config_dict['users_dec_perc_drop'],
-                                                     items_dec_perc_drop=self.config.variable_config_dict['items_dec_perc_drop'],
-                                                     community_dropout_strength=self.config.variable_config_dict['community_dropout_strength'],
-                                                     drop_only_power_nodes=self.config.variable_config_dict['drop_only_power_nodes'], )
+            new_inter_feat = community_edge_dropout(adj_tens=adj_tens,
+                                                    power_users_idx=self.config.variable_config_dict['power_users_ids'],
+                                                    power_items_idx=self.config.variable_config_dict['power_items_ids'],
+                                                    biased_user_edges_mask=self.config.variable_config_dict['biased_user_edges_mask'],
+                                                    biased_item_edges_mask=self.config.variable_config_dict['biased_item_edges_mask'],
+                                                    users_dec_perc_drop=self.config.variable_config_dict['users_dec_perc_drop'],
+                                                    items_dec_perc_drop=self.config.variable_config_dict['items_dec_perc_drop'],
+                                                    community_dropout_strength=self.config.variable_config_dict['community_dropout_strength'],
+                                                    drop_only_power_nodes=self.config.variable_config_dict['drop_only_power_nodes'], )
 
             cpu_data = new_inter_feat.cpu().numpy()
             interaction_df = pd.DataFrame(cpu_data, columns=train_data.dataset.inter_feat.columns)

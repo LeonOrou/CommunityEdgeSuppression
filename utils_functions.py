@@ -23,17 +23,11 @@ def set_seed(seed):
     # pandas.util.testing.rng = np.random.RandomState(seed)
 
 
-def power_node_edge_dropout(adj_tens, power_users_idx,
-                            power_items_idx,
-                            biased_user_edges_mask=None,
-                            biased_item_edges_mask=None,
-                            users_dec_perc_drop=0.05,
-                            items_dec_perc_drop=0.05,
-                            community_dropout_strength=0.6,
-                            drop_only_power_nodes=True):
+def community_edge_dropout(adj_tens, config):
     """
     Drop edges from the adjacency tensor based on community labels and dropout rates.
     :param adj_tens: torch.tensor, adjacency tensor with shape (n, 3) containing (user_id, item_id, rating)
+    :param config: Config object containing all necessary parameters
     :param power_users_idx: torch.tensor vector, adj_tens indices of power users
     :param power_items_idx: torch.tensor vector, adj_tens indices of power items
     :param biased_user_edges_mask: torch.tensor bool vector, adj_tens indices of biased user edges, i.e. edges they most interact with / in-community
@@ -45,11 +39,18 @@ def power_node_edge_dropout(adj_tens, power_users_idx,
     :return: adj_tens: torch.tensor, modified adjacency tensor without dropped edges (dropped via mask)
     """
 
-    # Make a copy to avoid modifying the original tensor
+    power_users_idx = config.power_users_ids,
+    power_items_idx = config.power_items_ids,
+    biased_user_edges_mask = config.biased_user_edges_mask,
+    biased_item_edges_mask = config.biased_item_edges_mask,
+    drop_only_power_nodes = config.drop_only_power_nodes,
+    community_dropout_strength = config.community_suppression,
+    users_dec_perc_drop = config.users_dec_perc_drop,
+    items_dec_perc_drop = config.items_dec_perc_drop
+
     adj_tens = adj_tens.clone()
     device = adj_tens.device
 
-    # Create a boolean mask for tracking edges to drop (more efficient than concatenating tensors)
     drop_mask = torch.zeros(adj_tens.shape[0], dtype=torch.bool, device=adj_tens.device)
 
     if users_dec_perc_drop > 0.0:
@@ -92,8 +93,8 @@ def power_node_edge_dropout(adj_tens, power_users_idx,
             perm = torch.randperm(in_com_item_indices.numel(), device=device)[:in_com_item_drop_count]
             drop_mask[in_com_item_indices[perm]] = True  # TODO: handle cases where the dropped edges would overlap
 
-    adj_tens[drop_mask, 2] = community_dropout_strength
-    return adj_tens
+    keepers_mask = ~drop_mask
+    return keepers_mask
 
 
 def binomial_significance_threshold(n_interactions, n_categories, alpha=0.05):

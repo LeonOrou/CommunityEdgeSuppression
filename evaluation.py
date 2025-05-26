@@ -5,7 +5,7 @@ from collections import defaultdict
 import math
 
 
-def evaluate_model(model, test_loader, device, k_list=[10, 20, 50], user_item_history=None,
+def evaluate_model(model, test_loader, device, k_list=[10, 20, 50, 100], user_item_history=None,
                    item_popularity=None, train_matrix=None):
     """
     GPU-optimized evaluation function that processes users in batches,

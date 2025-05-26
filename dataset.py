@@ -43,16 +43,6 @@ class LightGCNDataset(Dataset):
         return user_item_pairs
 
 
-def get_train_loader(dataset, batch_size):
-    users = torch.tensor([sample[0] for sample in dataset], dtype=torch.long).to('cuda')
-    pos_items = torch.tensor([sample[1] for sample in dataset], dtype=torch.long).to('cuda')
-    neg_items = torch.tensor([sample[2] for sample in dataset], dtype=torch.long).to('cuda')
-
-    # Using the minibatch and shuffle functions from utils.py
-    train_loader = minibatch(users, pos_items, neg_items, batch_size=batch_size)
-    return train_loader
-
-
 def get_dataset_tensor(config):
     """Get dataset tensor using config object."""
     if not os.path.exists(f'dataset/{config.dataset_name}/{config.dataset_name}_processed.npy'):
