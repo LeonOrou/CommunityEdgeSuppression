@@ -131,7 +131,7 @@ def objective(trial):
     model_name = trial.suggest_categorical("model_name", ["LightGCN"])
     users_dec_perc_drop = trial.suggest_categorical("users_dec_perc_drop", [0.0, 0.1])
     items_dec_perc_drop = trial.suggest_categorical("items_dec_perc_drop", [0.0, 0.2])
-    community_dropout_strength = trial.suggest_categorical("community_suppression", [0.0, 0.5, 0.9])
+    community_dropout_strength = trial.suggest_categorical("community_dropout_strength", [0.0, 0.5, 0.9])
     do_power_nodes_from_community = True
     DATASET_NAME = "ml-100k"
 
@@ -151,7 +151,7 @@ def objective(trial):
         config_dict={
             'users_dec_perc_drop': users_dec_perc_drop,
             'items_dec_perc_drop': items_dec_perc_drop,
-            'community_suppression': community_dropout_strength
+            'community_dropout_strength': community_dropout_strength
         }
     )
     config['device'] = device
@@ -169,7 +169,7 @@ def objective(trial):
             "items_top_percent": ITEMS_TOP_PERCENT,
             "users_dec_perc_drop": users_dec_perc_drop,
             "items_dec_perc_drop": items_dec_perc_drop,
-            "community_suppression": community_dropout_strength,
+            "community_dropout_strength": community_dropout_strength,
             "do_power_nodes_from_community": do_power_nodes_from_community,
             "batch_size": config_file['train_batch_size'],
             "TopK": config_file['topk'],

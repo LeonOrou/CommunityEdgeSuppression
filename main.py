@@ -7,7 +7,7 @@ from torch_geometric.graphgym import train
 # from LightGCN_PyTorch.code.register import dataset
 # from recbole.data import create_dataset
 from LightGCN_PyTorch.code.model import LightGCN
-from LightGCN_PyTorch.code.dataloader import Movielens100k
+from LightGCN_PyTorch.code.dataloader import Movielens
 # from LightGCN_PyTorch.code.utils import minibatch, UniformSample_original
 # from RecSys_PyTorch.models import ItemKNN
 # from vae_cf_pytorch.models import MultiVAE
@@ -43,7 +43,7 @@ def parse_arguments():
     parser.add_argument("--items_top_percent", type=float, default=0.05)
     parser.add_argument("--users_dec_perc_drop", type=float, default=0.05)
     parser.add_argument("--items_dec_perc_drop", type=float, default=0.05)
-    parser.add_argument("--community_suppression", type=float, default=0.6)
+    parser.add_argument("--community_dropout_strength", type=float, default=0.6)
     parser.add_argument("--drop_only_power_nodes", type=bool, default=True)
     parser.add_argument("--use_dropout", type=bool, default=True)
     parser.add_argument("--k_th_fold", type=int, default=0)
@@ -63,7 +63,7 @@ def initialize_wandb(config):
         "items_top_percent": config.items_top_percent,
         "users_dec_perc_drop": config.users_dec_perc_drop,
         "items_dec_perc_drop": config.items_dec_perc_drop,
-        "community_suppression": config.community_suppression,
+        "community_dropout_strength": config.community_dropout_strength,
         "use_dropout": config.use_dropout,
         "drop_only_power_nodes": config.drop_only_power_nodes,
         "k_th_fold": config.k_th_fold,
@@ -99,7 +99,7 @@ def initialize_wandb(config):
 
     return wandb.init(
         project="RecSys_PowerNodeEdgeDropout",
-        name=f"{config.model_name}_{config.dataset_name}_users_top_{config.users_top_percent}_com_drop_strength_{config.community_suppression}",
+        name=f"{config.model_name}_{config.dataset_name}_users_top_{config.users_top_percent}_com_drop_strength_{config.community_dropout_strength}",
         config=wandb_config
     )
 
@@ -107,18 +107,13 @@ def initialize_wandb(config):
 def get_biased_connectivity_data(config, adj_tens):
     user_community_connectivity_matrix, item_community_connectivity_matrix = calculate_community_metrics(
         config=config,
-        adj_tens=adj_tens
-    )
+        adj_tens=adj_tens)
+
 
     # user/item id 0 is never used / nan as labels start at 1 and we use them for indexing
     # normalize as distribution along the rows
     config.user_community_connectivity_matrix = user_community_connectivity_matrix
     config.item_community_connectivity_matrix = item_community_connectivity_matrix
-
-    user_community_connectivity_matrix[0] = torch.zeros(user_community_connectivity_matrix.shape[1],
-                                                        device=config.device)  # node indices start at 1, so we just set a value to be not nan
-    item_community_connectivity_matrix[0] = torch.zeros(item_community_connectivity_matrix.shape[1],
-                                                        device=config.device)
 
     config.user_community_connectivity_matrix_distribution = user_community_connectivity_matrix / torch.sum(
         user_community_connectivity_matrix, dim=1, keepdim=True)
@@ -182,7 +177,7 @@ def get_subset_masks(config):
     dataset_len = config.train_dataset_len
     fold_size = dataset_len // 5  # 5 folds, test set is excluded
     start = config.k_th_fold * fold_size
-    end = (config.k_th_fold + 1) * fold_size if config.k_th_fold !=4 else dataset_len
+    end = (config.k_th_fold + 1) * fold_size if config.k_th_fold != 4 else dataset_len
 
     valid_mask = np.zeros(dataset_len, dtype=bool)
     valid_mask[start:end] = True
@@ -214,9 +209,9 @@ def main():
     validation_indices = np.arange(config.k_th_fold * (train_dataset_len // 5),
                                    (config.k_th_fold + 1) * (train_dataset_len // 5), dtype=np.int64)
 
-    dataset_all = Movielens100k(validation_indices=validation_indices)
+    dataset_all = Movielens(dataset_name=config.dataset_name, validation_indices=validation_indices)
     config.train_dataset_len = train_dataset_len
-    config.nr_items = dataset_tensor[:, 1].max()
+    config.nr_items = Movielens.m_items
 
     # TODO: check community bias and connectivity if correct
     get_community_data(

@@ -29,7 +29,7 @@ def power_node_edge_dropout(adj_tens, power_users_idx,
                             biased_item_edges_mask=None,
                             users_dec_perc_drop=0.05,
                             items_dec_perc_drop=0.05,
-                            community_suppression=0.6,
+                            community_dropout_strength=0.6,
                             drop_only_power_nodes=True):
     """
     Drop edges from the adjacency tensor based on community labels and dropout rates.
@@ -40,7 +40,7 @@ def power_node_edge_dropout(adj_tens, power_users_idx,
     :param biased_item_edges_mask: torch.tensor bool vector, adj_tens indices of biased item edges, i.e. edges they most interact with / in-community
     :param users_dec_perc_drop: float [0, 1], dropout percentage of adj_tens for biased user edges
     :param items_dec_perc_drop: float [0, 1], dropout percentage of adj_tens for biased item edges
-    :param community_suppression: float [0, 1]: float, strength of community dropout: [0, 1]; 0 means normal dropout, 1 only biased / in-community
+    :param community_dropout_strength: float [0, 1]: float, strength of community dropout: [0, 1]; 0 means normal dropout, 1 only biased / in-community
     :param drop_only_power_nodes: bool, whether to drop edges from power nodes or not
     :return: adj_tens: torch.tensor, modified adjacency tensor without dropped edges (dropped via mask)
     """
@@ -92,34 +92,29 @@ def power_node_edge_dropout(adj_tens, power_users_idx,
             perm = torch.randperm(in_com_item_indices.numel(), device=device)[:in_com_item_drop_count]
             drop_mask[in_com_item_indices[perm]] = True  # TODO: handle cases where the dropped edges would overlap
 
-    adj_tens[drop_mask, 2] = community_suppression
+    adj_tens[drop_mask, 2] = community_dropout_strength
     return adj_tens
 
 
-def binomial_significance_threshold(n_iteractions, n_categories, alpha=0.05):
+def binomial_significance_threshold(n_interactions, n_categories, alpha=0.05):
     """
-    Returns the smallest count T such that P(X >= T) <= alpha/n_categories,
-    where X ~ Binomial(n_iteractions, 1/n_categories)
-
-    Parameters:
-    - n_iteractions: total number of trials (e.g. total user interactions)
-    - n_categories: number of categories (assumes uniform distribution over n_categories)
-    - alpha: desired significance level (default = 0.05)
-
-    Returns:
-    - threshold: smallest integer T satisfying the inequality
-    - threshold_proportion: T / n_iteractions as a float
+    Returns the smallest count T (clamped to n_interactions) such that
+    P(X >= T) <= alpha/n_categories, and its proportion T/n_interactions <= 1.
     """
-    p = 1 / n_categories
+    p = 1.0 / n_categories
     alpha_per_test = alpha / n_categories
-    for T in range(n_iteractions + 1):
-        p_val = binom.sf(T - 1, n_iteractions, p)  # sf = P(X >= T)
-        if p_val <= alpha_per_test:
-            return T, T / n_iteractions
-    return n_iteractions, 1.0  # fallback if no value found
+
+    n_arr = np.atleast_1d(n_interactions)
+    # find k with P(X > k) ≤ alpha_per_test, so T=k+1 may exceed n -> clamp next
+    raw_thresh = binom.isf(alpha_per_test, n_arr, p) + 1
+    thresh = np.minimum(raw_thresh, n_arr)           # clamp to max trials
+    props = thresh / n_arr                           # now guaranteed ≤ 1
+
+    if np.isscalar(n_interactions):
+        return int(thresh[0]), float(props[0])
+    return thresh.astype(int), props
 
 
-# @profile
 def plot_community_confidence(user_probs_path=None, user_labels=None, algorithm='Leiden', force_bipartite=True,
                               save_path='images/', top_n_communities=10, dataset_name=''):
     """
@@ -236,7 +231,6 @@ def plot_confidence(probs, save_path=None, dataset_name="", users_items='users')
     plt.show()
     if save_path:
         plt.savefig(f"{save_path}/{dataset_name}_{users_items}_probs_confidence.png")
-
 
 def plot_community_connectivity_distribution(user_connectivity_matrix, top_n_communities=10, save_path=None, dataset_name=''):
     """

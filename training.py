@@ -98,7 +98,7 @@ def train_and_evaluate(config, model, dataset, test_dataset):
                 biased_user_edges_mask=config.biased_user_edges_mask,
                 biased_item_edges_mask=config.biased_item_edges_mask,
                 drop_only_power_nodes=config.drop_only_power_nodes,
-                community_suppression=config.community_suppression,
+                community_dropout_strength=config.community_suppression,
                 users_dec_perc_drop=config.users_dec_perc_drop,
                 items_dec_perc_drop=config.items_dec_perc_drop
             )
