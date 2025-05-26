@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 from sknetwork.clustering import Leiden, Louvain
 from argparse import ArgumentParser
 import os
+from utils_functions import binomial_significance_threshold
 
 
 def get_community_labels(config, adj_np, algorithm='Leiden', save_path='dataset/ml-100k', get_probs=True, force_bipartite=True):
@@ -26,7 +27,13 @@ def get_community_labels(config, adj_np, algorithm='Leiden', save_path='dataset/
     adj_csr = sp.csr_matrix((adj_np[:, 2].astype(float), (adj_np[:, 0].astype(int), adj_np[:, 1].astype(int))))
 
     if algorithm == 'Leiden':
-        detect_obj = Leiden(return_aggregate=False, verbose=False)
+        if config.dataset_name == 'ml-100k':
+            resolution = 1.2
+        elif config.dataset_name == 'ml-20m':
+            resolution = 1.5
+        else:  # config.dataset_name == 'lfm':
+            resolution = 1.5
+        detect_obj = Leiden(resolution=resolution, return_aggregate=False, sort_clusters=True)
 
     detect_obj.fit(adj_csr, force_bipartite=force_bipartite)
 
@@ -51,14 +58,13 @@ def get_community_labels(config, adj_np, algorithm='Leiden', save_path='dataset/
     user_probs_sorted = np.sort(user_probs, axis=1)[:, ::-1]
     item_probs_sorted = np.sort(item_probs, axis=1)[:, ::-1]
 
-    # by visual inspection of the community interaction matrix, we choose:
-    #    1 / user_probs.shape[1] * user_probs.shape[1] ** (1/3))
-    #    = user_probs.shape[1] ** (-2/3)
-    user_community_threshold = user_probs.shape[1] ** (-2/3)  # TODO: introduce statistical significance test instead of **(-2/3)
-    item_community_threshold = item_probs.shape[1] ** (-2/3)
-    # if the probability of the first label is less than (1/nr_of_labels * 1.5) , set the label to -1
-    user_labels[user_probs_sorted[:, 0] < user_community_threshold] = -1
-    item_labels[item_probs_sorted[:, 0] < item_community_threshold] = -1
+    # user_community_thresholds = user_probs.shape[1] ** (-2/3)  # TODO: introduce statistical significance test instead of **(-2/3)
+    # item_community_thresholds = item_probs.shape[1] ** (-2/3)
+    user_community_thresholds = binomial_significance_threshold(n_interactions=config.user_degrees, n_categories=user_probs.shape[1], alpha=0.05)
+    item_community_thresholds = binomial_significance_threshold(n_interactions=config.item_degrees, n_categories=item_probs.shape[1], alpha=0.05)
+
+    user_labels[user_probs_sorted[:, 0] < user_community_thresholds] = -1
+    item_labels[item_probs_sorted[:, 0] < item_community_thresholds] = -1
 
     user_labels_sorted_matrix = np.full((user_labels.shape[0], user_probs_sorted.shape[1]), fill_value=-1, dtype=np.int64)
     item_labels_sorted_matrix = np.full((item_labels.shape[0], item_probs_sorted.shape[1]), fill_value=-1, dtype=np.int64)
@@ -67,8 +73,8 @@ def get_community_labels(config, adj_np, algorithm='Leiden', save_path='dataset/
     item_labels_matrix_mask = np.zeros(item_labels_sorted_matrix.shape, dtype=np.int64)
 
     for i in range(0, user_probs.shape[1]):
-        user_labels_i = np.where(user_probs_sorted[:, i] > user_community_threshold, user_probs_argsorted[:, i], -1)
-        item_labels_i = np.where(item_probs_sorted[:, i] > item_community_threshold, item_probs_argsorted[:, i], -1)
+        user_labels_i = np.where(user_probs_sorted[:, i] > user_community_thresholds, user_probs_argsorted[:, i], -1)
+        item_labels_i = np.where(item_probs_sorted[:, i] > item_community_thresholds, item_probs_argsorted[:, i], -1)
 
         if np.all(user_labels_i == -1) and np.all(item_labels_i == -1):
             break
@@ -84,8 +90,8 @@ def get_community_labels(config, adj_np, algorithm='Leiden', save_path='dataset/
     user_labels_sorted_matrix = user_labels_sorted_matrix[:, np.any(user_labels_sorted_matrix != -1, axis=0)]
     item_labels_sorted_matrix = item_labels_sorted_matrix[:, np.any(item_labels_sorted_matrix != -1, axis=0)]
 
-    np.savetxt(f'{save_path}/user_labels_{algorithm}_processed.csv', user_labels, delimiter=",")
-    np.savetxt(f'{save_path}/item_labels_{algorithm}_processed.csv', item_labels, delimiter=",")
+    np.savetxt(f'{save_path}/user_labels_{algorithm}_processed.csv', user_labels, delimiter=",", fmt='% 4d')
+    np.savetxt(f'{save_path}/item_labels_{algorithm}_processed.csv', item_labels, delimiter=",", fmt='% 4d')
 
     np.savetxt(f'{save_path}/user_labels_{algorithm}_matrix.csv', user_labels_sorted_matrix, delimiter=",", fmt='% 4d')
     np.savetxt(f'{save_path}/item_labels_{algorithm}_matrix.csv', item_labels_sorted_matrix, delimiter=",", fmt='% 4d')
