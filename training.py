@@ -8,6 +8,8 @@ from evaluation import evaluate_model
 from evaluation import precalculate_average_popularity
 from utils_functions import community_edge_dropout
 import wandb
+import numpy as np
+from LightGCN_PyTorch.code.utils import UniformSample_original_python
 
 
 def bpr_loss(self, users, pos, neg):
@@ -63,14 +65,21 @@ def train_and_evaluate(config, model, dataset):
     kf = KFold(n_splits=5, shuffle=True)
     results = {}
     # calculate average popularity dict
+    S = UniformSample_original_python(dataset)
+    users = torch.tensor(S[:, 0], dtype=torch.int64)
+    items = torch.tensor(S[:, 1], dtype=torch.int64)
+    neg_items = torch.tensor(S[:, 2], dtype=torch.int64)
+    pos_neg_train_dataset = torch.stack((users, items, neg_items), dim=1)
+    train_dataset = get_dataset_loader(pos_neg_train_dataset, config.batch_size, config.device)
+
     positive_train_items = dataset.getUserPosItems(dataset.trainUser)
     negative_train_items = dataset.getUserNegItems(dataset.trainUser)
-    pos_neg_train_dataset = torch.stack((dataset.trainUser, positive_train_items, negative_train_items))
+    pos_neg_train_dataset = torch.tensor(np.concatenate((dataset.trainUser, positive_train_items, negative_train_items), axis=1), dtype=torch.int64)
     train_dataset = get_dataset_loader(pos_neg_train_dataset, config.batch_size, config.device)
 
     positive_test_items = dataset.getUserPosItems(dataset.testUser)
     negative_test_items = dataset.getUserNegItems(dataset.testUser)
-    pos_neg_test_dataset = torch.stack((dataset.testUser, positive_test_items, negative_test_items))
+    pos_neg_test_dataset = torch.tensor(np.concatenate((dataset.testUser, positive_test_items, negative_test_items), axis=1), dtype=torch.int64)
     test_dataset = get_dataset_loader(pos_neg_test_dataset, config.eval_batch_size, config.device)
     avg_item_pop = precalculate_average_popularity(dataset.train_interaction)
 
