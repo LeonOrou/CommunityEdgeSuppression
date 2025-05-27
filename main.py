@@ -43,7 +43,7 @@ def parse_arguments():
     parser.add_argument("--items_top_percent", type=float, default=0.05)
     parser.add_argument("--users_dec_perc_drop", type=float, default=0.05)
     parser.add_argument("--items_dec_perc_drop", type=float, default=0.05)
-    parser.add_argument("--community_dropout_strength", type=float, default=0.6)
+    parser.add_argument("--community_dropout_strength", type=float, default=1)
     parser.add_argument("--drop_only_power_nodes", type=bool, default=True)
     parser.add_argument("--use_dropout", type=bool, default=True)
     parser.add_argument("--k_th_fold", type=int, default=0)
