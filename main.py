@@ -7,7 +7,7 @@ from torch_geometric.graphgym import train
 # from LightGCN_PyTorch.code.register import dataset
 # from recbole.data import create_dataset
 from LightGCN_PyTorch.code.model import LightGCN
-from LightGCN_PyTorch.code.dataloader import Movielens
+from dataset import Movielens
 # from LightGCN_PyTorch.code.utils import minibatch, UniformSample_original
 # from RecSys_PyTorch.models import ItemKNN
 # from vae_cf_pytorch.models import MultiVAE

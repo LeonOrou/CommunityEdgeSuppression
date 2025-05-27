@@ -56,7 +56,7 @@ class Config:
             self.eval_batch_size = 512
             self.batch_size = 512  # For consistency
             self.epochs = 200  # because it's different for each model
-            self.lightGCN_n_layers = 5
+            self.lightGCN_n_layers = 4
             self.latent_dim_rec = 128
             self.A_split = False
             self.keep_prob = 0.0  # dropout rate
