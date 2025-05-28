@@ -67,7 +67,7 @@ def train():
 
 
 @torch.no_grad()
-def test(k: int):
+def test(k: int, data=data, batch_size=batch_size,):
     emb = model.get_embedding(data.edge_index)
     user_emb, book_emb = emb[:num_users], emb[num_users:]
 
@@ -103,6 +103,7 @@ def test(k: int):
 
 for epoch in range(1, 101):
     loss = train()
-    precision, recall = test(k=20)
+    precision, recall = test(k=20, data=data, batch_size=batch_size)
     print(f'Epoch: {epoch:03d}, Loss: {loss:.4f}, Precision@20: '
           f'{precision:.4f}, Recall@20: {recall:.4f}')
+
