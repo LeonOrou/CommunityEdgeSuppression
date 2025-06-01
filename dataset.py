@@ -2,7 +2,6 @@ import torch
 from torch.utils.data import Dataset
 import numpy as np
 import os
-from LightGCN_PyTorch.code.utils import minibatch
 from LightGCN_PyTorch.code.dataloader import BasicDataset
 from os.path import join
 import scipy.sparse as sp
@@ -127,6 +126,7 @@ class Movielens(BasicDataset):
         test_indices = indices[test_size_from:]
         train_indices = indices[:test_size_from]
 
+        self.interaction = processed_data
         self.train_interaction = processed_data[train_indices]
         self.test_interaction = processed_data[test_indices]
 
