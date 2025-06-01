@@ -34,7 +34,7 @@ def community_edge_dropout(adj_tens, config):
     :param biased_item_edges_mask: torch.tensor bool vector, adj_tens indices of biased item edges, i.e. edges they most interact with / in-community
     :param users_dec_perc_drop: float [0, 1], dropout percentage of adj_tens for biased user edges
     :param items_dec_perc_drop: float [0, 1], dropout percentage of adj_tens for biased item edges
-    :param community_dropout_strength: float [0, 1]: float, strength of community dropout: [0, 1]; 0 means normal dropout, 1 only biased / in-community
+    :param community_suppression: float [0, 1]: float, strength of community dropout: [0, 1]; 0 means normal dropout, 1 only biased / in-community
     :param drop_only_power_nodes: bool, whether to drop edges from power nodes or not
     :return: adj_tens: torch.tensor, modified adjacency tensor without dropped edges (dropped via mask)
     """
@@ -44,14 +44,14 @@ def community_edge_dropout(adj_tens, config):
     biased_user_edges_mask = config.biased_user_edges_mask,
     biased_item_edges_mask = config.biased_item_edges_mask,
     drop_only_power_nodes = config.drop_only_power_nodes,
-    community_dropout_strength = config.community_suppression,
+    community_suppression = config.community_suppression,
     users_dec_perc_drop = config.users_dec_perc_drop,
     items_dec_perc_drop = config.items_dec_perc_drop
 
     adj_tens = adj_tens.clone()
     device = adj_tens.device
 
-    drop_mask = torch.zeros(adj_tens.shape[0], dtype=torch.bool, device=adj_tens.device)
+    suppress_mask = torch.zeros(adj_tens.shape[0], dtype=torch.bool, device=adj_tens.device)
 
     if users_dec_perc_drop > 0.0:
         user_edge_mask = torch.zeros(adj_tens.shape[0], dtype=torch.bool, device=device)
@@ -70,7 +70,7 @@ def community_edge_dropout(adj_tens, config):
 
         if in_com_user_drop_count > 0 and in_com_user_indices.numel() > 0:
             perm = torch.randperm(in_com_user_indices.numel(), device=device)[:in_com_user_drop_count]
-            drop_mask[in_com_user_indices[perm]] = True
+            suppress_mask[in_com_user_indices[perm]] = True
 
     if items_dec_perc_drop > 0.0:
         # Find all edges connected to power items
@@ -91,10 +91,11 @@ def community_edge_dropout(adj_tens, config):
 
         if in_com_item_drop_count > 0 and in_com_item_indices.numel() > 0:
             perm = torch.randperm(in_com_item_indices.numel(), device=device)[:in_com_item_drop_count]
-            drop_mask[in_com_item_indices[perm]] = True  # TODO: handle cases where the dropped edges would overlap
+            suppress_mask[in_com_item_indices[perm]] = True  # TODO: handle cases where the dropped edges would overlap
 
-    keepers_mask = ~drop_mask
-    return keepers_mask
+    edge_weights_new = torch.ones(adj_tens.shape[0], dtype=torch.float32, device=device)
+    edge_weights_new[suppress_mask] = community_suppression
+    return edge_weights_new
 
 
 def binomial_significance_threshold(n_interactions, n_categories, alpha=0.05):
