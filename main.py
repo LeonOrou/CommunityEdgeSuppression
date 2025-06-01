@@ -43,7 +43,7 @@ def parse_arguments():
     parser.add_argument("--items_top_percent", type=float, default=0.05)
     parser.add_argument("--users_dec_perc_drop", type=float, default=0.05)
     parser.add_argument("--items_dec_perc_drop", type=float, default=0.05)
-    parser.add_argument("--community_dropout_strength", type=float, default=1)
+    parser.add_argument("--community_suppression", type=float, default=0.6)
     parser.add_argument("--drop_only_power_nodes", type=bool, default=True)
     parser.add_argument("--use_dropout", type=bool, default=True)
     parser.add_argument("--k_th_fold", type=int, default=0)
@@ -63,7 +63,7 @@ def initialize_wandb(config):
         "items_top_percent": config.items_top_percent,
         "users_dec_perc_drop": config.users_dec_perc_drop,
         "items_dec_perc_drop": config.items_dec_perc_drop,
-        "community_dropout_strength": config.community_dropout_strength,
+        "community_suppression": config.community_suppression,
         "use_dropout": config.use_dropout,
         "drop_only_power_nodes": config.drop_only_power_nodes,
         "k_th_fold": config.k_th_fold,
@@ -99,7 +99,7 @@ def initialize_wandb(config):
 
     return wandb.init(
         project="RecSys_PowerNodeEdgeDropout",
-        name=f"{config.model_name}_{config.dataset_name}_users_top_{config.users_top_percent}_com_drop_strength_{config.community_dropout_strength}",
+        name=f"{config.model_name}_{config.dataset_name}_users_top_{config.users_top_percent}_com_suppression_{config.community_suppression}",
         config=wandb_config
     )
 
