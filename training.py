@@ -4,15 +4,17 @@ from torch_geometric.data import Data
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split, KFold
-from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import ndcg_score
 import os
 from collections import defaultdict
 import warnings
 
+from config import Config
 from evaluation import evaluate_model_with_complete_graph
 from models import LightGCN
 import torch.optim as optim
+from dataset import RecommendationDataset
+from argparse import ArgumentParser
 
 warnings.filterwarnings('ignore')
 
@@ -32,114 +34,6 @@ def load_movielens_data(data_path='ml-100k'):
     # Load ratings data (user_id, item_id, rating, timestamp)
     ratings = pd.read_csv(ratings_file, sep='\t', names=['user_id', 'item_id', 'rating', 'timestamp'])
     return ratings
-
-
-def prepare_data_with_consistent_encoding(ratings_df, min_interactions=5):
-    """
-    Prepare data ensuring ALL users and items are encoded consistently
-    across train/validation/test splits
-    """
-    # Filter users and items with minimum interactions FIRST
-    ratings_df = ratings_df.sample(frac=1, random_state=42).reset_index(drop=True)
-
-    user_counts = ratings_df['user_id'].value_counts()
-    item_counts = ratings_df['item_id'].value_counts()
-
-    valid_users = user_counts[user_counts >= min_interactions].index
-    valid_items = item_counts[item_counts >= min_interactions].index
-
-    filtered_df = ratings_df[
-        (ratings_df['user_id'].isin(valid_users)) &
-        (ratings_df['item_id'].isin(valid_items))
-        ].copy()
-
-    # Encode ALL users and items that appear in the dataset
-    # This ensures consistent encoding across all splits
-    user_encoder = LabelEncoder()
-    item_encoder = LabelEncoder()
-
-    filtered_df['user_encoded'] = user_encoder.fit_transform(filtered_df['user_id'])
-    filtered_df['item_encoded'] = item_encoder.fit_transform(filtered_df['item_id'])
-
-    num_users = len(user_encoder.classes_)
-    num_items = len(item_encoder.classes_)
-
-    return filtered_df, num_users, num_items, user_encoder, item_encoder
-
-
-def create_bipartite_graph(df, num_users, num_items, rating_weights=None):
-    """Create bipartite graph with edge weights based on ratings"""
-
-    # Default rating weights (can be customized)
-    if rating_weights is None:
-        rating_weights = {1: 0.2, 2: 0.4, 3: 0.6, 4: 0.8, 5: 1.0}
-
-    users = df['user_encoded'].values
-    items = df['item_encoded'].values + num_users  # Offset items by num_users
-    ratings = df['rating'].values
-
-    # Create edge weights based on ratings
-    edge_weights = np.array([rating_weights.get(r, 0.5) for r in ratings])
-
-    # Create bidirectional edges (user->item and item->user)
-    edge_index = torch.tensor([
-        np.concatenate([users, items]),
-        np.concatenate([items, users])
-    ], dtype=torch.long)
-
-    edge_weight = torch.tensor(
-        np.concatenate([edge_weights, edge_weights]),
-        dtype=torch.float
-    )
-
-    return edge_index, edge_weight
-
-
-def split_interactions_by_user(df, test_ratio=0.2, val_ratio=0.1):
-    """
-    Split interactions for each user into train/val/test
-    This ensures all users appear in training data
-    """
-    train_list = []
-    val_list = []
-    test_list = []
-
-    for user_id, group in df.groupby('user_encoded'):
-        user_interactions = group.sort_values('timestamp').reset_index(drop=True)
-        n_interactions = len(user_interactions)
-
-        if n_interactions < 3:
-            # If user has very few interactions, put most in training, 1 in test
-            train_list.append(user_interactions.iloc[:-1])
-            test_list.append(user_interactions.iloc[-1:])
-            continue
-
-        # Calculate split points
-        n_test = max(1, int(n_interactions * test_ratio))
-        n_val = max(1, int(n_interactions * val_ratio))
-        n_train = n_interactions - n_test - n_val
-
-        if n_train < 1:
-            n_train = 1
-            n_val = max(0, n_interactions - n_train - n_test)
-            n_test = n_interactions - n_train - n_val
-
-        # Split interactions (chronologically)
-        train_interactions = user_interactions.iloc[:n_train]
-        val_interactions = user_interactions.iloc[n_train:n_train + n_val]
-        test_interactions = user_interactions.iloc[n_train + n_val:]
-
-        train_list.append(train_interactions)
-        if len(val_interactions) > 0:
-            val_list.append(val_interactions)
-        if len(test_interactions) > 0:
-            test_list.append(test_interactions)
-
-    train_df = pd.concat(train_list, ignore_index=True) if train_list else pd.DataFrame()
-    val_df = pd.concat(val_list, ignore_index=True) if val_list else pd.DataFrame()
-    test_df = pd.concat(test_list, ignore_index=True) if test_list else pd.DataFrame()
-
-    return train_df, val_df, test_df
 
 
 def bpr_loss(user_emb, pos_item_emb, neg_item_emb):
@@ -172,30 +66,44 @@ def sample_negative_items(user_ids, pos_item_ids, num_items, user_positive_items
     return torch.tensor(neg_items, dtype=torch.long)
 
 
-def train_lightgcn_with_complete_graph(train_df, val_df, test_df, num_users, num_items, epochs=50, verbose=True):
+def get_model(dataset, config):
+    """Initialize model based on type"""
+    if config.model_name == 'LightGCN':
+        return LightGCN(
+            num_users=dataset.num_users,
+            num_items=dataset.num_items,
+            embedding_dim=config.embedding_dim,
+            num_layers=config.n_layers,
+        )
+    elif config.model_name == 'ItemKNN':
+        return ItemKNN(
+            num_items=dataset.num_items,
+            topk=config.item_knn_topk,
+            shrink=config.shrink,
+        )
+    elif config.model_name == 'MultiVAE':
+        return MultiVAE(
+            num_items=dataset.num_items,
+        )
+    else:
+        raise ValueError(f"Unknown model type: {config.model_type}")
+
+
+def train_model_with_complete_graph(dataset, model, config, epochs=50, verbose=True):
     """
     Train LightGCN using the COMPLETE graph structure (train+val+test)
     but only compute loss on training interactions
     """
 
-    # CRITICAL: Create the COMPLETE graph including ALL interactions
-    complete_df = pd.concat([train_df, val_df, test_df], ignore_index=True)
-    complete_edge_index, complete_edge_weight = create_bipartite_graph(complete_df, num_users, num_items)
+    complete_df = pd.concat([dataset.train_df, dataset.val_df, dataset.test_df], ignore_index=True)
 
     print(f"Complete graph: {len(complete_df)} interactions")
-    print(f"Training interactions: {len(train_df)} (used for loss)")
-    print(f"Val interactions: {len(val_df)} (used for evaluation)")
-    print(f"Test interactions: {len(test_df)} (used for evaluation)")
+    print(f"Training interactions: {len(dataset.train_df)} (used for loss)")
+    print(f"Val interactions: {len(dataset.val_df)} (used for evaluation)")
+    print(f"Test interactions: {len(dataset.test_df)} (used for evaluation)")
 
     # Initialize model
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-    model = LightGCN(
-        num_users=num_users,
-        num_items=num_items,
-        embedding_dim=64,
-        num_layers=3
-    ).to(device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-4)
 
@@ -208,8 +116,8 @@ def train_lightgcn_with_complete_graph(train_df, val_df, test_df, num_users, num
     )
 
     # Move data to device
-    complete_edge_index = complete_edge_index.to(device)
-    complete_edge_weight = complete_edge_weight.to(device)
+    dataset.complete_edge_index.to(device)
+    dataset.complete_edge_weight.to(device)
 
     # Create user positive items mapping for better negative sampling (from ALL interactions)
     user_positive_items = defaultdict(set)
@@ -217,19 +125,19 @@ def train_lightgcn_with_complete_graph(train_df, val_df, test_df, num_users, num
         user_positive_items[row['user_encoded']].add(row['item_encoded'])
 
     # Training parameters
-    batch_size = 1024
+    batch_size = config.batch_size
     best_val_ndcg = 0
-    patience = 15
+    patience = config.patience
     patience_counter = 0
 
     model.train()
 
-    for epoch in range(epochs):
+    for epoch in range(config.epochs):
         total_loss = 0
         num_batches = 0
 
         # Sample training batches from TRAINING data only (for loss computation)
-        train_interactions = train_df.sample(n=min(len(train_df), batch_size * 10), replace=True)
+        train_interactions = dataset.train_df.sample(n=min(len(dataset.train_df), batch_size * 10), replace=True)
 
         for i in range(0, len(train_interactions), batch_size):
             batch = train_interactions.iloc[i:i + batch_size]
@@ -245,12 +153,12 @@ def train_lightgcn_with_complete_graph(train_df, val_df, test_df, num_users, num
             batch_neg_items = sample_negative_items(
                 batch['user_encoded'].values,
                 batch['item_encoded'].values,
-                num_items,
+                dataset.num_items,
                 user_positive_items=user_positive_items
             ).to(device)
 
             # Forward pass - use COMPLETE graph for embeddings
-            user_emb, item_emb = model(complete_edge_index, complete_edge_weight)
+            user_emb, item_emb = model(dataset.complete_edge_index, dataset.complete_edge_weight)
 
             # Get embeddings for batch
             batch_user_emb = user_emb[batch_users]
@@ -282,8 +190,8 @@ def train_lightgcn_with_complete_graph(train_df, val_df, test_df, num_users, num
         # Validation every 5 epochs
         if epoch % 5 == 0:
             val_metrics = evaluate_model_with_complete_graph(
-                model, complete_edge_index, complete_edge_weight,
-                val_df, train_df, num_users, num_items
+                model, dataset.complete_edge_index, dataset.complete_edge_weight,
+                dataset.val_df, dataset.train_df, dataset.num_users, dataset.num_items
             )
             val_ndcg = val_metrics['ndcg']
 
@@ -307,26 +215,30 @@ def train_lightgcn_with_complete_graph(train_df, val_df, test_df, num_users, num
     if 'best_model_state' in locals():
         model.load_state_dict(best_model_state)
 
-    return model, complete_edge_index, complete_edge_weight
+    return model, dataset.complete_edge_index, dataset.complete_edge_weight
 
 
 def cross_validation_experiment_complete():
     """Run cross validation with complete graph approach"""
-    print("Loading MovieLens data...")
-    ratings_df = load_movielens_data()
-    print(f"Loaded {len(ratings_df)} ratings")
+
+    args = parse_arguments()
+    config = Config()
+    config.update_from_args(args)
+    config.setup_model_config()
+    config.log_config()
+
+    dataset = RecommendationDataset(name=config.dataset_name, data_path=f'dataset/{config.dataset_name}_raw')
+    dataset.load_data().prepare_data()
 
     print("Preparing data with consistent encoding...")
-    processed_df, num_users, num_items, user_encoder, item_encoder = prepare_data_with_consistent_encoding(ratings_df)
-    print(f"Processed data: {num_users} users, {num_items} items, {len(processed_df)} interactions")
+    print(f"Processed data: {dataset.num_users} users, {dataset.num_items} items, {len(dataset.complete_df)} interactions")
 
     # Split by interactions per user (not by random split)
     print("Splitting interactions by user...")
-    train_df, val_df, test_df = split_interactions_by_user(processed_df, test_ratio=0.2, val_ratio=0.1)
 
-    print(f"Train set: {len(train_df)} interactions")
-    print(f"Val set: {len(val_df)} interactions")
-    print(f"Test set: {len(test_df)} interactions")
+    print(f"Train set: {len(dataset.train_df)} interactions")
+    print(f"Val set: {len(dataset.val_df)} interactions")
+    print(f"Test set: {len(dataset.test_df)} interactions")
 
     # 5-fold cross validation using temporal splits within training set
     print("\nStarting 5-fold cross validation with complete graph...")
@@ -336,8 +248,10 @@ def cross_validation_experiment_complete():
 
     # Group training data by user for CV splits
     user_train_interactions = {}
-    for user_id, group in train_df.groupby('user_encoded'):
+    for user_id, group in dataset.train_df.groupby('user_encoded'):
         user_train_interactions[user_id] = group.sort_values('timestamp').reset_index(drop=True)
+
+    model = get_model(config=config, dataset=dataset)
 
     n_folds = 5
     for fold in range(n_folds):
@@ -362,16 +276,18 @@ def cross_validation_experiment_complete():
 
         print(f"Fold {fold + 1}: CV Train={len(cv_train_df)}, CV Val={len(cv_val_df)}")
 
-        # Train model with complete graph (CV train + CV val + original val + test)
-        model, complete_edge_index, complete_edge_weight = train_lightgcn_with_complete_graph(
-            cv_train_df, cv_val_df, pd.concat([val_df, test_df]), num_users, num_items, epochs=50
+        model, complete_edge_index, complete_edge_weight = train_model_with_complete_graph(
+            dataset=dataset,
+            model=model,
+            config=config,
+            epochs=50
         )
 
         # Evaluate on CV validation set
         if len(cv_val_df) > 0:
             val_metrics = evaluate_model_with_complete_graph(
                 model, complete_edge_index, complete_edge_weight,
-                cv_val_df, cv_train_df, num_users, num_items
+                cv_val_df, cv_train_df, dataset.num_users, dataset.num_items
             )
 
             fold_results = {
@@ -417,15 +333,15 @@ def cross_validation_experiment_complete():
     print("Training final model with complete graph structure...")
 
     # Final training: use ALL data in graph, but only train+val for loss
-    final_model, final_edge_index, final_edge_weight = train_lightgcn_with_complete_graph(
-        train_df, val_df, test_df, num_users, num_items, epochs=100, verbose=True
+    final_model, final_edge_index, final_edge_weight = train_model_with_complete_graph(
+        dataset.train_df, dataset.val_df, dataset.test_df, dataset.num_users, dataset.num_items, epochs=100, verbose=True
     )
 
     # Evaluate on test set (excluding train+val interactions)
-    train_val_df = pd.concat([train_df, val_df], ignore_index=True)
+    train_val_df = pd.concat([dataset.train_df, dataset.val_df], ignore_index=True)
     test_metrics = evaluate_model_with_complete_graph(
         final_model, final_edge_index, final_edge_weight,
-        test_df, train_val_df, num_users, num_items
+        dataset.test_df, train_val_df, dataset.num_users, dataset.num_items
     )
 
     print(f"\nFinal Test Set Results:")
@@ -455,6 +371,23 @@ def get_recommendations_complete_graph(model, user_id, complete_edge_index, comp
         top_scores = torch.topk(scores, k=k).values
 
     return top_items.cpu().numpy(), top_scores.cpu().numpy()
+
+
+def parse_arguments():
+    """Parse command line arguments."""
+    parser = ArgumentParser()
+    parser.add_argument("--model_name", type=str, default='LightGCN')
+    parser.add_argument("--dataset_name", type=str, default='ml-100k')
+    parser.add_argument("--users_top_percent", type=float, default=0.05)
+    parser.add_argument("--items_top_percent", type=float, default=0.05)
+    parser.add_argument("--users_dec_perc_drop", type=float, default=0.05)
+    parser.add_argument("--items_dec_perc_drop", type=float, default=0.05)
+    parser.add_argument("--community_suppression", type=float, default=0.6)
+    parser.add_argument("--drop_only_power_nodes", type=bool, default=True)
+    parser.add_argument("--use_dropout", type=bool, default=True)
+    parser.add_argument("--k_th_fold", type=int, default=0)
+
+    return parser.parse_args()
 
 
 if __name__ == "__main__":

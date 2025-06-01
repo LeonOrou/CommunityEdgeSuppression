@@ -16,7 +16,6 @@ from utils_functions import set_seed, plot_community_confidence, plot_community_
 from precompute import get_community_connectivity_matrix, get_community_labels, get_power_users_items, \
     get_biased_edges_mask, get_user_item_community_connectivity_matrices
 import wandb
-from argparse import ArgumentParser
 import logging
 from logging import getLogger
 import numpy as np
@@ -80,8 +79,8 @@ def initialize_wandb(config):
 
     if config.model_name == 'LightGCN':
         wandb_config.update({
-            "emb_dim": config.latent_dim_rec,
-            "num_layers": config.lightGCN_n_layers,
+            "emb_dim": config.embedding_dim,
+            "num_layers": config.n_layers,
         })
     elif config.model_name == 'ItemKNN':
         wandb_config.update({

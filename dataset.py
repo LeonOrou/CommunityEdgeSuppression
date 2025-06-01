@@ -9,6 +9,9 @@ from LightGCN_PyTorch.code.world import cprint
 from scipy.sparse import csr_matrix
 from LightGCN_PyTorch.code import world
 from time import time
+import pandas as pd
+from collections import defaultdict
+from sklearn.preprocessing import LabelEncoder
 
 
 def get_dataset_tensor(config):
@@ -86,199 +89,359 @@ def get_pos_neg_items_from_dataset(dataset):
     return np.array(S)
 
 
-class Movielens(BasicDataset):
-    """
-    Dataset type for pytorch \n
-    Incldue graph information
-    Movielens 100k dataset
-    """
-
-    def __init__(self, dataset_name='ml-100k'):
-        # train or test
-        cprint("loading [ml-100k] from processed file")
-        self.mode_dict = {'train': 0, "test": 1}
-        self.mode = self.mode_dict['train']
-        self.dataset_name = dataset_name
-        self.path = f'dataset/{self.dataset_name}'
-
-        # Load the processed file
-        processed_data = np.load(f'{self.path}/{dataset_name}_processed.npy')
-        processed_data = np.array(processed_data, dtype=np.int64)
-        cprint(f"Loaded data shape: {processed_data.shape}")
-
-        # Extract user, item, and rating information
-        users = processed_data[:, 0]
-        items = processed_data[:, 1]
-        ratings = processed_data[:, 2]
-
-        # Get the number of users and items
-        self.n_user = np.max(users) + 1  # IDs start at 0
-        self.m_item = np.max(items) + 1
-
-        # Split the data into train and test sets
-        # already shuffled in preprocessing
-        indices = np.arange(len(users))
-
-        # keep in mind cross validation
-        # test is last 20% of the data
-        # valid set is switching 16% of the train data
-        test_size_from = int(len(users) * 0.8)
-        test_indices = indices[test_size_from:]
-        train_indices = indices[:test_size_from]
-
-        self.interaction = processed_data
-        self.train_interaction = processed_data[train_indices]
-        self.test_interaction = processed_data[test_indices]
-
-        # Create train and test datasets
-        self.trainUser = users[train_indices]
-        self.trainItem = items[train_indices]
-        self.trainRating = ratings[train_indices]
-
-        self.testUser = users[test_indices]
-        self.testItem = items[test_indices]
-        self.testRating = ratings[test_indices]
-
-        self.trainUniqueUsers = np.unique(self.trainUser)
-        self.testUniqueUsers = np.unique(self.testUser)
-
-        self.traindataSize = len(self.trainUser)
-        self.testDataSize = len(self.testUser)
-
-        # print(f"Movielens Sparsity : {(len(self.trainUser) + len(self.testUser))/self.n_users/self.m_items}")
-        print(f"Number of users: {self.n_users}, Number of items: {self.m_items}")
-        print(f"Training interactions: {self.traindataSize}, Testing interactions: {self.testDataSize}")
-
-        # (users,items), bipartite graph
-        self.UserItemNet = csr_matrix((np.ones(len(self.trainUser)), (self.trainUser, self.trainItem)))
-
-        # pre-calculate
-        self._allPos = self.getUserPosItems(list(range(self.n_users)))
-        self.Graph = None
-        self.__testDict = self.__build_test()
-
-    @property
-    def n_users(self):
-        return self.n_user
-
-    @property
-    def m_items(self):
-        return self.m_item
-
-    @property
-    def trainDataSize(self):
-        return self.traindataSize
-
-    @property
-    def testDict(self):
-        return self.__testDict
-
-    @property
-    def allPos(self):
-        return self._allPos
-
-    def __build_test(self):
+class RecommendationDataset:
+    def __init__(self, name='ml-100k', data_path=None, min_interactions=5,
+                 test_ratio=0.2, val_ratio=0.16, random_state=42):
         """
-        return:
-            dict: {user: [items]}
+        Unified dataset class for recommendation systems
+
+        Args:
+            name: Dataset name ('ml-100k', 'ml-20m', 'lfm')
+            data_path: Path to dataset files
+            min_interactions: Minimum interactions per user/item
+            test_ratio: Ratio of test set
+            val_ratio: Ratio of validation set
+            random_state: Random seed for reproducibility
         """
-        test_data = {}
-        for i, item in enumerate(self.testItem):
-            user = self.testUser[i]
-            if test_data.get(user):
-                test_data[user].append(item)
-            else:
-                test_data[user] = [item]
-        return test_data
+        self.name = name
+        self.data_path = data_path or f'dataset/{name}_raw'
+        self.min_interactions = min_interactions
+        self.test_ratio = test_ratio
+        self.val_ratio = val_ratio
+        self.random_state = random_state
 
-    def getUserItemFeedback(self, users, items):
+        # Core attributes (populated after loading)
+        self.raw_df = None  # Original ratings dataframe
+        self.complete_df = None  # Filtered and encoded dataframe
+        self.train_df = None
+        self.val_df = None
+        self.test_df = None
+
+        # Encoding and metadata
+        self.num_users = None
+        self.num_items = None
+        self.user_encoder = None
+        self.item_encoder = None
+
+        # Graph structures (for graph-based models)
+        self.train_edge_index = None
+        self.train_edge_weight = None
+        self.complete_edge_index = None
+        self.complete_edge_weight = None
+
+        # Interaction mappings
+        self.user_positive_items = defaultdict(set)  # {user_id: set(item_ids)}
+        self.item_positive_users = defaultdict(set)  # {item_id: set(user_ids)}
+
+        # Statistics
+        self.stats = {}
+
+    def load_data(self):
+        """Load raw data based on dataset type"""
+        if self.name.startswith('ml-'):
+            self._load_movielens()
+        elif self.name == 'lfm':
+            self._load_lastfm()
+        else:
+            raise ValueError(f"Unknown dataset: {self.name}")
+
+        self._compute_statistics()
+        return self
+
+    def _load_movielens(self):
+        """Load MovieLens dataset"""
+        if self.name == 'ml-100k':
+            ratings_file = os.path.join(self.data_path, 'u.data')
+            self.raw_df = pd.read_csv(ratings_file, sep='\t',
+                                      names=['user_id', 'item_id', 'rating', 'timestamp'],)
+        elif self.name == 'ml-20m':
+            ratings_file = os.path.join(self.data_path, 'ratings.csv')
+            self.raw_df = pd.read_csv(ratings_file)
+            self.raw_df.sample(frac=1, random_state=42).reset_index(drop=True)
+
+    def _load_lastfm(self):
+        """Load Last.fm dataset"""
+        # Implement Last.fm specific loading
+        pass
+
+    def prepare_data_with_consistent_encoding(self, ratings_df):
         """
-        users:
-            shape [-1]
-        items:
-            shape [-1]
-        return:
-            feedback [-1]
+        Prepare data ensuring ALL users and items are encoded consistently
+        across train/validation/test splits
         """
-        return np.array(self.UserItemNet[users, items]).astype('uint8').reshape((-1,))
+        min_interactions = 5
+        min_rating = 4
 
-    def getUserPosItems(self, users):
-        posItems = []
-        for user in users:
-            posItems.append(self.UserItemNet[user].nonzero()[1])
-        return posItems
+        user_counts = ratings_df['user_id'].value_counts()
+        item_counts = ratings_df['item_id'].value_counts()
 
-    def getUserNegItems(self, users):
+        valid_users = user_counts[user_counts >= min_interactions].index
+        valid_items = item_counts[item_counts >= min_interactions].index
+
+        filtered_df = ratings_df[
+            (ratings_df['user_id'].isin(valid_users)) &
+            (ratings_df['item_id'].isin(valid_items))
+            ].copy()
+
+        # Filter out low ratings
+        filtered_df = filtered_df[filtered_df['rating'] >= min_rating].reset_index(drop=True)
+        filtered_df['rating'] = 1  # Treat all valid ratings as positive interactions
+
+        # Encode ALL users and items that appear in the dataset
+        # This ensures consistent encoding across all splits
+        user_encoder = LabelEncoder()
+        item_encoder = LabelEncoder()
+
+        filtered_df['user_encoded'] = user_encoder.fit_transform(filtered_df['user_id'])
+        filtered_df['item_encoded'] = item_encoder.fit_transform(filtered_df['item_id'])
+
+        # save encoders for genre label encoding
+        if not os.path.exists(f'dataset/{self.name}/encoders'):
+            os.makedirs(f'dataset/{self.name}/encoders')
+        pd.to_pickle(user_encoder, f'dataset/{self.name}/encoders/user_encoder.pkl')
+        pd.to_pickle(item_encoder, f'dataset/{self.name}/encoders/item_encoder.pkl')
+
+        num_users = len(user_encoder.classes_)
+        num_items = len(item_encoder.classes_)
+
+        self.complete_df = filtered_df
+        self.num_users = num_users
+        self.num_items = num_items
+        self.user_encoder = user_encoder
+        self.item_encoder = item_encoder
+
+    def split_interactions_by_user(self, val_ratio=0.16, test_ratio=0.2):
         """
-        not necessary for large dataset
-        it's stupid to return all neg items in super large dataset
+        Split interactions for each user into train/val/test
+        This ensures all users appear in training data
         """
-        negItems = []
-        allItems = set(range(self.m_items))
-        for user in users:
-            posItems = set(self.getUserPosItems([user])[0])
-            negItems.append(np.array(list(allItems - posItems)))
-        return negItems
+        # TODO: make only test split and validation from training data
+        train_list = []
+        val_list = []
+        test_list = []
 
-    def getSparseGraph(self):
-        """
-        build a graph in torch.sparse.IntTensor.
-        Details in NGCF's matrix form
-        A =
-            |I,   R|
-            |R^T, I|
-        """
-        print("loading adjacency matrix")
-        if self.Graph is None:
-            try:
-                pre_adj_mat = sp.load_npz(join(self.path, 's_pre_adj_mat.npz'))
-                print("successfully loaded...")
-                norm_adj = pre_adj_mat
-            except:
-                print("generating adjacency matrix")
-                s = time()
-                adj_mat = sp.dok_matrix((self.n_users + self.m_items, self.n_users + self.m_items), dtype=np.float32)
-                adj_mat = adj_mat.tolil()
-                R = self.UserItemNet.tolil()
-                adj_mat[:self.n_users, self.n_users:] = R
-                adj_mat[self.n_users:, :self.n_users] = R.T
-                adj_mat = adj_mat.todok()
+        for user_id, group in self.complete_df.groupby('user_encoded'):
+            # shuffle interactions for this user
+            user_interactions = group.sample(frac=1, random_state=42).reset_index(drop=True)
+            n_interactions = len(user_interactions)
 
-                rowsum = np.array(adj_mat.sum(axis=1))
-                d_inv = np.power(rowsum, -0.5).flatten()
-                d_inv[np.isinf(d_inv)] = 0.
-                d_mat = sp.diags(d_inv)
+            if n_interactions < 3:
+                # If user has very few interactions, put most in training, 1 in test
+                train_list.append(user_interactions.iloc[:-1])
+                test_list.append(user_interactions.iloc[-1:])
+                continue
 
-                norm_adj = d_mat.dot(adj_mat)
-                norm_adj = norm_adj.dot(d_mat)
-                norm_adj = norm_adj.tocsr()
-                end = time()
-                print(f"costing {end - s}s, saved norm_mat...")
-                sp.save_npz(join(self.path, 's_pre_adj_mat.npz'), norm_adj)
+            # Calculate split points
+            n_test = max(1, int(n_interactions * test_ratio))
+            n_val = max(1, int(n_interactions * val_ratio))
+            n_train = n_interactions - n_test - n_val
 
-            self.Graph = self._convert_sp_mat_to_sp_tensor(norm_adj)
-            self.Graph = self.Graph.coalesce().to(world.device)
-        return self.Graph
+            if n_train < 1:
+                n_train = 1
+                n_val = max(0, n_interactions - n_train - n_test)
+                n_test = n_interactions - n_train - n_val
 
-    def _convert_sp_mat_to_sp_tensor(self, X):
-        coo = X.tocoo().astype(np.float32)
-        row = torch.Tensor(coo.row).long()
-        col = torch.Tensor(coo.col).long()
-        index = torch.stack([row, col])
-        data = torch.FloatTensor(coo.data)
-        return torch.sparse.FloatTensor(index, data, torch.Size(coo.shape))
+            # Split interactions
+            train_interactions = user_interactions.iloc[:n_train]
+            val_interactions = user_interactions.iloc[n_train:n_train + n_val]
+            test_interactions = user_interactions.iloc[n_train + n_val:]
 
-    def __getitem__(self, index):
-        user = self.trainUniqueUsers[index]
-        # return user_id and the positive items of the user
-        return user
+            train_list.append(train_interactions)
+            if len(val_interactions) > 0:
+                val_list.append(val_interactions)
+            if len(test_interactions) > 0:
+                test_list.append(test_interactions)
 
-    def switch2test(self):
-        """
-        change dataset mode to offer test data to dataloader
-        """
-        self.mode = self.mode_dict['test']
+        self.train_df = pd.concat(train_list, ignore_index=True) if train_list else pd.DataFrame()
+        self.val_df = pd.concat(val_list, ignore_index=True) if val_list else pd.DataFrame()
+        self.test_df = pd.concat(test_list, ignore_index=True) if test_list else pd.DataFrame()
 
-    def __len__(self):
-        return len(self.trainUniqueUsers)
+
+    def prepare_data(self):
+        """Filter, encode, and split data"""
+        # Filter users/items with minimum interactions
+        self.prepare_data_with_consistent_encoding(self.raw_df)
+
+        self.split_interactions_by_user()
+
+        self._create_graph_structures()
+
+        # self._create_splits()
+        #
+        # # Build interaction mappings
+        # self._build_interaction_mappings()
+        #
+        # # Create graph structures
+        # self._create_graph_structures()
+        #
+        # return self
+
+    def _create_graph_structures(self, rating_weights=None):
+        """Create graph structures for graph-based models"""
+        # Training graph
+        self.train_edge_index, self.train_edge_weight = create_bipartite_graph(
+            self.train_df, self.num_users, self.num_items, rating_weights
+        )
+
+        # Complete graph (train + val + test)
+        complete_df = pd.concat([self.train_df, self.val_df, self.test_df],
+                                ignore_index=True)
+        self.complete_edge_index, self.complete_edge_weight = create_bipartite_graph(
+            complete_df, self.num_users, self.num_items, rating_weights
+        )
+
+    def _build_interaction_mappings(self):
+        """Build user-item interaction mappings"""
+        for df in [self.train_df, self.val_df, self.test_df]:
+            if df is not None and len(df) > 0:
+                for _, row in df.iterrows():
+                    user_id = row['user_encoded']
+                    item_id = row['item_encoded']
+                    self.user_positive_items[user_id].add(item_id)
+                    self.item_positive_users[item_id].add(user_id)
+
+    def get_train_interactions(self, user_id=None):
+        """Get training interactions for a specific user or all users"""
+        if user_id is not None:
+            user_items = self.train_df[self.train_df['user_encoded'] == user_id]
+            return set(user_items['item_encoded'].values)
+        return self.train_df
+
+    def get_user_positive_items(self, user_id, split='all'):
+        """Get positive items for a user"""
+        if split == 'train':
+            return set(self.train_df[self.train_df['user_encoded'] == user_id]['item_encoded'].values)
+        elif split == 'all':
+            return self.user_positive_items.get(user_id, set())
+
+    def sample_negative_items(self, user_ids, num_negatives=1):
+        """Sample negative items for given users"""
+        neg_items = []
+        for user_id in user_ids:
+            user_pos_items = self.get_user_positive_items(user_id, split='all')
+            user_neg_items = []
+
+            for _ in range(num_negatives):
+                neg_item = np.random.randint(0, self.num_items)
+                attempts = 0
+                while neg_item in user_pos_items and attempts < 100:
+                    neg_item = np.random.randint(0, self.num_items)
+                    attempts += 1
+                user_neg_items.append(neg_item)
+            neg_items.extend(user_neg_items)
+
+        return neg_items
+
+    def get_dataloader(self, split='train', batch_size=1024, shuffle=True,
+                       num_negatives=1, model_type='lightgcn'):
+        """Get dataloader for specific split and model type"""
+        if model_type in ['lightgcn', 'itemknn']:
+            return self._get_pairwise_dataloader(split, batch_size, shuffle, num_negatives)
+        elif model_type == 'multivae':
+            return self._get_pointwise_dataloader(split, batch_size, shuffle)
+
+    def _get_pairwise_dataloader(self, split, batch_size, shuffle, num_negatives):
+        """Get dataloader for pairwise models (LightGCN, ItemKNN)"""
+        df = getattr(self, f'{split}_df')
+
+        if shuffle:
+            df = df.sample(frac=1)
+
+        for i in range(0, len(df), batch_size):
+            batch = df.iloc[i:i + batch_size]
+
+            users = batch['user_encoded'].values
+            pos_items = batch['item_encoded'].values
+            neg_items = self.sample_negative_items(users, num_negatives)
+
+            yield {
+                'users': torch.tensor(users, dtype=torch.long),
+                'pos_items': torch.tensor(pos_items, dtype=torch.long),
+                'neg_items': torch.tensor(neg_items, dtype=torch.long),
+                'batch_size': len(batch)
+            }
+
+    def _get_pointwise_dataloader(self, split, batch_size, shuffle):
+        """Get dataloader for pointwise models (MultiVAE)"""
+        # Create user-item interaction matrix for VAE
+        df = getattr(self, f'{split}_df')
+
+        # Create sparse matrix representation
+        from scipy.sparse import csr_matrix
+
+        rows = df['user_encoded'].values
+        cols = df['item_encoded'].values
+        data = np.ones(len(df))  # Binary for MultiVAE
+
+        interaction_matrix = csr_matrix((data, (rows, cols)),
+                                        shape=(self.num_users, self.num_items))
+
+        user_ids = np.arange(self.num_users)
+        if shuffle:
+            np.random.shuffle(user_ids)
+
+        for i in range(0, len(user_ids), batch_size):
+            batch_users = user_ids[i:i + batch_size]
+            batch_matrix = interaction_matrix[batch_users].toarray()
+
+            yield {
+                'users': torch.tensor(batch_users, dtype=torch.long),
+                'interactions': torch.tensor(batch_matrix, dtype=torch.float32),
+                'batch_size': len(batch_users)
+            }
+
+    def _compute_statistics(self):
+        """Compute dataset statistics"""
+        if self.complete_df is not None:
+            self.stats = {
+                'num_users': self.num_users,
+                'num_items': self.num_items,
+                'num_interactions': len(self.complete_df),
+                'density': len(self.complete_df) / (self.num_users * self.num_items),
+                'avg_interactions_per_user': len(self.complete_df) / self.num_users,
+                'avg_interactions_per_item': len(self.complete_df) / self.num_items,
+            }
+
+    def get_cv_splits(self, n_folds=5):
+        """Get cross-validation splits"""
+        # Implement CV split logic
+        pass
+
+    def to_device(self, device):
+        """Move graph data to device"""
+        if self.train_edge_index is not None:
+            self.train_edge_index = self.train_edge_index.to(device)
+            self.train_edge_weight = self.train_edge_weight.to(device)
+        if self.complete_edge_index is not None:
+            self.complete_edge_index = self.complete_edge_index.to(device)
+            self.complete_edge_weight = self.complete_edge_weight.to(device)
+        return self
+
+
+def create_bipartite_graph(df, num_users, num_items, rating_weights=None):
+    """Create bipartite graph with edge weights based on ratings"""
+
+    # Default rating weights (can be customized)
+    if rating_weights is None:
+        rating_weights = {1: 0.2, 2: 0.4, 3: 0.6, 4: 0.8, 5: 1.0}
+
+    users = df['user_encoded'].values
+    items = df['item_encoded'].values + num_users  # Offset items by num_users
+    ratings = df['rating'].values
+
+    # Create edge weights based on ratings
+    edge_weights = np.array([rating_weights.get(r, 0.5) for r in ratings])
+
+    # Create bidirectional edges (user->item and item->user)
+    edge_index = torch.tensor([
+        np.concatenate([users, items]),
+        np.concatenate([items, users])
+    ], dtype=torch.long)
+
+    edge_weight = torch.tensor(
+        np.concatenate([edge_weights, edge_weights]),
+        dtype=torch.float
+    )
+
+    return edge_index, edge_weight
 
