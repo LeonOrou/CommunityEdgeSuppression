@@ -5,12 +5,13 @@ from torch_geometric.nn import MessagePassing
 from RecSys_PyTorch.models.BaseModel import BaseModel
 import numpy as np
 import scipy.sparse as sp
+from torch_geometric.utils import degree
 
 
 # Custom LightGCN implementation with edge weights
-class LightGCN(MessagePassing):
+class LightGCN(nn.Module):
     def __init__(self, num_users, num_items, embedding_dim=64, num_layers=3):
-        super().__init__(aggr='add')
+        super().__init__()
         self.num_users = num_users
         self.num_items = num_items
         self.embedding_dim = embedding_dim
@@ -21,8 +22,8 @@ class LightGCN(MessagePassing):
         self.item_embedding = nn.Embedding(num_items, embedding_dim)
 
         # Initialize embeddings with Xavier uniform
-        nn.init.xavier_uniform_(self.user_embedding.weight)
-        nn.init.xavier_uniform_(self.item_embedding.weight)
+        nn.init.normal_(self.user_embedding.weight, std=0.1)
+        nn.init.normal_(self.item_embedding.weight, std=0.1)
 
     def forward(self, edge_index, edge_weight=None):
         # Get initial embeddings
@@ -30,14 +31,14 @@ class LightGCN(MessagePassing):
         item_emb = self.item_embedding.weight
 
         # Combine user and item embeddings
-        x = torch.cat([user_emb, item_emb], dim=0)
+        all_emb = torch.cat([user_emb, item_emb], dim=0)
 
         # Store embeddings from each layer
-        embeddings = [x]
+        embeddings = [all_emb]
 
         for _ in range(self.num_layers):
-            x = self.propagate(edge_index, x=x, edge_weight=edge_weight)
-            embeddings.append(x)
+            all_emb = self.propagate(edge_index, x=all_emb, edge_weight=edge_weight)
+            embeddings.append(all_emb)
 
         # Average embeddings across all layers
         final_embedding = torch.stack(embeddings, dim=0).mean(dim=0)
@@ -48,15 +49,23 @@ class LightGCN(MessagePassing):
 
         return user_final, item_final
 
-    def message(self, x_j, edge_weight):
-        # Apply edge weights to messages
-        if edge_weight is not None:
-            return edge_weight.view(-1, 1) * x_j
-        return x_j
+    def propagate(self, edge_index, x, edge_weight=None):
+        # Normalize by degree
+        row, col = edge_index
+        deg = degree(col, x.size(0), dtype=x.dtype)
+        deg_inv_sqrt = deg.pow(-0.5)
+        deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
 
-    def update(self, aggr_out, x):
-        # Update node embeddings with aggregated messages
-        return aggr_out
+        # Symmetric normalization
+        norm = deg_inv_sqrt[row] * deg_inv_sqrt[col]
+        if edge_weight is not None:
+            norm = norm * edge_weight
+
+        # Message passing
+        out = torch.zeros_like(x)
+        out.index_add_(0, col, x[row] * norm.view(-1, 1))
+
+        return out
 
 
 class ItemKNN(nn.Module):
