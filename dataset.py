@@ -124,6 +124,8 @@ class RecommendationDataset:
         self.num_items = None
         self.user_encoder = None
         self.item_encoder = None
+        self.user_degrees = None
+        self.item_degrees = None
 
         # Graph structures (for graph-based models)
         self.train_edge_index = None
@@ -479,11 +481,6 @@ class RecommendationDataset:
                 'avg_interactions_per_item': len(self.complete_df) / self.num_items,
             }
 
-    def get_cv_splits(self, n_folds=5):
-        """Get cross-validation splits"""
-        # Implement CV split logic
-        pass
-
     def to_device(self, device):
         """Move graph data to device"""
         if self.train_edge_index is not None:
@@ -516,4 +513,12 @@ class RecommendationDataset:
         )
 
         return edge_index, edge_weight
+
+    def get_node_degrees(self):
+        """Get degrees of users and items in the graph"""
+        user_degrees = np.bincount(self.complete_df['user_encoded'])
+        item_degrees = np.bincount(self.complete_df['item_encoded'])
+        self.user_degrees = user_degrees
+        self.item_degrees = item_degrees
+        return user_degrees, item_degrees
 

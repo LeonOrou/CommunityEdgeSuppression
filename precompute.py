@@ -58,10 +58,12 @@ def get_community_labels(config, adj_np, algorithm='Leiden', save_path='dataset/
     user_probs_sorted = np.sort(user_probs, axis=1)[:, ::-1]
     item_probs_sorted = np.sort(item_probs, axis=1)[:, ::-1]
 
-    # user_community_thresholds = user_probs.shape[1] ** (-2/3)  # TODO: introduce statistical significance test instead of **(-2/3)
-    # item_community_thresholds = item_probs.shape[1] ** (-2/3)
-    counts_users, user_community_thresholds = binomial_significance_threshold(n_interactions=config.user_degrees, n_categories=user_probs.shape[1], alpha=0.05)
-    counts_items, item_community_thresholds = binomial_significance_threshold(n_interactions=config.item_degrees, n_categories=item_probs.shape[1], alpha=0.05)
+    counts_users, user_community_thresholds = binomial_significance_threshold(n_interactions=config.user_degrees,
+                                                                              n_categories=user_probs.shape[1],
+                                                                              alpha=0.05)
+    counts_items, item_community_thresholds = binomial_significance_threshold(n_interactions=config.item_degrees,
+                                                                              n_categories=item_probs.shape[1],
+                                                                              alpha=0.05)
 
     # Replace -1 with another value (e.g., 0 or a special flag like -99)
     user_labels = np.where(user_probs_sorted[:, 0] < user_community_thresholds, -1, user_labels)
@@ -359,6 +361,7 @@ def get_biased_edges_mask(adj_tens, user_com_labels_mask, item_com_labels_mask,
                           user_community_connectivity_matrix_distribution,
                           item_community_connectivity_matrix_distribution,
                           bias_threshold=0.4):
+    # TODO: make bias threshold via binomial significance threshold
 
     # make two masks for the user and item community connectivity matrices to get values above threshold
     users_com_connectivity_mask = user_community_connectivity_matrix_distribution > bias_threshold

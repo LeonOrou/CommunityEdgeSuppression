@@ -253,6 +253,7 @@ def cross_validation_experiment_complete():
     dataset = RecommendationDataset(name=config.dataset_name, data_path=f'dataset/{config.dataset_name}_raw')
     dataset.load_data().prepare_data()
 
+    config.user_degrees, config.item_degrees = dataset.get_node_degrees()
     print("Preparing data with consistent encoding...")
     print(f"Processed data: {dataset.num_users} users, {dataset.num_items} items, {len(dataset.complete_df)} interactions")
 
