@@ -24,7 +24,7 @@ import os
 import pandas as pd
 from sklearn.model_selection import KFold
 from evaluation import evaluate_model, precalculate_average_popularity
-from utils_functions import community_edge_dropout
+from utils_functions import community_edge_suppression
 from config import Config
 from dataset import get_dataset_tensor
 from training import train_and_evaluate

@@ -7,6 +7,162 @@ import torch
 import torch_geometric
 
 
+def plot_community_bias(user_biases, item_biases, save_path=None, dataset_name=''):
+    """
+    Plot the community biases for users and items.
+
+    :param user_biases: torch.tensor, community bias for users
+    :param item_biases: torch.tensor, community bias for items
+    :param save_path: str or None, path to save the figure
+    :param dataset_name: str, name of the dataset for saving figures
+    """
+    # index zero is not a node, so we need to remove it
+    user_biases = user_biases[1:]
+    item_biases = item_biases[1:]
+
+    # Convert to numpy if tensor
+    if isinstance(user_biases, torch.Tensor):
+        user_biases = user_biases.cpu().numpy()
+        item_biases = item_biases.cpu().numpy()
+
+    plt.figure(figsize=(12, 8))
+    plt.boxplot([user_biases, item_biases], labels=['User bias', 'Items bias'])
+    plt.title('Community Bias for each user and item')
+    plt.ylabel('Bias [0, 1]')
+    plt.ylim(0, 1)
+    plt.grid(True, linestyle='--', alpha=0.7)
+
+    if save_path:
+        plt.savefig(f"{save_path}/{dataset_name}_community_bias.png")
+    plt.show()
+
+
+def plot_degree_distributions(adj_tens, num_bins=100, save_path=None, dataset_name=''):
+    """
+    Plot the degree distributions for users and items in decreasing order.
+
+    :param adj_tens: torch.tensor, adjacency matrix with format (n, 3) containing (user_id, item_id, rating)
+    :param num_bins: int, number of percentile bins to use
+    :param save_path: str or None, path to save the figures
+    :param dataset_name: str, name of the dataset for saving figures
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import torch
+
+    # Convert to numpy if it's a tensor
+    if isinstance(adj_tens, torch.Tensor):
+        adj_np = adj_tens.cpu().numpy()
+    else:
+        adj_np = adj_tens
+
+    # Extract user and item indices
+    user_indices = adj_np[:, 0].astype(int)
+    item_indices = adj_np[:, 1].astype(int)
+
+    # Get unique nodes and their degrees
+    unique_users, user_counts = np.unique(user_indices, return_counts=True)
+    unique_items, item_counts = np.unique(item_indices, return_counts=True)
+
+    # Sort degrees in descending order
+    sorted_user_degrees = np.sort(user_counts)[::-1]
+    sorted_item_degrees = np.sort(item_counts)[::-1]
+
+    # Create percentile bins for node rankings
+    user_percentiles = np.linspace(0, 100, num_bins + 1)
+    item_percentiles = np.linspace(0, 100, num_bins + 1)
+
+    # Use percentiles to get indices into sorted arrays
+    user_bin_indices = np.percentile(np.arange(len(sorted_user_degrees)), user_percentiles).astype(int)
+    item_bin_indices = np.percentile(np.arange(len(sorted_item_degrees)), item_percentiles).astype(int)
+
+    # Make sure the last index points to the end of the array
+    user_bin_indices[-1] = len(sorted_user_degrees)
+    item_bin_indices[-1] = len(sorted_item_degrees)
+
+    # Calculate average degrees for each percentile bin
+    user_bin_degrees = [np.mean(sorted_user_degrees[user_bin_indices[i]:user_bin_indices[i + 1]])
+                        for i in range(len(user_bin_indices) - 1)]
+    item_bin_degrees = [np.mean(sorted_item_degrees[item_bin_indices[i]:item_bin_indices[i + 1]])
+                        for i in range(len(item_bin_indices) - 1)]
+
+    # Create plots
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 8))
+
+    # Plot user degree distribution
+    ax1.bar(range(len(user_bin_degrees)), user_bin_degrees)
+    ax1.set_title('User Degree Distribution (Decreasing Order)')
+    ax1.set_xlabel('Percentile Bin')
+    ax1.set_ylabel('Average Degree')
+    ax1.grid(True, linestyle='--', alpha=0.7)
+
+    # Add user statistics
+    ax1.text(0.02, 0.95,
+             f"Users: {len(unique_users)}\n"
+             f"Max degree: {sorted_user_degrees[0]}\n"
+             f"Mean degree: {np.mean(user_counts):.1f}\n"
+             f"Median degree: {np.median(user_counts):.1f}",
+             transform=ax1.transAxes,
+             bbox=dict(facecolor='white', alpha=0.8))
+
+    # Plot item degree distribution
+    ax2.bar(range(len(item_bin_degrees)), item_bin_degrees)
+    ax2.set_title('Item Degree Distribution (Decreasing Order)')
+    ax2.set_xlabel('Percentile Bin')
+    ax2.set_ylabel('Average Degree')
+    ax2.grid(True, linestyle='--', alpha=0.7)
+
+    # Add item statistics
+    ax2.text(0.02, 0.95,
+             f"Items: {len(unique_items)}\n"
+             f"Max degree: {sorted_item_degrees[0]}\n"
+             f"Mean degree: {np.mean(item_counts):.1f}\n"
+             f"Median degree: {np.median(item_counts):.1f}",
+             transform=ax2.transAxes,
+             bbox=dict(facecolor='white', alpha=0.8))
+
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(f"{save_path}/{dataset_name}_degree_distribution_info.png")
+    plt.show()
+
+    # Create line plot of actual degree distributions
+    plt.figure(figsize=(16, 8))
+
+    # Create normalized x-axis
+    user_x = np.linspace(0, 1, len(sorted_user_degrees))
+    item_x = np.linspace(0, 1, len(sorted_item_degrees))
+
+    plt.plot(user_x, sorted_user_degrees, label=f'Users ({len(unique_users)})')
+    plt.plot(item_x, sorted_item_degrees, label=f'Items ({len(unique_items)})')
+
+    plt.xlabel('Normalized Node Rank')
+    plt.ylabel('Degree')
+    plt.title('Node Degree Distribution (Decreasing Order)')
+    plt.legend()
+    plt.grid(True, linestyle='--', alpha=0.7)
+
+    if save_path:
+        plt.savefig(f"{save_path}/{dataset_name}_degree_distribution.png")
+    plt.show()
+
+    # Create log-scale version for better visualization of tail distribution
+    plt.figure(figsize=(16, 8))
+    plt.semilogy(user_x, sorted_user_degrees, label=f'Users ({len(unique_users)})')
+    plt.semilogy(item_x, sorted_item_degrees, label=f'Items ({len(unique_items)})')
+
+    plt.xlabel('Normalized Node Rank')
+    plt.ylabel('Degree (Log Scale)')
+    plt.title('Node Degree Distribution (Decreasing Order, Log Scale)')
+    plt.legend()
+    plt.grid(True, which="both", linestyle='--', alpha=0.7)
+
+    if save_path:
+        plt.savefig(f"{save_path}_log.png")
+    plt.show()
+
+
 def cut_cols_sparse_matrix(matrix, n_cols):
     """
     Cut the number of columns in a sparse matrix.
@@ -27,6 +183,7 @@ def cut_cols_sparse_matrix(matrix, n_cols):
 
     # Create the new matrix
     return sp.sparse.csr_matrix((data, (row_indices, col_indices)), shape=(matrix.shape[0], n_cols))
+
 
 # Load the probability distribution of community labels
 def plot_community_confidences(probs, algorithm='Leiden'):

@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from sknetwork.clustering import Leiden, Louvain
 from argparse import ArgumentParser
 import os
-from utils_functions import binomial_significance_threshold
+from scipy.stats import binom
 
 
 def get_community_labels(config, adj_np, algorithm='Leiden', save_path='dataset/ml-100k', get_probs=True, force_bipartite=True):
@@ -108,6 +108,25 @@ def get_community_labels(config, adj_np, algorithm='Leiden', save_path='dataset/
                    delimiter=",", fmt='%.4f')
 
     return torch.tensor(user_labels_sorted_matrix, dtype=torch.int64, device=device), torch.tensor(item_labels_sorted_matrix, dtype=torch.int64, device=device)
+
+
+def binomial_significance_threshold(n_interactions, n_categories, alpha=0.05):
+    """
+    Returns the smallest count T (clamped to n_interactions) such that
+    P(X >= T) <= alpha/n_categories, and its proportion T/n_interactions <= 1.
+    """
+    p = 1.0 / n_categories
+    alpha_per_test = alpha / n_categories
+
+    n_arr = np.atleast_1d(n_interactions)
+    # find k with P(X > k) ≤ alpha_per_test, so T=k+1 may exceed n -> clamp next
+    raw_thresh = binom.isf(alpha_per_test, n_arr, p) + 1
+    thresh = np.minimum(raw_thresh, n_arr)           # clamp to max trials
+    props = thresh / n_arr                           # now guaranteed ≤ 1
+
+    if np.isscalar(n_interactions):
+        return int(thresh[0]), float(props[0])
+    return thresh.astype(int), props
 
 
 def get_power_users_items(config, adj_tens, user_com_labels, item_com_labels,

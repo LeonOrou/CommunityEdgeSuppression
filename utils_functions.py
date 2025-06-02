@@ -4,9 +4,11 @@ import random
 import torch_geometric
 # from line_profiler_pycharm import profile
 import matplotlib
-matplotlib.use('agg')
 import matplotlib.pyplot as plt
-from scipy.stats import binom
+import wandb
+import os
+from precompute import get_community_labels, get_power_users_items, get_biased_edges_mask, get_user_item_community_connectivity_matrices
+matplotlib.use('agg')
 
 
 # set seed function for all libraries used in the project
@@ -23,7 +25,7 @@ def set_seed(seed):
     # pandas.util.testing.rng = np.random.RandomState(seed)
 
 
-def community_edge_dropout(adj_tens, config):
+def community_edge_suppression(adj_tens, config):
     """
     Drop edges from the adjacency tensor based on community labels and dropout rates.
     :param adj_tens: torch.tensor, adjacency tensor with shape (n, 3) containing (user_id, item_id, rating)
@@ -96,25 +98,6 @@ def community_edge_dropout(adj_tens, config):
     edge_weights_new = torch.ones(adj_tens.shape[0], dtype=torch.float32, device=device)
     edge_weights_new[suppress_mask] = community_suppression
     return edge_weights_new
-
-
-def binomial_significance_threshold(n_interactions, n_categories, alpha=0.05):
-    """
-    Returns the smallest count T (clamped to n_interactions) such that
-    P(X >= T) <= alpha/n_categories, and its proportion T/n_interactions <= 1.
-    """
-    p = 1.0 / n_categories
-    alpha_per_test = alpha / n_categories
-
-    n_arr = np.atleast_1d(n_interactions)
-    # find k with P(X > k) ≤ alpha_per_test, so T=k+1 may exceed n -> clamp next
-    raw_thresh = binom.isf(alpha_per_test, n_arr, p) + 1
-    thresh = np.minimum(raw_thresh, n_arr)           # clamp to max trials
-    props = thresh / n_arr                           # now guaranteed ≤ 1
-
-    if np.isscalar(n_interactions):
-        return int(thresh[0]), float(props[0])
-    return thresh.astype(int), props
 
 
 def plot_community_confidence(user_probs_path=None, user_labels=None, algorithm='Leiden', force_bipartite=True,
@@ -343,159 +326,138 @@ def get_community_bias(item_communities_each_user_dist=None, user_communities_ea
     return user_bias.cpu(), item_bias.cpu()
 
 
-def plot_community_bias(user_biases, item_biases, save_path=None, dataset_name=''):
-    """
-    Plot the community biases for users and items.
+def initialize_wandb(config):
+    """Initialize Weights & Biases for experiment tracking with config object."""
+    wandb.login(key="d234bc98a4761bff39de0e5170df00094ac42269")
 
-    :param user_biases: torch.tensor, community bias for users
-    :param item_biases: torch.tensor, community bias for items
-    :param save_path: str or None, path to save the figure
-    :param dataset_name: str, name of the dataset for saving figures
-    """
-    # index zero is not a node, so we need to remove it
-    user_biases = user_biases[1:]
-    item_biases = item_biases[1:]
+    # Create wandb config dict from our config object
+    wandb_config = {
+        "dataset": config.dataset_name,
+        "model": config.model_name,
+        "users_top_percent": config.users_top_percent,
+        "items_top_percent": config.items_top_percent,
+        "users_dec_perc_drop": config.users_dec_perc_drop,
+        "items_dec_perc_drop": config.items_dec_perc_drop,
+        "community_suppression": config.community_suppression,
+        "use_dropout": config.use_dropout,
+        "drop_only_power_nodes": config.drop_only_power_nodes,
+        "k_th_fold": config.k_th_fold,
+        "learning_rate": config.learning_rate,
+        "epochs": config.epochs,
+    }
 
-    # Convert to numpy if tensor
-    if isinstance(user_biases, torch.Tensor):
-        user_biases = user_biases.cpu().numpy()
-        item_biases = item_biases.cpu().numpy()
+    # Add model-specific config parameters
+    if config.model_name != 'ItemKNN':
+        wandb_config.update({
+            "train_batch_size": config.train_batch_size,
+            "eval_batch_size": config.eval_batch_size,
+        })
 
-    plt.figure(figsize=(12, 8))
-    plt.boxplot([user_biases, item_biases], labels=['User bias', 'Items bias'])
-    plt.title('Community Bias for each user and item')
-    plt.ylabel('Bias [0, 1]')
-    plt.ylim(0, 1)
-    plt.grid(True, linestyle='--', alpha=0.7)
+    if config.model_name == 'LightGCN':
+        wandb_config.update({
+            "emb_dim": config.embedding_dim,
+            "num_layers": config.n_layers,
+        })
+    elif config.model_name == 'ItemKNN':
+        wandb_config.update({
+            "item_knn_topk": config.item_knn_topk,
+            "shrink": config.shrink,
+        })
+    elif config.model_name == 'MultiVAE':
+        wandb_config.update({
+            "hidden_dimension": config.hidden_dimension,
+            "latent_dimension": config.latent_dimension,
+            "VAE_dropout": config.drop,
+            "anneal_cap": config.anneal_cap,
+            "total_anneal_steps": config.total_anneal_steps,
+        })
 
-    if save_path:
-        plt.savefig(f"{save_path}/{dataset_name}_community_bias.png")
-    plt.show()
+    return wandb.init(
+        project="RecSys_PowerNodeEdgeDropout",
+        name=f"{config.model_name}_{config.dataset_name}_users_top_{config.users_top_percent}_com_suppression_{config.community_suppression}",
+        config=wandb_config
+    )
 
 
-def plot_degree_distributions(adj_tens, num_bins=100, save_path=None, dataset_name=''):
-    """
-    Plot the degree distributions for users and items in decreasing order.
+def get_biased_connectivity_data(config, adj_tens):
+    user_community_connectivity_matrix, item_community_connectivity_matrix = calculate_community_metrics(
+        config=config,
+        adj_tens=adj_tens)
 
-    :param adj_tens: torch.tensor, adjacency matrix with format (n, 3) containing (user_id, item_id, rating)
-    :param num_bins: int, number of percentile bins to use
-    :param save_path: str or None, path to save the figures
-    :param dataset_name: str, name of the dataset for saving figures
-    """
-    import matplotlib.pyplot as plt
-    import numpy as np
-    import torch
+    config.user_community_connectivity_matrix = user_community_connectivity_matrix
+    config.item_community_connectivity_matrix = item_community_connectivity_matrix
 
-    # Convert to numpy if it's a tensor
-    if isinstance(adj_tens, torch.Tensor):
-        adj_np = adj_tens.cpu().numpy()
-    else:
-        adj_np = adj_tens
+    config.user_community_connectivity_matrix_distribution = user_community_connectivity_matrix / torch.sum(
+        user_community_connectivity_matrix, dim=1, keepdim=True)
+    config.item_community_connectivity_matrix_distribution = item_community_connectivity_matrix / torch.sum(
+        item_community_connectivity_matrix, dim=1, keepdim=True)
 
-    # Extract user and item indices
-    user_indices = adj_np[:, 0].astype(int)
-    item_indices = adj_np[:, 1].astype(int)
+    user_labels_Leiden_matrix_mask = np.loadtxt(f'dataset/{config.dataset_name}/user_labels_Leiden_matrix_mask.csv',
+                                                delimiter=',')
+    item_labels_Leiden_matrix_mask = np.loadtxt(f'dataset/{config.dataset_name}/item_labels_Leiden_matrix_mask.csv',
+                                                delimiter=',')
 
-    # Get unique nodes and their degrees
-    unique_users, user_counts = np.unique(user_indices, return_counts=True)
-    unique_items, item_counts = np.unique(item_indices, return_counts=True)
+    (config.biased_user_edges_mask,
+     config.biased_item_edges_mask) = get_biased_edges_mask(
+        adj_tens=adj_tens,
+        user_com_labels_mask=torch.tensor(user_labels_Leiden_matrix_mask, device=config.device),
+        item_com_labels_mask=torch.tensor(item_labels_Leiden_matrix_mask, device=config.device),
+        user_community_connectivity_matrix_distribution=config.user_community_connectivity_matrix_distribution,
+        item_community_connectivity_matrix_distribution=config.item_community_connectivity_matrix_distribution,
+        bias_threshold=0.4)
 
-    # Sort degrees in descending order
-    sorted_user_degrees = np.sort(user_counts)[::-1]
-    sorted_item_degrees = np.sort(item_counts)[::-1]
 
-    # Create percentile bins for node rankings
-    user_percentiles = np.linspace(0, 100, num_bins + 1)
-    item_percentiles = np.linspace(0, 100, num_bins + 1)
+def get_community_data(config, adj_np):
+    """Get or load community labels and power nodes."""
+    # Create directory if it doesn't exist
+    if not os.path.exists(f'dataset/{config.dataset_name}'):
+        os.makedirs(f'dataset/{config.dataset_name}')
 
-    # Use percentiles to get indices into sorted arrays
-    user_bin_indices = np.percentile(np.arange(len(sorted_user_degrees)), user_percentiles).astype(int)
-    item_bin_indices = np.percentile(np.arange(len(sorted_item_degrees)), item_percentiles).astype(int)
+    # TODO: all community data has to be from whole dataset and masked for the subsets
+    (config.user_com_labels,
+     config.item_com_labels) = get_community_labels(
+        config=config,
+        adj_np=adj_np,
+        save_path=f'dataset/{config.dataset_name}',
+        get_probs=True)
 
-    # Make sure the last index points to the end of the array
-    user_bin_indices[-1] = len(sorted_user_degrees)
-    item_bin_indices[-1] = len(sorted_item_degrees)
+    (config.power_users_ids,
+     config.power_items_ids) = get_power_users_items(
+        config=config,
+        adj_tens=torch.tensor(adj_np, device=config.device),
+        user_com_labels=config.user_com_labels,
+        item_com_labels=config.item_com_labels,
+        users_top_percent=config.users_top_percent,
+        items_top_percent=config.items_top_percent,
+        save_path=f'dataset/{config.dataset_name}')
 
-    # Calculate average degrees for each percentile bin
-    user_bin_degrees = [np.mean(sorted_user_degrees[user_bin_indices[i]:user_bin_indices[i + 1]])
-                        for i in range(len(user_bin_indices) - 1)]
-    item_bin_degrees = [np.mean(sorted_item_degrees[item_bin_indices[i]:item_bin_indices[i + 1]])
-                        for i in range(len(item_bin_indices) - 1)]
 
-    # Create plots
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 8))
+def calculate_community_metrics(config, adj_tens):
+    """Calculate community connectivity matrix and average degrees."""
+    (user_community_connectivity_matrix,
+     item_community_connectivity_matrix) = get_user_item_community_connectivity_matrices(
+        adj_tens=adj_tens,
+        user_com_labels=config.user_com_labels,
+        item_com_labels=config.item_com_labels)
+    return user_community_connectivity_matrix, item_community_connectivity_matrix
 
-    # Plot user degree distribution
-    ax1.bar(range(len(user_bin_degrees)), user_bin_degrees)
-    ax1.set_title('User Degree Distribution (Decreasing Order)')
-    ax1.set_xlabel('Percentile Bin')
-    ax1.set_ylabel('Average Degree')
-    ax1.grid(True, linestyle='--', alpha=0.7)
 
-    # Add user statistics
-    ax1.text(0.02, 0.95,
-             f"Users: {len(unique_users)}\n"
-             f"Max degree: {sorted_user_degrees[0]}\n"
-             f"Mean degree: {np.mean(user_counts):.1f}\n"
-             f"Median degree: {np.median(user_counts):.1f}",
-             transform=ax1.transAxes,
-             bbox=dict(facecolor='white', alpha=0.8))
+def get_subset_masks(config):
+    """Get subset masks for community data."""
+    dataset_len = config.train_dataset_len
+    fold_size = dataset_len // 5  # 5 folds, test set is excluded
+    start = config.k_th_fold * fold_size
+    end = (config.k_th_fold + 1) * fold_size if config.k_th_fold != 4 else dataset_len
 
-    # Plot item degree distribution
-    ax2.bar(range(len(item_bin_degrees)), item_bin_degrees)
-    ax2.set_title('Item Degree Distribution (Decreasing Order)')
-    ax2.set_xlabel('Percentile Bin')
-    ax2.set_ylabel('Average Degree')
-    ax2.grid(True, linestyle='--', alpha=0.7)
+    valid_mask = np.zeros(dataset_len, dtype=bool)
+    valid_mask[start:end] = True
+    test_mask = np.zeros(dataset_len, dtype=bool)
+    test_mask[fold_size * 5:] = True
+    train_mask = np.zeros(dataset_len, dtype=bool)
+    train_mask[~valid_mask & ~test_mask] = True
 
-    # Add item statistics
-    ax2.text(0.02, 0.95,
-             f"Items: {len(unique_items)}\n"
-             f"Max degree: {sorted_item_degrees[0]}\n"
-             f"Mean degree: {np.mean(item_counts):.1f}\n"
-             f"Median degree: {np.median(item_counts):.1f}",
-             transform=ax2.transAxes,
-             bbox=dict(facecolor='white', alpha=0.8))
-
-    plt.tight_layout()
-
-    if save_path:
-        plt.savefig(f"{save_path}/{dataset_name}_degree_distribution_info.png")
-    plt.show()
-
-    # Create line plot of actual degree distributions
-    plt.figure(figsize=(16, 8))
-
-    # Create normalized x-axis
-    user_x = np.linspace(0, 1, len(sorted_user_degrees))
-    item_x = np.linspace(0, 1, len(sorted_item_degrees))
-
-    plt.plot(user_x, sorted_user_degrees, label=f'Users ({len(unique_users)})')
-    plt.plot(item_x, sorted_item_degrees, label=f'Items ({len(unique_items)})')
-
-    plt.xlabel('Normalized Node Rank')
-    plt.ylabel('Degree')
-    plt.title('Node Degree Distribution (Decreasing Order)')
-    plt.legend()
-    plt.grid(True, linestyle='--', alpha=0.7)
-
-    if save_path:
-        plt.savefig(f"{save_path}/{dataset_name}_degree_distribution.png")
-    plt.show()
-
-    # Create log-scale version for better visualization of tail distribution
-    plt.figure(figsize=(16, 8))
-    plt.semilogy(user_x, sorted_user_degrees, label=f'Users ({len(unique_users)})')
-    plt.semilogy(item_x, sorted_item_degrees, label=f'Items ({len(unique_items)})')
-
-    plt.xlabel('Normalized Node Rank')
-    plt.ylabel('Degree (Log Scale)')
-    plt.title('Node Degree Distribution (Decreasing Order, Log Scale)')
-    plt.legend()
-    plt.grid(True, which="both", linestyle='--', alpha=0.7)
-
-    if save_path:
-        plt.savefig(f"{save_path}_log.png")
-    plt.show()
+    config.train_mask = train_mask
+    config.valid_mask = valid_mask
+    config.test_mask = test_mask
 
 

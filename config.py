@@ -55,7 +55,7 @@ class Config:
             self.train_batch_size = 512
             self.eval_batch_size = 512
             self.batch_size = 512  # For consistency
-            self.epochs = 200  # because it's different for each model
+            self.epochs = 50  # because it's different for each model
             self.n_layers = 4
             self.embedding_dim = 128
             self.A_split = False
