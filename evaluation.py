@@ -3,32 +3,34 @@ import torch
 from collections import defaultdict
 
 
-def evaluate_model_with_complete_graph(model, complete_edge_index, complete_edge_weight,
-                                       test_df, train_df, num_users, num_items, k=10):
+def evaluate_model(model, dataset, stage='loo', k=10):
     """
     Evaluate model using the complete graph structure but excluding training interactions
+    stage: 'full_train' for full training evaluation, 'loo' for leave-one-out evaluation
     """
     model.eval()
-    device = next(model.parameters()).device
+
+    if stage == 'full_train':
+        dataset.val_df = dataset.test_df
 
     # Create a set of training interactions for each user to exclude from evaluation
     train_user_items = defaultdict(set)
-    for _, row in train_df.iterrows():
+    for _, row in dataset.train_df.iterrows():
         train_user_items[row['user_encoded']].add(row['item_encoded'])
 
     with torch.no_grad():
         # Use the COMPLETE graph (including test edges) for embeddings
-        user_emb, item_emb = model(complete_edge_index, complete_edge_weight)
+        user_emb, item_emb = model(dataset.complete_edge_index, dataset.complete_edge_weight)
 
         # Group test interactions by user
-        user_test_items = test_df.groupby('user_encoded')['item_encoded'].apply(list).to_dict()
+        user_test_items = dataset.val_df.groupby('user_encoded')['item_encoded'].apply(list).to_dict()
 
         ndcg_scores = []
         recall_scores = []
         precision_scores = []
 
         for user_id, true_items in user_test_items.items():
-            if user_id >= num_users:
+            if user_id >= dataset.num_users:
                 continue
 
             # Get user embedding and compute scores for all items

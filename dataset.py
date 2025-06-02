@@ -109,6 +109,7 @@ class RecommendationDataset:
         self.test_ratio = test_ratio
         self.val_ratio = val_ratio
         self.random_state = random_state
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         # Core attributes (populated after loading)
         self.raw_df = None  # Original ratings dataframe
@@ -116,6 +117,7 @@ class RecommendationDataset:
         self.train_df = None
         self.val_df = None
         self.test_df = None
+        self.n_folds = 5  # Default number of folds for cross-validation
 
         # Encoding and metadata
         self.num_users = None
@@ -164,11 +166,12 @@ class RecommendationDataset:
         # Implement Last.fm specific loading
         pass
 
-    def prepare_data_with_consistent_encoding(self, ratings_df):
+    def prepare_data_with_consistent_encoding(self):
         """
         Prepare data ensuring ALL users and items are encoded consistently
         across train/validation/test splits
         """
+        ratings_df = self.raw_df.copy()
         min_interactions = 5
         min_rating = 4
 
@@ -210,14 +213,12 @@ class RecommendationDataset:
         self.user_encoder = user_encoder
         self.item_encoder = item_encoder
 
-    def split_interactions_by_user(self, val_ratio=0.16, test_ratio=0.2):
+    def split_interactions_by_user(self, test_ratio=0.2, n_folds=5):
         """
-        Split interactions for each user into train/val/test
+        Split interactions for each user into train_val/test, then pre-compute k-fold CV splits
         This ensures all users appear in training data
         """
-        # TODO: make only test split and validation from training data
-        train_list = []
-        val_list = []
+        train_val_list = []
         test_list = []
 
         for user_id, group in self.complete_df.groupby('user_encoded'):
@@ -225,48 +226,132 @@ class RecommendationDataset:
             user_interactions = group.sample(frac=1, random_state=42).reset_index(drop=True)
             n_interactions = len(user_interactions)
 
-            if n_interactions < 3:
-                # If user has very few interactions, put most in training, 1 in test
-                train_list.append(user_interactions.iloc[:-1])
-                test_list.append(user_interactions.iloc[-1:])
+            if n_interactions < 2:
+                # If user has only 1 interaction, put it in train_val
+                train_val_list.append(user_interactions)
                 continue
 
             # Calculate split points
             n_test = max(1, int(n_interactions * test_ratio))
-            n_val = max(1, int(n_interactions * val_ratio))
-            n_train = n_interactions - n_test - n_val
+            n_train_val = n_interactions - n_test
 
-            if n_train < 1:
-                n_train = 1
-                n_val = max(0, n_interactions - n_train - n_test)
-                n_test = n_interactions - n_train - n_val
+            if n_train_val < 1:
+                # Ensure at least 1 interaction in train_val
+                n_train_val = 1
+                n_test = n_interactions - n_train_val
 
             # Split interactions
-            train_interactions = user_interactions.iloc[:n_train]
-            val_interactions = user_interactions.iloc[n_train:n_train + n_val]
-            test_interactions = user_interactions.iloc[n_train + n_val:]
+            train_val_interactions = user_interactions.iloc[:n_train_val]
+            test_interactions = user_interactions.iloc[n_train_val:]
 
-            train_list.append(train_interactions)
-            if len(val_interactions) > 0:
-                val_list.append(val_interactions)
+            train_val_list.append(train_val_interactions)
             if len(test_interactions) > 0:
                 test_list.append(test_interactions)
 
-        self.train_df = pd.concat(train_list, ignore_index=True) if train_list else pd.DataFrame()
-        self.val_df = pd.concat(val_list, ignore_index=True) if val_list else pd.DataFrame()
+        self.train_val_df = pd.concat(train_val_list, ignore_index=True) if train_val_list else pd.DataFrame()
         self.test_df = pd.concat(test_list, ignore_index=True) if test_list else pd.DataFrame()
 
+        # Create k-fold CV splits
+        self.create_cv_splits(n_folds)
+
+        # Update complete_df to ensure it contains all data
+        self.complete_df = pd.concat([self.train_val_df, self.test_df], ignore_index=True)
+
+    def create_cv_splits(self, n_folds=5):
+        """
+        Create k-fold cross-validation splits from train_val_df
+        Each fold will have its own train and validation dataframes
+        """
+        # Initialize lists to store fold dataframes
+        for i in range(n_folds):
+            setattr(self, f'fold_{i}_train_df', pd.DataFrame())
+            setattr(self, f'fold_{i}_val_df', pd.DataFrame())
+
+        # Process each user's interactions
+        for user_id, group in self.train_val_df.groupby('user_encoded'):
+            user_interactions = group.reset_index(drop=True)
+            n_interactions = len(user_interactions)
+
+            if n_interactions < n_folds:
+                # If user has fewer interactions than folds, distribute them
+                for i in range(n_interactions):
+                    fold_idx = i % n_folds
+                    # This interaction goes to validation for fold_idx, training for others
+                    for j in range(n_folds):
+                        if j == fold_idx:
+                            val_df = getattr(self, f'fold_{j}_val_df')
+                            setattr(self, f'fold_{j}_val_df',
+                                    pd.concat([val_df, user_interactions.iloc[[i]]], ignore_index=True))
+                        else:
+                            train_df = getattr(self, f'fold_{j}_train_df')
+                            setattr(self, f'fold_{j}_train_df',
+                                    pd.concat([train_df, user_interactions.iloc[[i]]], ignore_index=True))
+            else:
+                # Standard k-fold split
+                fold_size = n_interactions // n_folds
+                remainder = n_interactions % n_folds
+
+                start_idx = 0
+                for i in range(n_folds):
+                    # Calculate fold boundaries
+                    end_idx = start_idx + fold_size + (1 if i < remainder else 0)
+
+                    # Get validation data for this fold
+                    val_data = user_interactions.iloc[start_idx:end_idx]
+
+                    # Get training data (everything except validation)
+                    train_data = pd.concat([
+                        user_interactions.iloc[:start_idx],
+                        user_interactions.iloc[end_idx:]
+                    ], ignore_index=True)
+
+                    # Append to fold dataframes
+                    val_df = getattr(self, f'fold_{i}_val_df')
+                    train_df = getattr(self, f'fold_{i}_train_df')
+
+                    setattr(self, f'fold_{i}_val_df',
+                            pd.concat([val_df, val_data], ignore_index=True))
+                    setattr(self, f'fold_{i}_train_df',
+                            pd.concat([train_df, train_data], ignore_index=True))
+
+                    start_idx = end_idx
+
+    def get_fold_data(self, fold_idx):
+        """
+        Get train and validation dataframes for a specific fold
+
+        Parameters:
+        -----------
+        fold_idx : int
+            Index of the fold (0 to n_folds-1)
+
+        Returns:
+        --------
+        tuple : (train_df, val_df)
+            Training and validation dataframes for the specified fold
+        """
+        if not hasattr(self, 'n_folds'):
+            raise ValueError("CV splits have not been created yet. Run split_interactions_by_user first.")
+
+        if fold_idx < 0 or fold_idx >= self.n_folds:
+            raise ValueError(f"fold_idx must be between 0 and {self.n_folds - 1}, got {fold_idx}")
+
+        train_df = getattr(self, f'fold_{fold_idx}_train_df')
+        val_df = getattr(self, f'fold_{fold_idx}_val_df')
+
+        self.train_df = train_df
+        self.val_df = val_df
 
     def prepare_data(self):
         """Filter, encode, and split data"""
         # Filter users/items with minimum interactions
-        self.prepare_data_with_consistent_encoding(self.raw_df)
+        self.prepare_data_with_consistent_encoding()
 
         self.split_interactions_by_user()
 
         self._create_graph_structures()
 
-        # self._create_splits()
+        self.to_device(self.device)
         #
         # # Build interaction mappings
         # self._build_interaction_mappings()
@@ -278,17 +363,9 @@ class RecommendationDataset:
 
     def _create_graph_structures(self, rating_weights=None):
         """Create graph structures for graph-based models"""
-        # Training graph
-        self.train_edge_index, self.train_edge_weight = create_bipartite_graph(
-            self.train_df, self.num_users, self.num_items, rating_weights
-        )
+        self.train_edge_index, self.train_edge_weight = self.create_bipartite_graph(rating_weights)
 
-        # Complete graph (train + val + test)
-        complete_df = pd.concat([self.train_df, self.val_df, self.test_df],
-                                ignore_index=True)
-        self.complete_edge_index, self.complete_edge_weight = create_bipartite_graph(
-            complete_df, self.num_users, self.num_items, rating_weights
-        )
+        self.complete_edge_index, self.complete_edge_weight = self.create_bipartite_graph(rating_weights)
 
     def _build_interaction_mappings(self):
         """Build user-item interaction mappings"""
@@ -332,7 +409,7 @@ class RecommendationDataset:
 
         return neg_items
 
-    def get_dataloader(self, split='train', batch_size=1024, shuffle=True,
+    def get_dataloader(self, split='train', batch_size=512, shuffle=True,
                        num_negatives=1, model_type='lightgcn'):
         """Get dataloader for specific split and model type"""
         if model_type in ['lightgcn', 'itemknn']:
@@ -417,31 +494,26 @@ class RecommendationDataset:
             self.complete_edge_weight = self.complete_edge_weight.to(device)
         return self
 
+    def create_bipartite_graph(self, edge_weights=None):
+        """Create bipartite graph with edge weights based on ratings"""
+        # TODO: only necessary for LightGCN, dont make for ItemKNN and MultiVAE
 
-def create_bipartite_graph(df, num_users, num_items, rating_weights=None):
-    """Create bipartite graph with edge weights based on ratings"""
+        df = self.complete_df
+        users = df['user_encoded'].values
+        items = df['item_encoded'].values + self.num_users  # Offset items by num_users
+        if edge_weights is None:
+            edge_weights = df['rating'].values
 
-    # Default rating weights (can be customized)
-    if rating_weights is None:
-        rating_weights = {1: 0.2, 2: 0.4, 3: 0.6, 4: 0.8, 5: 1.0}
+        # Create bidirectional edges (user->item and item->user)
+        edge_index = torch.tensor([
+            np.concatenate([users, items]),
+            np.concatenate([items, users])
+        ], dtype=torch.long)
 
-    users = df['user_encoded'].values
-    items = df['item_encoded'].values + num_users  # Offset items by num_users
-    ratings = df['rating'].values
+        edge_weight = torch.tensor(
+            np.concatenate([edge_weights, edge_weights]),
+            dtype=torch.float
+        )
 
-    # Create edge weights based on ratings
-    edge_weights = np.array([rating_weights.get(r, 0.5) for r in ratings])
-
-    # Create bidirectional edges (user->item and item->user)
-    edge_index = torch.tensor([
-        np.concatenate([users, items]),
-        np.concatenate([items, users])
-    ], dtype=torch.long)
-
-    edge_weight = torch.tensor(
-        np.concatenate([edge_weights, edge_weights]),
-        dtype=torch.float
-    )
-
-    return edge_index, edge_weight
+        return edge_index, edge_weight
 
