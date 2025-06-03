@@ -92,6 +92,11 @@ def get_community_labels(config, adj_np, algorithm='Leiden', save_path='dataset/
     # keep only columns that have not all -1s
     user_labels_sorted_matrix = user_labels_sorted_matrix[:, np.any(user_labels_sorted_matrix != -1, axis=0)]
     item_labels_sorted_matrix = item_labels_sorted_matrix[:, np.any(item_labels_sorted_matrix != -1, axis=0)]
+    # as clusters are sorted by size, we can remove columns that have all zeros
+    user_labels_matrix_mask = user_labels_matrix_mask[:, np.any(user_labels_matrix_mask != 0, axis=0)]
+    item_labels_matrix_mask = item_labels_matrix_mask[:, np.any(item_labels_matrix_mask != 0, axis=0)]
+    user_probs = user_probs[:, np.any(user_labels_matrix_mask != 0, axis=0)]
+    item_probs = item_probs[:, np.any(item_labels_matrix_mask != 0, axis=0)]
 
     np.savetxt(f'{save_path}/user_labels_{algorithm}_processed.csv', user_labels, delimiter=",", fmt='% 4d')
     np.savetxt(f'{save_path}/item_labels_{algorithm}_processed.csv', item_labels, delimiter=",", fmt='% 4d')
