@@ -143,6 +143,9 @@ class RecommendationDataset:
     def load_data(self):
         """Load raw data based on dataset type"""
         if self.name.startswith('ml-'):
+            if not os.path.exists(f'dataset/{self.name}/saved'):
+                os.makedirs(f'dataset/{self.name}/saved')
+
             self._load_movielens()
         elif self.name == 'lfm':
             self._load_lastfm()
@@ -164,7 +167,7 @@ class RecommendationDataset:
             self.raw_df = pd.read_csv(ratings_file, sep='\t',
                                       names=['user_id', 'item_id', 'rating'],
                                       usecols=[0, 1, 2], header=0)
-        self.raw_df.sample(frac=1, random_state=42).reset_index(drop=True)
+        self.raw_df = self.raw_df.sample(frac=1, random_state=42).reset_index(drop=True)
 
     def _load_lastfm(self):
         """Load Last.fm dataset"""
@@ -209,14 +212,14 @@ class RecommendationDataset:
         pd.to_pickle(user_encoder, f'dataset/{self.name}/encoders/user_encoder.pkl')
         pd.to_pickle(item_encoder, f'dataset/{self.name}/encoders/item_encoder.pkl')
 
+        pd.to_pickle(filtered_df, f'dataset/{self.name}/saved/filtered_df.pkl')
+
         num_users = len(user_encoder.classes_)
         num_items = len(item_encoder.classes_)
 
         self.complete_df = filtered_df
         self.num_users = num_users
         self.num_items = num_items
-        self.user_encoder = user_encoder
-        self.item_encoder = item_encoder
 
     def split_interactions_by_user(self, test_ratio=0.2, n_folds=5):
         """
@@ -323,8 +326,16 @@ class RecommendationDataset:
 
     def prepare_data(self):
         """Filter, encode, and split data"""
-        # Filter users/items with minimum interactions
-        self.prepare_data_with_consistent_encoding()
+
+        # load if processed file is already available
+        if not os.path.exists(f'dataset/{self.name}/saved/filtered_df.pkl'):
+            self.load_data()
+            self.prepare_data_with_consistent_encoding()
+            self.raw_df = None  # Clear raw_df to save memory
+        else:
+            self.complete_df = pd.read_pickle(f'dataset/{self.name}/saved/filtered_df.pkl')
+            self.num_users = len(pd.unique(self.complete_df['user_encoded']))
+            self.num_items = len(pd.unique(self.complete_df['item_encoded']))
 
         self.split_interactions_by_user()
 

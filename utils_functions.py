@@ -380,9 +380,10 @@ def initialize_wandb(config):
 
 
 def get_biased_connectivity_data(config, adj_tens):
-    user_community_connectivity_matrix, item_community_connectivity_matrix = calculate_community_metrics(
-        config=config,
-        adj_tens=adj_tens)
+    user_community_connectivity_matrix, item_community_connectivity_matrix = get_user_item_community_connectivity_matrices(
+        adj_tens=adj_tens,
+        user_com_labels=config.user_com_labels,
+        item_com_labels=config.item_com_labels)
 
     config.user_community_connectivity_matrix = user_community_connectivity_matrix
     config.item_community_connectivity_matrix = item_community_connectivity_matrix
@@ -392,72 +393,43 @@ def get_biased_connectivity_data(config, adj_tens):
     config.item_community_connectivity_matrix_distribution = item_community_connectivity_matrix / torch.sum(
         item_community_connectivity_matrix, dim=1, keepdim=True)
 
-    user_labels_Leiden_matrix_mask = np.loadtxt(f'dataset/{config.dataset_name}/saved/user_labels_Leiden_matrix_mask.csv',
+    user_labels_Leiden_matrix_mask = np.loadtxt(f'dataset/{config.dataset_name}/saved/user_labels_matrix_mask.csv',
                                                 delimiter=',')
-    item_labels_Leiden_matrix_mask = np.loadtxt(f'dataset/{config.dataset_name}/saved/item_labels_Leiden_matrix_mask.csv',
+    item_labels_Leiden_matrix_mask = np.loadtxt(f'dataset/{config.dataset_name}/saved/item_labels_matrix_mask.csv',
                                                 delimiter=',')
 
     (config.biased_user_edges_mask,
      config.biased_item_edges_mask) = get_biased_edges_mask(
+        config=config,
         adj_tens=adj_tens,
         user_com_labels_mask=torch.tensor(user_labels_Leiden_matrix_mask, device=config.device),
         item_com_labels_mask=torch.tensor(item_labels_Leiden_matrix_mask, device=config.device),
         user_community_connectivity_matrix_distribution=config.user_community_connectivity_matrix_distribution,
         item_community_connectivity_matrix_distribution=config.item_community_connectivity_matrix_distribution,
-        bias_threshold=0.4)
+        )
 
 
 def get_community_data(config, adj_np):
     """Get or load community labels and power nodes."""
     # Create directory if it doesn't exist
-    if not os.path.exists(f'dataset/saved/{config.dataset_name}'):
-        os.makedirs(f'dataset/saved/{config.dataset_name}')
+    if not os.path.exists(f'dataset/{config.dataset_name}/saved'):
+        os.makedirs(f'dataset/{config.dataset_name}/saved')
 
     # TODO: all community data has to be from whole dataset and masked for the subsets
     (config.user_com_labels,
      config.item_com_labels) = get_community_labels(
         config=config,
         adj_np=adj_np,
-        save_path=f'dataset/saved/{config.dataset_name}',
+        save_path=f'dataset/{config.dataset_name}/saved',
         get_probs=True)
 
     (config.power_users_ids,
      config.power_items_ids) = get_power_users_items(
-        config=config,
         adj_tens=torch.tensor(adj_np, device=config.device),
         user_com_labels=config.user_com_labels,
         item_com_labels=config.item_com_labels,
         users_top_percent=config.users_top_percent,
         items_top_percent=config.items_top_percent,
-        save_path=f'dataset/saved/{config.dataset_name}')
-
-
-def calculate_community_metrics(config, adj_tens):
-    """Calculate community connectivity matrix and average degrees."""
-    (user_community_connectivity_matrix,
-     item_community_connectivity_matrix) = get_user_item_community_connectivity_matrices(
-        adj_tens=adj_tens,
-        user_com_labels=config.user_com_labels,
-        item_com_labels=config.item_com_labels)
-    return user_community_connectivity_matrix, item_community_connectivity_matrix
-
-
-def get_subset_masks(config):
-    """Get subset masks for community data."""
-    dataset_len = config.train_dataset_len
-    fold_size = dataset_len // 5  # 5 folds, test set is excluded
-    start = config.k_th_fold * fold_size
-    end = (config.k_th_fold + 1) * fold_size if config.k_th_fold != 4 else dataset_len
-
-    valid_mask = np.zeros(dataset_len, dtype=bool)
-    valid_mask[start:end] = True
-    test_mask = np.zeros(dataset_len, dtype=bool)
-    test_mask[fold_size * 5:] = True
-    train_mask = np.zeros(dataset_len, dtype=bool)
-    train_mask[~valid_mask & ~test_mask] = True
-
-    config.train_mask = train_mask
-    config.valid_mask = valid_mask
-    config.test_mask = test_mask
+        save_path=f'dataset/{config.dataset_name}/saved')
 
 

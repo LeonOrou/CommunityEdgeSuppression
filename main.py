@@ -87,7 +87,7 @@ def prepare_adj_tensor(dataset):
             df['rating'].values
         ]),
         dtype=torch.int64,
-        device=dataset.complete_edge_index.device
+        device=dataset.device
     )
     return adj_tens
 
@@ -135,8 +135,8 @@ def train_model(dataset, model, config, stage='loo', verbose=True):
 
     # Create user positive items mapping for better negative sampling (from ALL interactions)
     user_positive_items = defaultdict(set)
-    for _, row in dataset.complete_df.iterrows():
-        user_positive_items[row['user_encoded']].add(row['item_encoded'])
+    for user_id, group in dataset.complete_df.groupby('user_encoded')['item_encoded']:
+        user_positive_items[user_id] = set(group.values)
 
     # Training parameters
     batch_size = config.batch_size
@@ -307,7 +307,7 @@ def main():
     config.log_config()
 
     dataset = RecommendationDataset(name=config.dataset_name, data_path=f'dataset/{config.dataset_name}')
-    dataset.load_data().prepare_data()
+    dataset.prepare_data()
 
     config.user_degrees, config.item_degrees = dataset.get_node_degrees()
     print("Preparing data with consistent encoding...")

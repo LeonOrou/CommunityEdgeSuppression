@@ -10,30 +10,29 @@ import os
 from scipy.stats import binom
 
 
-def get_community_labels(config, adj_np, algorithm='Leiden', save_path='dataset/ml-100k', get_probs=True, force_bipartite=True):
+def get_community_labels(config, adj_np, save_path='dataset/ml-100k/saved', get_probs=True, force_bipartite=True):
     # read and return them if already computed locally
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    if f'user_labels_{algorithm}_matrix_mask.csv' in os.listdir(f'dataset/{config.dataset_name}'):
+    if f'user_labels_matrix_mask.csv' in os.listdir(save_path):
         return torch.tensor(
-            np.loadtxt(f'dataset/{config.dataset_name}/user_labels_{algorithm}_matrix.csv', delimiter=','),
+            np.loadtxt(f'{save_path}/user_labels_matrix.csv', delimiter=','),
             dtype=torch.int64,
             device=device
         ), torch.tensor(
-            np.loadtxt(f'dataset/{config.dataset_name}/item_labels_{algorithm}_matrix.csv', delimiter=','),
+            np.loadtxt(f'{save_path}/item_labels_matrix.csv', delimiter=','),
             dtype=torch.int64,
             device=device
         )
 
     adj_csr = sp.csr_matrix((adj_np[:, 2].astype(float), (adj_np[:, 0].astype(int), adj_np[:, 1].astype(int))))
 
-    if algorithm == 'Leiden':
-        if config.dataset_name == 'ml-100k':
-            resolution = 1.2
-        elif config.dataset_name == 'ml-20m':
-            resolution = 1.5
-        else:  # config.dataset_name == 'lfm':
-            resolution = 1.5
-        detect_obj = Leiden(resolution=resolution, return_aggregate=False, sort_clusters=True)
+    if config.dataset_name == 'ml-100k':
+        resolution = 1.2
+    elif config.dataset_name == 'ml-20m':
+        resolution = 1.5
+    else:  # config.dataset_name == 'lfm':
+        resolution = 1.5
+    detect_obj = Leiden(resolution=resolution, return_aggregate=False, sort_clusters=True)
 
     detect_obj.fit(adj_csr, force_bipartite=force_bipartite)
 
@@ -52,25 +51,25 @@ def get_community_labels(config, adj_np, algorithm='Leiden', save_path='dataset/
     item_labels = item_probs_argsorted[:, 0]
 
     # keeping for community connectivity matrix
-    np.savetxt(f'{save_path}/user_labels_{algorithm}_raw.csv', user_labels, delimiter=",", fmt='% 4d')
-    np.savetxt(f'{save_path}/item_labels_{algorithm}_raw.csv', item_labels, delimiter=",", fmt='% 4d')
+    np.savetxt(f'{save_path}/user_labels_raw.csv', user_labels, delimiter=",", fmt='% 4d')
+    np.savetxt(f'{save_path}/item_labels_raw.csv', item_labels, delimiter=",", fmt='% 4d')
 
     user_probs_sorted = np.sort(user_probs, axis=1)[:, ::-1]
     item_probs_sorted = np.sort(item_probs, axis=1)[:, ::-1]
 
-    counts_users, user_community_thresholds = binomial_significance_threshold(n_interactions=config.user_degrees,
-                                                                              n_categories=user_probs.shape[1],
-                                                                              alpha=0.05)
-    counts_items, item_community_thresholds = binomial_significance_threshold(n_interactions=config.item_degrees,
-                                                                              n_categories=item_probs.shape[1],
-                                                                              alpha=0.05)
+    user_community_thresholds = binomial_significance_threshold(n_interactions=config.user_degrees,
+                                                                  n_categories=user_probs.shape[1],
+                                                                  alpha=0.05)
+    item_community_thresholds = binomial_significance_threshold(n_interactions=config.item_degrees,
+                                                                  n_categories=item_probs.shape[1],
+                                                                  alpha=0.05)
 
     # Replace -1 with another value (e.g., 0 or a special flag like -99)
     user_labels = np.where(user_probs_sorted[:, 0] < user_community_thresholds, -1, user_labels)
     item_labels = np.where(item_probs_sorted[:, 0] < item_community_thresholds, -1, item_labels)
 
-    user_labels_sorted_matrix = np.full((user_labels.shape[0], user_probs_sorted.shape[1]), fill_value=-1, dtype=np.int64)
-    item_labels_sorted_matrix = np.full((item_labels.shape[0], item_probs_sorted.shape[1]), fill_value=-1, dtype=np.int64)
+    user_labels_sorted_matrix = np.full((user_labels.shape[0], user_probs.shape[1]), fill_value=-1, dtype=np.int64)
+    item_labels_sorted_matrix = np.full((item_labels.shape[0], item_probs.shape[1]), fill_value=-1, dtype=np.int64)
 
     user_labels_matrix_mask = np.zeros(user_labels_sorted_matrix.shape, dtype=np.int64)
     item_labels_matrix_mask = np.zeros(item_labels_sorted_matrix.shape, dtype=np.int64)
@@ -93,25 +92,27 @@ def get_community_labels(config, adj_np, algorithm='Leiden', save_path='dataset/
     user_labels_sorted_matrix = user_labels_sorted_matrix[:, np.any(user_labels_sorted_matrix != -1, axis=0)]
     item_labels_sorted_matrix = item_labels_sorted_matrix[:, np.any(item_labels_sorted_matrix != -1, axis=0)]
     # as clusters are sorted by size, we can remove columns that have all zeros
-    user_labels_matrix_mask = user_labels_matrix_mask[:, np.any(user_labels_matrix_mask != 0, axis=0)]
-    item_labels_matrix_mask = item_labels_matrix_mask[:, np.any(item_labels_matrix_mask != 0, axis=0)]
-    user_probs = user_probs[:, np.any(user_labels_matrix_mask != 0, axis=0)]
-    item_probs = item_probs[:, np.any(item_labels_matrix_mask != 0, axis=0)]
+    user_col_drop = np.any(user_labels_matrix_mask != 0, axis=0)
+    item_col_drop = np.any(item_labels_matrix_mask != 0, axis=0)
+    user_labels_matrix_mask = user_labels_matrix_mask[:, user_col_drop]
+    item_labels_matrix_mask = item_labels_matrix_mask[:, item_col_drop]
+    user_probs = user_probs[:, user_col_drop]
+    item_probs = item_probs[:, item_col_drop]
 
-    np.savetxt(f'{save_path}/user_labels_{algorithm}_processed.csv', user_labels, delimiter=",", fmt='% 4d')
-    np.savetxt(f'{save_path}/item_labels_{algorithm}_processed.csv', item_labels, delimiter=",", fmt='% 4d')
+    np.savetxt(f'{save_path}/user_labels_processed.csv', user_labels, delimiter=",", fmt='% 4d')
+    np.savetxt(f'{save_path}/item_labels_processed.csv', item_labels, delimiter=",", fmt='% 4d')
 
-    np.savetxt(f'{save_path}/user_labels_{algorithm}_matrix.csv', user_labels_sorted_matrix, delimiter=",", fmt='% 4d')
-    np.savetxt(f'{save_path}/item_labels_{algorithm}_matrix.csv', item_labels_sorted_matrix, delimiter=",", fmt='% 4d')
+    np.savetxt(f'{save_path}/user_labels_matrix.csv', user_labels_sorted_matrix, delimiter=",", fmt='% 4d')
+    np.savetxt(f'{save_path}/item_labels_matrix.csv', item_labels_sorted_matrix, delimiter=",", fmt='% 4d')
 
     # for dropout
-    np.savetxt(f'{save_path}/user_labels_{algorithm}_matrix_mask.csv', user_labels_matrix_mask, delimiter=",", fmt='% 4d')
-    np.savetxt(f'{save_path}/item_labels_{algorithm}_matrix_mask.csv', item_labels_matrix_mask, delimiter=",", fmt='% 4d')
+    np.savetxt(f'{save_path}/user_labels_matrix_mask.csv', user_labels_matrix_mask, delimiter=",", fmt='% 4d')
+    np.savetxt(f'{save_path}/item_labels_matrix_mask.csv', item_labels_matrix_mask, delimiter=",", fmt='% 4d')
 
     if get_probs:
-        np.savetxt(f'{save_path}/user_labels_{algorithm}_probs.csv', user_probs,
+        np.savetxt(f'{save_path}/user_labels_probs.csv', user_probs,
                    delimiter=",", fmt='%.4f')
-        np.savetxt(f'{save_path}/item_labels_{algorithm}_probs.csv', item_probs,
+        np.savetxt(f'{save_path}/item_labels_probs.csv', item_probs,
                    delimiter=",", fmt='%.4f')
 
     return torch.tensor(user_labels_sorted_matrix, dtype=torch.int64, device=device), torch.tensor(item_labels_sorted_matrix, dtype=torch.int64, device=device)
@@ -132,16 +133,15 @@ def binomial_significance_threshold(n_interactions, n_categories, alpha=0.05):
     props = thresh / n_arr                           # now guaranteed ≤ 1
 
     if np.isscalar(n_interactions):
-        return int(thresh[0]), float(props[0])
-    return thresh.astype(int), props
+        return float(props[0])
+    return props
 
 
-def get_power_users_items(config, adj_tens, user_com_labels, item_com_labels,
+def get_power_users_items(adj_tens, user_com_labels, item_com_labels,
                           users_top_percent=0.01, items_top_percent=0.01,
-                          save_path='/dataset/ml-32m'):
+                          save_path='/dataset/saved/ml-100k'):
     """
-    Get the indices of the top users and items based on their degree.
-    :param config: dict, configuration dictionary
+    Get the indices of the top users and items based on their degree
     :param adj_tens: torch.tensor, format (n, 3) with (user, item, rating)
     :param user_com_labels: torch.tensor format (n_users, m_labels (user with most labels)), community labels for each user
     :param item_com_labels: torch.tensor format (n_items, m_labels (item with most labels)), community labels for each item
@@ -153,14 +153,13 @@ def get_power_users_items(config, adj_tens, user_com_labels, item_com_labels,
     # read and return them if already computed locally
     device = adj_tens.device  # Get the device of the input tensor
     if f'power_user_ids_top{users_top_percent}.csv' in os.listdir(
-            f'dataset/{config.dataset_name}') and f'power_item_ids_top{items_top_percent}.csv' in os.listdir(
-            f'dataset/{config.dataset_name}'):
+            save_path) and f'power_item_ids_top{items_top_percent}.csv' in os.listdir(save_path):
         return torch.tensor(
-            np.loadtxt(f'dataset/{config.dataset_name}/power_user_ids_top{users_top_percent}.csv'),
+            np.loadtxt(f'{save_path}/power_user_ids_top{users_top_percent}.csv'),
             dtype=torch.int64,
             device=device
         ), torch.tensor(
-            np.loadtxt(f'dataset/{config.dataset_name}/power_item_ids_top{items_top_percent}.csv'),
+            np.loadtxt(f'{save_path}/power_item_ids_top{items_top_percent}.csv'),
             dtype=torch.int64,
             device=device)
 
@@ -359,18 +358,23 @@ def get_user_item_community_connectivity_matrices(adj_tens, user_com_labels, ite
 
         item_communities_each_user += temp_tensor
 
-    return item_communities_each_user, user_communities_each_item
+    return torch.tensor(item_communities_each_user, dtype=torch.int32), torch.tensor(user_communities_each_item, dtype=torch.int32)
 
 
-def get_biased_edges_mask(adj_tens, user_com_labels_mask, item_com_labels_mask,
+def get_biased_edges_mask(config, adj_tens, user_com_labels_mask, item_com_labels_mask,
                           user_community_connectivity_matrix_distribution,
-                          item_community_connectivity_matrix_distribution,
-                          bias_threshold=0.4):
-    # TODO: make bias threshold via binomial significance threshold
+                          item_community_connectivity_matrix_distribution,):
 
-    # make two masks for the user and item community connectivity matrices to get values above threshold
-    users_com_connectivity_mask = user_community_connectivity_matrix_distribution > bias_threshold
-    items_com_connectivity_mask = item_community_connectivity_matrix_distribution > bias_threshold
+    user_community_thresholds = binomial_significance_threshold(n_interactions=config.user_degrees,
+                                                                  n_categories=user_community_connectivity_matrix_distribution.shape[1],
+                                                                  alpha=0.05)
+    item_community_thresholds = binomial_significance_threshold(n_interactions=config.item_degrees,
+                                                                  n_categories=item_community_connectivity_matrix_distribution.shape[1],
+                                                                  alpha=0.05)
+
+    # get masks for communities that are row wise above the threshold
+    users_com_connectivity_mask = user_community_connectivity_matrix_distribution > torch.tensor(user_community_thresholds, device=config.device).unsqueeze(1)
+    items_com_connectivity_mask = item_community_connectivity_matrix_distribution > torch.tensor(item_community_thresholds, device=config.device).unsqueeze(1)
 
     # get indices where in user/item com masks at least one community is above threshold
     users_com_labels_mask_rows = torch.any(user_com_labels_mask > 0, dim=1)
