@@ -126,7 +126,7 @@ def binomial_significance_threshold(n_interactions, n_categories, alpha=0.05):
     alpha_per_test = alpha / n_categories
 
     n_arr = np.atleast_1d(n_interactions)
-    # find k with P(X > k) ≤ alpha_per_test, so T=k+1 may exceed n -> clamp next
+    # find k_values with P(X > k_values) ≤ alpha_per_test, so T=k_values+1 may exceed n -> clamp next
     raw_thresh = binom.isf(alpha_per_test, n_arr, p) + 1
     thresh = np.minimum(raw_thresh, n_arr)           # clamp to max trials
     props = thresh / n_arr                           # now guaranteed ≤ 1

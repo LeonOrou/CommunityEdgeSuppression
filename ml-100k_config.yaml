@@ -46,7 +46,7 @@ train_neg_sample_args:
 
 metrics: ['Recall', 'MRR', 'NDCG', 'Hit', 'Precision', 'ItemCoverage', 'AveragePopularity', 'GiniIndex', 'ShannonEntropy', 'TailPercentage']
 topk: 10  # try 20, 50, 100
-valid_metric: ndcg@10  # for early stopping, same k needed as topk
+valid_metric: ndcg@10  # for early stopping, same k_values needed as topk
 metric_decimal_place: 4
 repeatable: True
 

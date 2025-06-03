@@ -82,8 +82,8 @@ def get_hyperparameter_results():
             if 'n_layers' in config:
                 params['n_layers'] = config.get('n_layers')['value']
         elif model_name == 'ItemKNN':
-            if 'k' in config:
-                params['k'] = config.get('k')['value']
+            if 'k_values' in config:
+                params['k_values'] = config.get('k_values')['value']
             if 'shrink' in config:
                 params['shrink'] = config.get('shrink')['value']
         elif model_name == 'MultiVAE':
@@ -108,7 +108,7 @@ def get_hyperparameter_results():
         if model_name == 'LightGCN':
             param_cols = ['learning_rate', 'embedding_size', 'n_layers']
         elif model_name == 'ItemKNN':
-            param_cols = ['k', 'shrink']
+            param_cols = ['k_values', 'shrink']
         else:  # MultiVAE
             param_cols = ['hidden_dimension', 'latent_dimension', 'dropout_prob', 'anneal_cap']
 
@@ -140,7 +140,7 @@ def display_results(results):
             display_cols = ['n_layers', 'embedding_size', 'learning_rate', 'scheduler',
                             'test_ndcg', 'test_item_coverage', 'test_gini_index', 'test_avg_popularity']
         elif model_name == 'ItemKNN':
-            display_cols = ['k', 'shrink', 'test_ndcg', 'test_item_coverage', 'test_gini_index', 'test_avg_popularity']
+            display_cols = ['k_values', 'shrink', 'test_ndcg', 'test_item_coverage', 'test_gini_index', 'test_avg_popularity']
         else:  # MultiVAE
             display_cols = ['hidden_dimension', 'latent_dimension', 'dropout_prob',
                             'anneal_cap', 'test_ndcg', 'test_item_coverage', 'test_gini_index', 'test_avg_popularity']

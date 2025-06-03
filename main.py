@@ -18,7 +18,6 @@ from argparse import ArgumentParser
 from utils_functions import (
     community_edge_suppression, get_community_data, get_biased_connectivity_data, set_seed)
 
-
 warnings.filterwarnings('ignore')
 
 
@@ -30,26 +29,29 @@ def bpr_loss(user_emb, pos_item_emb, neg_item_emb):
     return loss
 
 
-def sample_negative_items(user_ids, pos_item_ids, num_items, user_positive_items=None, num_negatives=1):
-    """Sample negative items for each user-positive item pair"""
-    neg_items = []
+def sample_negative_items_optimized(user_ids, pos_item_ids, num_items, user_positive_items, device):
+    """Optimized negative sampling with minimal CPU-GPU transfer"""
+    batch_size = len(user_ids)
+    neg_items = np.zeros(batch_size, dtype=np.int32)  # Use int32
 
-    for user_id, pos_item_id in zip(user_ids, pos_item_ids):
-        user_neg_items = []
-        user_pos_set = user_positive_items.get(user_id, set()) if user_positive_items else set()
+    # Process on CPU for efficiency with sparse data
+    user_ids_cpu = user_ids.cpu().numpy()
 
-        for _ in range(num_negatives):
-            attempts = 0
-            while attempts < 100:  # Prevent infinite loop
-                neg_item = np.random.randint(0, num_items)
-                # Ensure negative item is not a positive item for this user
-                if neg_item not in user_pos_set:
-                    break
-                attempts += 1
-            user_neg_items.append(neg_item)
-        neg_items.extend(user_neg_items)
+    for i in range(batch_size):
+        user_id = user_ids_cpu[i]
+        user_pos_set = user_positive_items.get(user_id, set())
 
-    return torch.tensor(neg_items, dtype=torch.long)
+        # Simple and fast negative sampling
+        neg_item = np.random.randint(0, num_items)
+        attempts = 0
+        while neg_item in user_pos_set and attempts < 100:
+            neg_item = np.random.randint(0, num_items)
+            attempts += 1
+
+        neg_items[i] = neg_item
+
+    # Single transfer to GPU with int32
+    return torch.tensor(neg_items, dtype=torch.int32, device=device)
 
 
 def get_model(dataset, config):
@@ -90,6 +92,18 @@ def prepare_adj_tensor(dataset):
     return adj_tens
 
 
+def prepare_training_data_gpu(train_df, device):
+    """Pre-convert training data to GPU tensors with memory-efficient dtypes"""
+    # Use int32 for user/item indices - sufficient for millions of users/items
+    all_users = torch.tensor(train_df['user_encoded'].values, dtype=torch.int32, device=device)
+    all_items = torch.tensor(train_df['item_encoded'].values, dtype=torch.int32, device=device)
+
+    # Create indices for shuffling (needs long for arange)
+    indices = torch.arange(len(train_df), device=device)
+
+    return all_users, all_items, indices
+
+
 def train_model(dataset, model, config, stage='loo', verbose=True):
     """
     Train LightGCN using the COMPLETE graph structure (train+val+test)
@@ -102,25 +116,17 @@ def train_model(dataset, model, config, stage='loo', verbose=True):
     print(f"Test interactions: {len(dataset.test_df)} (used for evaluation)")
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Training on device: {device}")
 
-    # Pre-calculate community data and biased edges
-    adj_np = dataset.complete_df[['user_encoded', 'item_encoded', 'rating']].values
-    adj_tens = prepare_adj_tensor(dataset)
-
-    # Get community labels and power nodes
-    get_community_data(config, adj_np)
-
-    # Get biased connectivity data
-    get_biased_connectivity_data(config, adj_tens)
-
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-4)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.0001, weight_decay=1e-5)
 
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
         mode='max',  # max ndcg
-        factor=0.5,
-        patience=10,
-        min_lr=1e-5,
+        factor=0.7,  # less aggressive reduction
+        patience=20,  # more patience
+        min_lr=1e-6,
+        verbose=True  # print when LR is reduced
     )
 
     # Move data to device
@@ -135,16 +141,39 @@ def train_model(dataset, model, config, stage='loo', verbose=True):
     # Training parameters
     batch_size = config.batch_size
     best_val_ndcg = 0
-    patience = config.patience
+    patience = config.patience if hasattr(config, 'patience') else 50  # increase default patience
     patience_counter = 0
+
+    # Track validation history for better early stopping
+    val_history = []
+    best_epoch = 0
 
     if stage == 'full_train':
         dataset.train_df = dataset.train_val_df  # Use all training+validation data for training
         dataset.val_df = dataset.test_df  # Use test set as validation for final evaluation
 
+    # Pre-convert training data to GPU
+    all_train_users, all_train_items, train_indices = prepare_training_data_gpu(dataset.train_df, device)
+    num_train = len(train_indices)
+
+    # Warmup scheduler for the first few epochs
+    warmup_epochs = 10
+    initial_lr = 0.0001
+
+    def get_lr_with_warmup(epoch):
+        if epoch < warmup_epochs:
+            return initial_lr * (epoch + 1) / warmup_epochs
+        return initial_lr
+
+    adj_tens = prepare_adj_tensor(dataset)
+
     model.train()
 
     for epoch in range(config.epochs):
+        # Apply warmup
+        if epoch < warmup_epochs:
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = get_lr_with_warmup(epoch)
         # Apply community edge suppression if enabled
         if config.use_dropout:
             # Apply community edge suppression to get modified edge weights
@@ -162,31 +191,36 @@ def train_model(dataset, model, config, stage='loo', verbose=True):
         total_loss = 0
         num_batches = 0
 
-        for i in range(0, len(dataset.train_df), batch_size):
-            batch = dataset.train_df.iloc[i:i + batch_size]
+        # Shuffle indices on GPU
+        perm = torch.randperm(num_train, device=device)
+        train_indices_shuffled = train_indices[perm]
 
-            if len(batch) == 0:
+        for i in range(0, num_train, batch_size):
+            batch_indices = train_indices_shuffled[i:i + batch_size]
+
+            if len(batch_indices) == 0:
                 continue
 
-            # Get batch data
-            batch_users = torch.tensor(batch['user_encoded'].values, dtype=torch.long).to(device)
-            batch_pos_items = torch.tensor(batch['item_encoded'].values, dtype=torch.long).to(device)
+            # Get batch data (already on GPU)
+            batch_users = all_train_users[batch_indices]
+            batch_pos_items = all_train_items[batch_indices]
 
-            # Improved negative sampling using complete interaction set
-            batch_neg_items = sample_negative_items(
-                batch['user_encoded'].values,
-                batch['item_encoded'].values,
+            # Sample negative items with optimized CPU-GPU transfer
+            batch_neg_items = sample_negative_items_optimized(
+                batch_users,
+                batch_pos_items,
                 dataset.num_items,
-                user_positive_items=user_positive_items
-            ).to(device)
+                user_positive_items,
+                device
+            )
 
-            # Use the current edge weights (either modified or original)
+            # Forward pass - embeddings are computed on GPU
             user_emb, item_emb = model(dataset.complete_edge_index, current_edge_weight)
 
-            # Get embeddings for batch
-            batch_user_emb = user_emb[batch_users]
-            batch_pos_item_emb = item_emb[batch_pos_items]
-            batch_neg_item_emb = item_emb[batch_neg_items]
+            # Get embeddings for batch (cast indices to long for embedding lookup)
+            batch_user_emb = user_emb[batch_users.long()]
+            batch_pos_item_emb = item_emb[batch_pos_items.long()]
+            batch_neg_item_emb = item_emb[batch_neg_items.long()]
 
             # Compute loss ONLY on training interactions
             loss = bpr_loss(batch_user_emb, batch_pos_item_emb, batch_neg_item_emb)
@@ -200,41 +234,63 @@ def train_model(dataset, model, config, stage='loo', verbose=True):
 
             total_loss_batch = loss + l2_reg
 
-            # Backward pass
+            # Backward pass with gradient clipping
             optimizer.zero_grad()
             total_loss_batch.backward()
+
+            # Gradient clipping to prevent exploding gradients
+            # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
             optimizer.step()
 
             total_loss += total_loss_batch.item()
             num_batches += 1
 
-        # Validation every 5 epochs
-        if epoch % 5 == 0:
+        if epoch % 10 == 0 or epoch == config.epochs - 1:
             # Use original edge weights for evaluation (no suppression)
             val_metrics = evaluate_model(
-                model=model, dataset=dataset, k=10,
+                model=model, dataset=dataset, k_values=[10],
             )
-            val_ndcg = val_metrics['ndcg']
+            val_ndcg = val_metrics[10]['ndcg']  # Use k=10 for scheduler and early stopping
+            val_history.append(val_ndcg)
 
-            scheduler.step(val_ndcg)
+            # scheduler.step(val_ndcg)
+            current_lr = optimizer.param_groups[0]['lr']
 
-            if verbose and epoch % 10 == 0:
+            if verbose:
                 avg_loss = total_loss / max(num_batches, 1)
                 suppression_status = "ON" if config.use_dropout else "OFF"
-                print(
-                    f'  Epoch {epoch:3d}/{config.epochs}, Loss: {avg_loss:.4f}, Val NDCG: {val_ndcg:.4f} (Suppression: {suppression_status})')
+                print(f'  Epoch {epoch:3d}/{config.epochs}, Loss: {avg_loss:.4f}, '
+                      f'Val NDCG@10: {val_ndcg:.4f} (Suppression: {suppression_status})')
 
-            # Early stopping
+            # Improved early stopping with relative improvement check
             if val_ndcg > best_val_ndcg:
-                best_val_ndcg = val_ndcg
-                patience_counter = 0
-                best_model_state = model.state_dict().copy()
+                improvement = (val_ndcg - best_val_ndcg) / best_val_ndcg if best_val_ndcg > 0 else 1.0
+
+                # Only update best if improvement is significant (> 0.1%)
+                if improvement > 0.001 or best_val_ndcg == 0:
+                    best_val_ndcg = val_ndcg
+                    patience_counter = 0
+                    best_model_state = model.state_dict().copy()
+                    best_epoch = epoch
+                else:
+                    patience_counter += 1
             else:
                 patience_counter += 1
-                if patience_counter >= patience:
+
+            # Additional check: stop if learning has plateaued
+            if len(val_history) >= 5:
+                recent_std = np.std(val_history[-5:])
+                if recent_std < 0.0001 and patience_counter >= patience // 2:
                     if verbose:
-                        print(f"  Early stopping at epoch {epoch}")
+                        print(f"  Early stopping at epoch {epoch} - validation plateaued")
                     break
+
+            if patience_counter >= patience:
+                if verbose:
+                    print(f"  Early stopping at epoch {epoch} - no improvement for {patience} checks")
+                    print(f"  Best epoch was {best_epoch} with NDCG@10: {best_val_ndcg:.4f}")
+                break
 
     # Load best model
     if 'best_model_state' in locals():
@@ -250,12 +306,13 @@ def main():
     config.setup_model_config()
     config.log_config()
 
-    dataset = RecommendationDataset(name=config.dataset_name, data_path=f'dataset/{config.dataset_name}_raw')
+    dataset = RecommendationDataset(name=config.dataset_name, data_path=f'dataset/{config.dataset_name}')
     dataset.load_data().prepare_data()
 
     config.user_degrees, config.item_degrees = dataset.get_node_degrees()
     print("Preparing data with consistent encoding...")
-    print(f"Processed data: {dataset.num_users} users, {dataset.num_items} items, {len(dataset.complete_df)} interactions")
+    print(
+        f"Processed data: {dataset.num_users} users, {dataset.num_items} items, {len(dataset.complete_df)} interactions")
 
     print(f"Train set: {len(dataset.train_val_df)} interactions")
     print(f"Test set: {len(dataset.test_df)} interactions")
@@ -267,6 +324,16 @@ def main():
         print(f"User dropout: {config.users_dec_perc_drop}, Item dropout: {config.items_dec_perc_drop}")
     else:
         print("Community edge suppression DISABLED")
+
+    # Pre-calculate community data and biased edges
+    adj_np = dataset.complete_df[['user_encoded', 'item_encoded', 'rating']].values
+    adj_tens = prepare_adj_tensor(dataset)
+
+    # Get community labels and power nodes
+    get_community_data(config, adj_np)
+
+    # Get biased connectivity data
+    get_biased_connectivity_data(config, adj_tens)
 
     cv_results = []
 
@@ -287,41 +354,77 @@ def main():
         # Evaluate on CV validation set
         if len(dataset.val_df) > 0:
             val_metrics = evaluate_model(
-                model=model, dataset=dataset, k=10, stage='loo'
+                model=model, dataset=dataset, k_values=config.evaluate_top_k, stage='loo'
             )
 
             fold_results = {
                 'fold': fold + 1,
-                'val_ndcg': val_metrics['ndcg'],
-                'val_recall': val_metrics['recall'],
-                'val_precision': val_metrics['precision']
             }
+
+            # Store metrics for each k
+            for k in config.evaluate_top_k:
+                fold_results[f'val_ndcg@{k}'] = val_metrics[k]['ndcg']
+                fold_results[f'val_recall@{k}'] = val_metrics[k]['recall']
+                fold_results[f'val_precision@{k}'] = val_metrics[k]['precision']
+                fold_results[f'val_mrr@{k}'] = val_metrics[k]['mrr']
+                fold_results[f'val_hit_rate@{k}'] = val_metrics[k]['hit_rate']
+                fold_results[f'val_item_coverage@{k}'] = val_metrics[k]['item_coverage']
+                fold_results[f'val_gini_index@{k}'] = val_metrics[k]['gini_index']
+                fold_results[f'val_simpson_index@{k}'] = val_metrics[k]['simpson_index']
 
             cv_results.append(fold_results)
 
-            print(f"Fold {fold + 1} Results:")
-            print(
-                f"  Val - NDCG: {val_metrics['ndcg']:.4f}, Recall: {val_metrics['recall']:.4f}, Precision: {val_metrics['precision']:.4f}")
+            print(f"\nFold {fold + 1} Results:")
+            print(f"{'Metric':<15} {'k=10':>10} {'k=20':>10} {'k=50':>10} {'k=100':>10}")
+            print("-" * 48)
+
+            # Only show key metrics during training
+            for metric, key in [('NDCG', 'ndcg'), ('Recall', 'recall'), ('Hit Rate', 'hit_rate')]:
+                row = f"{metric:<15}"
+                for k in config.evaluate_top_k:
+                    row += f"{val_metrics[k][key]:>10.4f}"
+                print(row)
 
     # Calculate average CV results
     if cv_results:
         cv_df = pd.DataFrame(cv_results)
-        cv_summary = {
-            'val_ndcg_mean': cv_df['val_ndcg'].mean(),
-            'val_ndcg_std': cv_df['val_ndcg'].std(),
-            'val_recall_mean': cv_df['val_recall'].mean(),
-            'val_recall_std': cv_df['val_recall'].std(),
-            'val_precision_mean': cv_df['val_precision'].mean(),
-            'val_precision_std': cv_df['val_precision'].std(),
-        }
+        cv_summary = {}
 
-        print("\n" + "=" * 60)
-        print("CROSS-VALIDATION SUMMARY")
-        print("=" * 60)
-        print(f"Validation Set (5-fold CV):")
-        print(f"  NDCG:      {cv_summary['val_ndcg_mean']:.4f} ± {cv_summary['val_ndcg_std']:.4f}")
-        print(f"  Recall:    {cv_summary['val_recall_mean']:.4f} ± {cv_summary['val_recall_std']:.4f}")
-        print(f"  Precision: {cv_summary['val_precision_mean']:.4f} ± {cv_summary['val_precision_std']:.4f}")
+        # Calculate mean for each metric at each k
+        for k in config.evaluate_top_k:
+            cv_summary[k] = {
+                'NDCG': cv_df[f'val_ndcg@{k}'].mean(),
+                'Recall': cv_df[f'val_recall@{k}'].mean(),
+                'Precision': cv_df[f'val_precision@{k}'].mean(),
+                'MRR': cv_df[f'val_mrr@{k}'].mean(),
+                'Hit Rate': cv_df[f'val_hit_rate@{k}'].mean(),
+                'Item Coverage': cv_df[f'val_item_coverage@{k}'].mean(),
+                'Gini Index': cv_df[f'val_gini_index@{k}'].mean(),
+                'Simpson Index': cv_df[f'val_simpson_index@{k}'].mean(),
+            }
+
+        print("\n" + "=" * 70)
+        print("CROSS-VALIDATION SUMMARY (5-fold average)")
+        print("=" * 70)
+
+        # Create table with metrics as rows and k values as columns
+        print(f"\n{'Metric':<15} {'k=10':>10} {'k=20':>10} {'k=50':>10} {'k=100':>10}")
+        print("-" * 58)
+
+        metrics = ['NDCG', 'Recall', 'Precision', 'MRR', 'Hit Rate',
+                   'Item Coverage', 'Gini Index', 'Simpson Index']
+
+        for metric in metrics:
+            row = f"{metric:<15}"
+            for k in config.evaluate_top_k:
+                value = cv_summary[k][metric]
+                row += f"{value:>12.4f}"
+            print(row)
+
+            # Add separator after accuracy metrics
+            if metric == 'Hit Rate':
+                print("-" * 58)
+
     else:
         cv_summary = {}
 
@@ -339,13 +442,37 @@ def main():
     )
 
     test_metrics = evaluate_model(
-        model=final_model, dataset=dataset, k=10, stage='full_train'
+        model=final_model, dataset=dataset, k_values=config.evaluate_top_k, stage='full_train'
     )
 
-    print(f"\nFinal Test Set Results:")
-    print(f"  NDCG:      {test_metrics['ndcg']:.4f}")
-    print(f"  Recall:    {test_metrics['recall']:.4f}")
-    print(f"  Precision: {test_metrics['precision']:.4f}")
+    print(f"\nFINAL TEST SET RESULTS")
+    print("=" * 70)
+
+    # Create table with metrics as rows and k values as columns
+    print(f"\n{'Metric':<20} {'k=5':>12} {'k=10':>12} {'k=20':>12}")
+    print("-" * 58)
+
+    metrics_dict = {
+        'NDCG': 'ndcg',
+        'Recall': 'recall',
+        'Precision': 'precision',
+        'MRR': 'mrr',
+        'Hit Rate': 'hit_rate',
+        'Item Coverage': 'item_coverage',
+        'Gini Index': 'gini_index',
+        'Simpson Index': 'simpson_index'
+    }
+
+    for display_name, metric_key in metrics_dict.items():
+        row = f"{display_name:<20}"
+        for k in config.evaluate_top_k:
+            value = test_metrics[k][metric_key]
+            row += f"{value:>12.4f}"
+        print(row)
+
+        # Add separator after accuracy metrics
+        if display_name == 'Hit Rate':
+            print("-" * 58)
 
     return cv_results, cv_summary, test_metrics, final_model
 
@@ -375,15 +502,15 @@ def parse_arguments():
     """Parse command line arguments."""
     parser = ArgumentParser()
     parser.add_argument("--model_name", type=str, default='LightGCN')
-    parser.add_argument("--dataset_name", type=str, default='ml-100k')
+    parser.add_argument("--dataset_name", type=str, default='ml-20m')
     parser.add_argument("--users_top_percent", type=float, default=0.05)
     parser.add_argument("--items_top_percent", type=float, default=0.05)
     parser.add_argument("--users_dec_perc_drop", type=float, default=0.05)
     parser.add_argument("--items_dec_perc_drop", type=float, default=0.05)
-    parser.add_argument("--community_suppression", type=float, default=0.6)
+    parser.add_argument("--community_suppression", type=float, default=0.4)
     parser.add_argument("--drop_only_power_nodes", type=bool, default=True)
     parser.add_argument("--use_dropout", type=bool, default=True)
-    parser.add_argument("--k_th_fold", type=int, default=0)
+    parser.add_argument("--epochs", type=int, default=100)
 
     return parser.parse_args()
 
@@ -392,12 +519,31 @@ if __name__ == "__main__":
     set_seed(42)  # For reproducibility
     cv_results, cv_summary, test_metrics, final_model = main()
 
-    print("\n" + "=" * 60)
+    print("\n" + "=" * 70)
     print("DETAILED FOLD RESULTS")
-    print("=" * 60)
-    for result in cv_results:
-        print(f"Fold {result['fold']}:")
-        print(
-            f"  Val: NDCG={result['val_ndcg']:.4f}, Recall={result['val_recall']:.4f}, Precision={result['val_precision']:.4f}")
-        print()
+    print("=" * 70)
 
+    for result in cv_results:
+        print(f"\nFold {result['fold']}:")
+        print(f"{'Metric':<20} {'k=5':>12} {'k=10':>12} {'k=20':>12}")
+        print("-" * 58)
+
+        # Accuracy metrics
+        for metric in ['NDCG', 'Recall', 'Precision', 'MRR', 'Hit Rate']:
+            row = f"{metric:<20}"
+            for k in [10, 20, 50, 100]:
+                key = f'val_{metric.lower().replace(" ", "_")}@{k}'
+                value = result[key]
+                row += f"{value:>12.4f}"
+            print(row)
+
+        print("-" * 58)
+
+        # Diversity metrics
+        for metric in ['Item Coverage', 'Gini Index', 'Simpson Index']:
+            row = f"{metric:<20}"
+            for k in [10, 20, 50, 100]:
+                key = f'val_{metric.lower().replace(" ", "_")}@{k}'
+                value = result[key]
+                row += f"{value:>12.4f}"
+            print(row)

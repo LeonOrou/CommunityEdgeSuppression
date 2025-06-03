@@ -104,7 +104,7 @@ class RecommendationDataset:
             random_state: Random seed for reproducibility
         """
         self.name = name
-        self.data_path = data_path or f'dataset/{name}_raw'
+        self.data_path = data_path if data_path else f'dataset/{name}'
         self.min_interactions = min_interactions
         self.test_ratio = test_ratio
         self.val_ratio = val_ratio
@@ -155,16 +155,16 @@ class RecommendationDataset:
     def _load_movielens(self):
         """Load MovieLens dataset"""
         if self.name == 'ml-100k':
-            ratings_file = os.path.join(self.data_path, 'u.data')
+            ratings_file = os.path.join(f'{self.data_path}', 'u.data')
             self.raw_df = pd.read_csv(ratings_file, sep='\t',
                                       names=['user_id', 'item_id', 'rating'],
                                       usecols=[0, 1, 2], header=None)
         elif self.name == 'ml-20m':
             ratings_file = os.path.join(self.data_path, 'ml-20m.inter')
-            self.raw_df = pd.read_csv(ratings_file, sep=',',
+            self.raw_df = pd.read_csv(ratings_file, sep='\t',
                                       names=['user_id', 'item_id', 'rating'],
                                       usecols=[0, 1, 2], header=0)
-            self.raw_df.sample(frac=1, random_state=42).reset_index(drop=True)
+        self.raw_df.sample(frac=1, random_state=42).reset_index(drop=True)
 
     def _load_lastfm(self):
         """Load Last.fm dataset"""
@@ -220,7 +220,7 @@ class RecommendationDataset:
 
     def split_interactions_by_user(self, test_ratio=0.2, n_folds=5):
         """
-        Split interactions for each user into train_val/test, then pre-compute k-fold CV splits
+        Split interactions for each user into train_val/test, then pre-compute k_values-fold CV splits
         This ensures all users appear in training data
         """
         train_val_list = []
@@ -297,7 +297,7 @@ class RecommendationDataset:
                         # This interaction goes to training for current fold
                         train_data.append(user_interactions.iloc[idx])
             else:
-                # Standard k-fold split
+                # Standard k_values-fold split
                 fold_size = n_interactions // n_folds
                 remainder = n_interactions % n_folds
 

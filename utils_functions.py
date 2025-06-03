@@ -392,9 +392,9 @@ def get_biased_connectivity_data(config, adj_tens):
     config.item_community_connectivity_matrix_distribution = item_community_connectivity_matrix / torch.sum(
         item_community_connectivity_matrix, dim=1, keepdim=True)
 
-    user_labels_Leiden_matrix_mask = np.loadtxt(f'dataset/{config.dataset_name}/user_labels_Leiden_matrix_mask.csv',
+    user_labels_Leiden_matrix_mask = np.loadtxt(f'dataset/{config.dataset_name}/saved/user_labels_Leiden_matrix_mask.csv',
                                                 delimiter=',')
-    item_labels_Leiden_matrix_mask = np.loadtxt(f'dataset/{config.dataset_name}/item_labels_Leiden_matrix_mask.csv',
+    item_labels_Leiden_matrix_mask = np.loadtxt(f'dataset/{config.dataset_name}/saved/item_labels_Leiden_matrix_mask.csv',
                                                 delimiter=',')
 
     (config.biased_user_edges_mask,
@@ -410,15 +410,15 @@ def get_biased_connectivity_data(config, adj_tens):
 def get_community_data(config, adj_np):
     """Get or load community labels and power nodes."""
     # Create directory if it doesn't exist
-    if not os.path.exists(f'dataset/{config.dataset_name}'):
-        os.makedirs(f'dataset/{config.dataset_name}')
+    if not os.path.exists(f'dataset/saved/{config.dataset_name}'):
+        os.makedirs(f'dataset/saved/{config.dataset_name}')
 
     # TODO: all community data has to be from whole dataset and masked for the subsets
     (config.user_com_labels,
      config.item_com_labels) = get_community_labels(
         config=config,
         adj_np=adj_np,
-        save_path=f'dataset/{config.dataset_name}',
+        save_path=f'dataset/saved/{config.dataset_name}',
         get_probs=True)
 
     (config.power_users_ids,
@@ -429,7 +429,7 @@ def get_community_data(config, adj_np):
         item_com_labels=config.item_com_labels,
         users_top_percent=config.users_top_percent,
         items_top_percent=config.items_top_percent,
-        save_path=f'dataset/{config.dataset_name}')
+        save_path=f'dataset/saved/{config.dataset_name}')
 
 
 def calculate_community_metrics(config, adj_tens):

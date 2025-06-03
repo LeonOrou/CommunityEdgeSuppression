@@ -32,7 +32,7 @@ def parse_arguments():
     parser.add_argument("--n_layers", type=int, default=3)
 
     # ItemKNN
-    parser.add_argument("--k", type=int, default=100)
+    parser.add_argument("--k_values", type=int, default=100)
     parser.add_argument("--shrink", type=float, default=0.0)
 
     # MultiVAE
@@ -93,7 +93,7 @@ def setup_config(args, device):
         })
     elif args.model == 'ItemKNN':
         config_dict.update({
-            'k': args.k,
+            'k_values': args.k,
             'shrink': args.shrink,
         })
     elif args.model == 'MultiVAE':
@@ -161,7 +161,7 @@ def initialize_wandb(args, config):
     if args.model == 'LightGCN':
         wandb_config.update({"n_layers": args.n_layers})
     elif args.model == 'ItemKNN':
-        wandb_config.update({"k": args.k, "shrink": args.shrink})
+        wandb_config.update({"k_values": args.k, "shrink": args.shrink})
     elif args.model == 'MultiVAE':
         wandb_config.update({
             "hidden_dimension": args.hidden_dimension,

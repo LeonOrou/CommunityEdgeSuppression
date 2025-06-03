@@ -74,28 +74,28 @@ def evaluate_model(model, test_loader, device, k_list=[10, 20, 50], user_item_hi
                     rel_mask[i, :length] = True
                     rel_counts[i] = length
 
-            # For each k, compute metrics vectorized over batch
+            # For each k_values, compute metrics vectorized over batch
             for k in k_list:
-                # topk predictions: shape (batch_size, k)
+                # topk predictions: shape (batch_size, k_values)
                 topk_vals, topk_idx = torch.topk(predictions, k, dim=1)
                 # Update recommended item counts
                 for i in range(batch_size):
                     item_recommended.index_add_(0, topk_idx[i], torch.ones(k, device=device))
                 # Compute hit, recall, ndcg vectorized
-                # Expand topk indices: shape (batch_size, k, 1)
+                # Expand topk indices: shape (batch_size, k_values, 1)
                 topk_exp = topk_idx.unsqueeze(2)
                 # Compare with rel_matrix (batch_size, 1, max_rel)
-                cmp = (topk_exp == rel_matrix.unsqueeze(1))  # shape (batch_size, k, max_rel)
-                # Determine if each top-k item is relevant
-                hit_matrix = cmp.any(dim=2)  # (batch_size, k), boolean
+                cmp = (topk_exp == rel_matrix.unsqueeze(1))  # shape (batch_size, k_values, max_rel)
+                # Determine if each top-k_values item is relevant
+                hit_matrix = cmp.any(dim=2)  # (batch_size, k_values), boolean
                 # Hit: per user, did any topk item hit any relevant?
                 hit = (hit_matrix.any(dim=1)).float()  # (batch_size,)
                 # Recall: per user, count hits divided by rel_counts
                 recall = (hit_matrix.float().sum(dim=1)) / (rel_counts + 1e-8)  # (batch_size,)
-                # NDCG: discount vector: (k,)
+                # NDCG: discount vector: (k_values,)
                 discounts = torch.tensor([1.0 / math.log2(i + 2) for i in range(k)], device=device)
                 dcg = (hit_matrix.float() * discounts).sum(dim=1)
-                # Ideal DCG: for each user, sum best discounts for min(rel_counts, k) items
+                # Ideal DCG: for each user, sum best discounts for min(rel_counts, k_values) items
                 ideal_dcg = torch.zeros(batch_size, device=device)
                 for i in range(batch_size):
                     cutoff = int(min(rel_counts[i].item(), k))
@@ -136,16 +136,16 @@ def evaluate_model(model, test_loader, device, k_list=[10, 20, 50], user_item_hi
 def calculate_ndcg(ranked_matrix, relevant_matrix, rel_mask, k):
     """
     Vectorized NDCG calculation.
-    ranked_matrix: Tensor of shape (B, k) for ranked items.
+    ranked_matrix: Tensor of shape (B, k_values) for ranked items.
     relevant_matrix: Tensor of shape (B, max_rel) padded with -1.
     rel_mask: Boolean tensor of same shape as relevant_matrix indicating valid entries.
     Returns: Tensor (B,) with ndcg for each user.
     """
     B = ranked_matrix.shape[0]
     discounts = torch.tensor([1.0 / math.log2(i + 2) for i in range(k)], device=ranked_matrix.device)
-    topk_exp = ranked_matrix.unsqueeze(2)  # (B,k,1)
-    cmp = (topk_exp == relevant_matrix.unsqueeze(1))  # (B,k, max_rel)
-    rel_hits = cmp.any(dim=2).float()  # (B,k)
+    topk_exp = ranked_matrix.unsqueeze(2)  # (B,k_values,1)
+    cmp = (topk_exp == relevant_matrix.unsqueeze(1))  # (B,k_values, max_rel)
+    rel_hits = cmp.any(dim=2).float()  # (B,k_values)
     dcg = (rel_hits * discounts).sum(dim=1)
     ideal_dcg = torch.zeros(B, device=ranked_matrix.device)
     # Compute ideal dcg per user
@@ -160,7 +160,7 @@ def calculate_ndcg(ranked_matrix, relevant_matrix, rel_mask, k):
 def calculate_recall(ranked_matrix, relevant_matrix, rel_mask):
     """
     Vectorized Recall calculation.
-    ranked_matrix: Tensor of shape (B, k)
+    ranked_matrix: Tensor of shape (B, k_values)
     relevant_matrix: Tensor of shape (B, max_rel)
     rel_mask: Boolean tensor of shape (B, max_rel)
     Returns: Tensor (B,) of recall values.

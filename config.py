@@ -15,7 +15,7 @@ class Config:
         self.community_suppression = None
         self.drop_only_power_nodes = None
         self.use_dropout = None
-        self.k_th_fold = None
+        self.evaluate_top_k = [10, 20, 50, 100]
 
         # Will be set during initialization
         self.device = None
@@ -29,9 +29,6 @@ class Config:
         self.item_community_connectivity_matrix_distribution = None
         self.biased_user_edges_mask = None
         self.biased_item_edges_mask = None
-        self.train_mask = None
-        self.valid_mask = None
-        self.test_mask = None
         self.train_dataset_len = 0
 
         # training parameters; lr-scheduler, optimizer, etc.
@@ -55,16 +52,16 @@ class Config:
             self.train_batch_size = 512
             self.eval_batch_size = 512
             self.batch_size = 512  # For consistency
-            self.epochs = 50  # because it's different for each model
-            self.n_layers = 4
-            self.embedding_dim = 128
+            self.epochs = 100  # because it's different for each model
+            self.n_layers = 3
+            self.embedding_dim = 64
             self.A_split = False
             self.keep_prob = 0.0  # dropout rate
             self.dropout = False
             self.pretrain = 0
             self.num_folds = 5
             self.node_dropout = 0.0
-            self.reg = 1e-4
+            self.reg = 1e-5
             self.weight_decay = 1
             self.graph_dir = f'./dataset/{self.dataset_name}/lgcn_graphs'
         elif self.model_name == 'ItemKNN':
