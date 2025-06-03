@@ -41,13 +41,13 @@ def community_edge_suppression(adj_tens, config):
     :return: adj_tens: torch.tensor, modified adjacency tensor without dropped edges (dropped via mask)
     """
 
-    power_users_idx = config.power_users_ids,
-    power_items_idx = config.power_items_ids,
-    biased_user_edges_mask = config.biased_user_edges_mask,
-    biased_item_edges_mask = config.biased_item_edges_mask,
-    drop_only_power_nodes = config.drop_only_power_nodes,
-    community_suppression = config.community_suppression,
-    users_dec_perc_drop = config.users_dec_perc_drop,
+    power_users_idx = config.power_users_ids
+    power_items_idx = config.power_items_ids
+    biased_user_edges_mask = config.biased_user_edges_mask
+    biased_item_edges_mask = config.biased_item_edges_mask
+    drop_only_power_nodes = config.drop_only_power_nodes
+    community_suppression = config.community_suppression
+    users_dec_perc_drop = config.users_dec_perc_drop
     items_dec_perc_drop = config.items_dec_perc_drop
 
     adj_tens = adj_tens.clone()

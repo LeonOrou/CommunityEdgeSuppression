@@ -41,7 +41,7 @@ class LightGCN(nn.Module):
             embeddings.append(all_emb)
 
         # Average embeddings across all layers
-        final_embedding = torch.stack(embeddings, dim=0).mean(dim=0)
+        final_embedding = torch.stack(embeddings, dim=1).mean(dim=1)
 
         # Split back into user and item embeddings
         user_final = final_embedding[:self.num_users]

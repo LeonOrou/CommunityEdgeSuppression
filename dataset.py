@@ -157,10 +157,13 @@ class RecommendationDataset:
         if self.name == 'ml-100k':
             ratings_file = os.path.join(self.data_path, 'u.data')
             self.raw_df = pd.read_csv(ratings_file, sep='\t',
-                                      names=['user_id', 'item_id', 'rating', 'timestamp'],)
+                                      names=['user_id', 'item_id', 'rating'],
+                                      usecols=[0, 1, 2], header=None)
         elif self.name == 'ml-20m':
-            ratings_file = os.path.join(self.data_path, 'ratings.csv')
-            self.raw_df = pd.read_csv(ratings_file)
+            ratings_file = os.path.join(self.data_path, 'ml-20m.inter')
+            self.raw_df = pd.read_csv(ratings_file, sep=',',
+                                      names=['user_id', 'item_id', 'rating'],
+                                      usecols=[0, 1, 2], header=0)
             self.raw_df.sample(frac=1, random_state=42).reset_index(drop=True)
 
     def _load_lastfm(self):
@@ -253,21 +256,30 @@ class RecommendationDataset:
         self.train_val_df = pd.concat(train_val_list, ignore_index=True) if train_val_list else pd.DataFrame()
         self.test_df = pd.concat(test_list, ignore_index=True) if test_list else pd.DataFrame()
 
-        # Create k-fold CV splits
-        self.create_cv_splits(n_folds)
-
         # Update complete_df to ensure it contains all data
         self.complete_df = pd.concat([self.train_val_df, self.test_df], ignore_index=True)
 
-    def create_cv_splits(self, n_folds=5):
+    def get_fold_i(self, i, n_folds=5):
         """
-        Create k-fold cross-validation splits from train_val_df
-        Each fold will have its own train and validation dataframes
+        Generate train and validation dataframes for fold i without storing all folds.
+
+        Parameters:
+        -----------
+        i : int
+            Index of the fold (0 to n_folds-1)
+        n_folds : int
+            Total number of folds (default: 5)
+
+        Returns:
+        --------
+        None (sets self.train_df and self.val_df)
         """
-        # Initialize lists to store fold dataframes
-        for i in range(n_folds):
-            setattr(self, f'fold_{i}_train_df', pd.DataFrame())
-            setattr(self, f'fold_{i}_val_df', pd.DataFrame())
+        if i < 0 or i >= n_folds:
+            raise ValueError(f"Fold index must be between 0 and {n_folds - 1}, got {i}")
+
+        # Initialize empty lists for this fold
+        train_data = []
+        val_data = []
 
         # Process each user's interactions
         for user_id, group in self.train_val_df.groupby('user_encoded'):
@@ -276,73 +288,38 @@ class RecommendationDataset:
 
             if n_interactions < n_folds:
                 # If user has fewer interactions than folds, distribute them
-                for i in range(n_interactions):
-                    fold_idx = i % n_folds
-                    # This interaction goes to validation for fold_idx, training for others
-                    for j in range(n_folds):
-                        if j == fold_idx:
-                            val_df = getattr(self, f'fold_{j}_val_df')
-                            setattr(self, f'fold_{j}_val_df',
-                                    pd.concat([val_df, user_interactions.iloc[[i]]], ignore_index=True))
-                        else:
-                            train_df = getattr(self, f'fold_{j}_train_df')
-                            setattr(self, f'fold_{j}_train_df',
-                                    pd.concat([train_df, user_interactions.iloc[[i]]], ignore_index=True))
+                for idx in range(n_interactions):
+                    fold_idx = idx % n_folds
+                    if fold_idx == i:
+                        # This interaction goes to validation for current fold
+                        val_data.append(user_interactions.iloc[idx])
+                    else:
+                        # This interaction goes to training for current fold
+                        train_data.append(user_interactions.iloc[idx])
             else:
                 # Standard k-fold split
                 fold_size = n_interactions // n_folds
                 remainder = n_interactions % n_folds
 
+                # Calculate boundaries for fold i
                 start_idx = 0
-                for i in range(n_folds):
-                    # Calculate fold boundaries
-                    end_idx = start_idx + fold_size + (1 if i < remainder else 0)
+                for j in range(i):
+                    start_idx += fold_size + (1 if j < remainder else 0)
 
-                    # Get validation data for this fold
-                    val_data = user_interactions.iloc[start_idx:end_idx]
+                end_idx = start_idx + fold_size + (1 if i < remainder else 0)
 
-                    # Get training data (everything except validation)
-                    train_data = pd.concat([
-                        user_interactions.iloc[:start_idx],
-                        user_interactions.iloc[end_idx:]
-                    ], ignore_index=True)
+                # Get validation data for this fold
+                val_data.extend(user_interactions.iloc[start_idx:end_idx].to_dict('records'))
 
-                    # Append to fold dataframes
-                    val_df = getattr(self, f'fold_{i}_val_df')
-                    train_df = getattr(self, f'fold_{i}_train_df')
+                # Get training data (everything except validation)
+                if start_idx > 0:
+                    train_data.extend(user_interactions.iloc[:start_idx].to_dict('records'))
+                if end_idx < n_interactions:
+                    train_data.extend(user_interactions.iloc[end_idx:].to_dict('records'))
 
-                    setattr(self, f'fold_{i}_val_df',
-                            pd.concat([val_df, val_data], ignore_index=True))
-                    setattr(self, f'fold_{i}_train_df',
-                            pd.concat([train_df, train_data], ignore_index=True))
-
-                    start_idx = end_idx
-
-    def get_fold_data(self, fold_idx):
-        """
-        Get train and validation dataframes for a specific fold
-
-        Parameters:
-        -----------
-        fold_idx : int
-            Index of the fold (0 to n_folds-1)
-
-        Returns:
-        --------
-        tuple : (train_df, val_df)
-            Training and validation dataframes for the specified fold
-        """
-        if not hasattr(self, 'n_folds'):
-            raise ValueError("CV splits have not been created yet. Run split_interactions_by_user first.")
-
-        if fold_idx < 0 or fold_idx >= self.n_folds:
-            raise ValueError(f"fold_idx must be between 0 and {self.n_folds - 1}, got {fold_idx}")
-
-        train_df = getattr(self, f'fold_{fold_idx}_train_df')
-        val_df = getattr(self, f'fold_{fold_idx}_val_df')
-
-        self.train_df = train_df
-        self.val_df = val_df
+        # Convert lists to dataframes
+        self.train_df = pd.DataFrame(train_data)
+        self.val_df = pd.DataFrame(val_data)
 
     def prepare_data(self):
         """Filter, encode, and split data"""
@@ -365,8 +342,6 @@ class RecommendationDataset:
 
     def _create_graph_structures(self, rating_weights=None):
         """Create graph structures for graph-based models"""
-        self.train_edge_index, self.train_edge_weight = self.create_bipartite_graph(rating_weights)
-
         self.complete_edge_index, self.complete_edge_weight = self.create_bipartite_graph(rating_weights)
 
     def _build_interaction_mappings(self):
