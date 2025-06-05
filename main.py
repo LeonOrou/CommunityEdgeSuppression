@@ -343,10 +343,9 @@ def main():
             stage='loo',
         )
 
-        # Evaluate on CV validation set - UPDATED TO INCLUDE DATASET_NAME
         if len(dataset.val_df) > 0:
             val_metrics = evaluate_model(
-                model=model, dataset=dataset, dataset_name=config.dataset_name,
+                model=model, dataset=dataset,
                 k_values=config.evaluate_top_k, stage='loo'
             )
 
@@ -490,7 +489,7 @@ def main():
 
     # UPDATED TO INCLUDE DATASET_NAME
     test_metrics = evaluate_model(
-        model=final_model, dataset=dataset, dataset_name=config.dataset_name,
+        model=final_model, dataset=dataset,
         k_values=config.evaluate_top_k, stage='full_train'
     )
 
