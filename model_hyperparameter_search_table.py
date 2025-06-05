@@ -160,11 +160,6 @@ def display_results(results):
         print(f"Results saved to {filename}")
 
 
-def main():
-    results = get_hyperparameter_results()
-    display_results(results)
-
-
-if __name__ == "__main__":
-    main()
+results = get_hyperparameter_results()
+display_results(results)
 

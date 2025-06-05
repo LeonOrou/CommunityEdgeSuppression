@@ -341,7 +341,6 @@ def initialize_wandb(config):
         "community_suppression": config.community_suppression,
         "use_dropout": config.use_dropout,
         "drop_only_power_nodes": config.drop_only_power_nodes,
-        "k_th_fold": config.k_th_fold,
         "learning_rate": config.learning_rate,
         "epochs": config.epochs,
     }
@@ -374,7 +373,7 @@ def initialize_wandb(config):
 
     return wandb.init(
         project="RecSys_PowerNodeEdgeDropout",
-        name=f"{config.model_name}_{config.dataset_name}_users_top_{config.users_top_percent}_com_suppression_{config.community_suppression}",
+        name=f"{config.model_name}_{config.dataset_name}_users_top_{config.items_dec_perc_drop}_items_top_{config.items_dec_perc_drop}com_suppression_{config.community_suppression}",
         config=wandb_config
     )
 

@@ -126,6 +126,7 @@ class RecommendationDataset:
         self.item_encoder = None
         self.user_degrees = None
         self.item_degrees = None
+        self.item_popularities = None
 
         # Graph structures (for graph-based models)
         self.train_edge_index = None
@@ -163,7 +164,7 @@ class RecommendationDataset:
                                       names=['user_id', 'item_id', 'rating'],
                                       usecols=[0, 1, 2], header=None)
         elif self.name == 'ml-20m':
-            ratings_file = os.path.join(self.data_path, 'ml-20m.inter')
+            ratings_file = os.path.join(self.data_path, 'ratings.csv')
             self.raw_df = pd.read_csv(ratings_file, sep='\t',
                                       names=['user_id', 'item_id', 'rating'],
                                       usecols=[0, 1, 2], header=0)
@@ -173,6 +174,14 @@ class RecommendationDataset:
         """Load Last.fm dataset"""
         # Implement Last.fm specific loading
         pass
+
+    def calculate_item_popularities(self):
+        """Calculate item popularities based on interaction counts"""
+        if self.complete_df is not None:
+            item_counts = self.complete_df['item_encoded'].value_counts()
+            self.item_popularities = item_counts / len(self.complete_df)
+        else:
+            raise ValueError("complete_df is not set. Please prepare the data first.")
 
     def prepare_data_with_consistent_encoding(self):
         """
@@ -340,6 +349,8 @@ class RecommendationDataset:
         self.split_interactions_by_user()
 
         self._create_graph_structures()
+
+        self.calculate_item_popularities()
 
         self.to_device(self.device)
         #

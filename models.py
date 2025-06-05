@@ -67,6 +67,17 @@ class LightGCN(nn.Module):
 
         return out
 
+    def predict(self, user_indices, item_indices):
+        """
+        Predict scores for given user-item pairs.
+        :param user_indices: Tensor of user indices.
+        :param item_indices: Tensor of item indices.
+        :return: Predicted scores for the user-item pairs.
+        """
+        user_emb = self.user_embedding(user_indices)
+        item_emb = self.item_embedding(item_indices)
+        return (user_emb * item_emb).sum(dim=1)
+
 
 class ItemKNN(nn.Module):
     def __init__(self, dataset, hparams, device):

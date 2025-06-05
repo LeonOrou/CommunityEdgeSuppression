@@ -36,7 +36,7 @@ class Config:
         self.gamma = 0.5
         self.min_lr = 1e-5
         self.reproducibility = True
-        self.learning_rate = 1e-3
+        self.learning_rate = 1e-4
         self.nr_items = None
 
         self.setup_device()
@@ -49,21 +49,17 @@ class Config:
     def setup_model_config(self):
         """Setup model-specific configurations."""
         if self.model_name == 'LightGCN':
-            self.train_batch_size = 512
-            self.eval_batch_size = 512
             self.batch_size = 512  # For consistency
-            self.epochs = 100  # because it's different for each model
+            self.learning_rate = 0.005
+            self.epochs = 50  # because it's different for each model
             self.n_layers = 3
-            self.embedding_dim = 64
+            self.embedding_dim = 128
             self.A_split = False
             self.keep_prob = 0.0  # dropout rate
             self.dropout = False
-            self.pretrain = 0
             self.num_folds = 5
-            self.node_dropout = 0.0
             self.reg = 1e-5
             self.weight_decay = 1
-            self.graph_dir = f'./dataset/{self.dataset_name}/lgcn_graphs'
         elif self.model_name == 'ItemKNN':
             self.epochs = 1
             self.item_knn_topk = 250
@@ -71,8 +67,6 @@ class Config:
             self.feature_weighting = 'bm25'
         elif self.model_name == 'MultiVAE':
             self.epochs = 200
-            self.train_batch_size = 4096
-            self.eval_batch_size = 4096
             self.batch_size = 4096  # For consistency
             self.hidden_dimension = 800
             self.latent_dimension = 200
