@@ -519,3 +519,55 @@ class RecommendationDataset:
         self.item_degrees = item_degrees
         return user_degrees, item_degrees
 
+
+def sample_negative_items(user_ids, pos_item_ids, num_items, user_positive_items, device):
+    batch_size = len(user_ids)
+    neg_items = np.zeros(batch_size, dtype=np.int32)  # Use int32
+
+    # Process on CPU for efficiency with sparse data
+    user_ids_cpu = user_ids.cpu().numpy()
+
+    for i in range(batch_size):
+        user_id = user_ids_cpu[i]
+        user_pos_set = user_positive_items.get(user_id, set())
+
+        # Simple and fast negative sampling
+        neg_item = np.random.randint(0, num_items)
+        attempts = 0
+        while neg_item in user_pos_set and attempts < 100:
+            neg_item = np.random.randint(0, num_items)
+            attempts += 1
+
+        neg_items[i] = neg_item
+
+    # Single transfer to GPU with int32
+    return torch.tensor(neg_items, dtype=torch.int32, device=device)
+
+
+def prepare_adj_tensor(dataset):
+    """Prepare adjacency tensor from dataset in the format (user_id, item_id, rating)"""
+    df = dataset.complete_df
+    adj_tens = torch.tensor(
+        np.column_stack([
+            df['user_encoded'].values,
+            df['item_encoded'].values,
+            df['rating'].values
+        ]),
+        dtype=torch.int64,
+        device=dataset.device
+    )
+    return adj_tens
+
+
+def prepare_training_data_gpu(train_df, device):
+    """Pre-convert training data to GPU tensors with memory-efficient dtypes"""
+    # Use int32 for user/item indices - sufficient for millions of users/items
+    all_users = torch.tensor(train_df['user_encoded'].values, dtype=torch.int32, device=device)
+    all_items = torch.tensor(train_df['item_encoded'].values, dtype=torch.int32, device=device)
+
+    # Create indices for shuffling (needs long for arange)
+    indices = torch.arange(len(train_df), device=device)
+
+    return all_users, all_items, indices
+
+

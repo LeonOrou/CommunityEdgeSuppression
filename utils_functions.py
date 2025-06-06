@@ -432,3 +432,4 @@ def get_community_data(config, adj_np):
         save_path=f'dataset/{config.dataset_name}/saved')
 
 
+

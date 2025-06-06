@@ -1,5 +1,5 @@
 import torch
-from torch_geometric.utils import degree, add_self_loops
+from torch_geometric.utils import degree, add_self_cvps
 from torch_geometric.data import Data
 import pandas as pd
 import numpy as np
@@ -8,109 +8,26 @@ from sklearn.metrics import ndcg_score
 import os
 from collections import defaultdict
 import warnings
-
 from config import Config
 from evaluation import evaluate_model, calculate_ndcg, evaluate_current_model_ndcg
-from models import LightGCN
+from models import LightGCN, calculate_bpr_loss, ItemKNN, MultiVAE, multivae_loss, get_model
 import torch.optim as optim
-from dataset import RecommendationDataset
+from dataset import RecommendationDataset, sample_negative_items, prepare_adj_tensor, prepare_training_data_gpu
 from argparse import ArgumentParser
 from utils_functions import (
-    community_edge_suppression, get_community_data, get_biased_connectivity_data, set_seed)
-from utils_functions import initialize_wandb
+    community_edge_suppression, get_community_data, get_biased_connectivity_data, set_seed,)
 import wandb
+from logging import init_wandb, log_fold_metrics_to_wandb, log_test_metrics_to_wandb, log_cv_summary_to_wandb
 
 warnings.filterwarnings('ignore')
 
 
-def bpr_loss(user_emb, pos_item_emb, neg_item_emb):
-    """Bayesian Personalized Ranking loss"""
-    pos_scores = (user_emb * pos_item_emb).sum(dim=1)
-    neg_scores = (user_emb * neg_item_emb).sum(dim=1)
-    loss = torch.mean(torch.nn.functional.softplus(neg_scores - pos_scores))
-    return loss
-
-
-def sample_negative_items_optimized(user_ids, pos_item_ids, num_items, user_positive_items, device):
-    """Optimized negative sampling with minimal CPU-GPU transfer"""
-    batch_size = len(user_ids)
-    neg_items = np.zeros(batch_size, dtype=np.int32)  # Use int32
-
-    # Process on CPU for efficiency with sparse data
-    user_ids_cpu = user_ids.cpu().numpy()
-
-    for i in range(batch_size):
-        user_id = user_ids_cpu[i]
-        user_pos_set = user_positive_items.get(user_id, set())
-
-        # Simple and fast negative sampling
-        neg_item = np.random.randint(0, num_items)
-        attempts = 0
-        while neg_item in user_pos_set and attempts < 100:
-            neg_item = np.random.randint(0, num_items)
-            attempts += 1
-
-        neg_items[i] = neg_item
-
-    # Single transfer to GPU with int32
-    return torch.tensor(neg_items, dtype=torch.int32, device=device)
-
-
-def get_model(dataset, config):
-    """Initialize model based on type"""
-    if config.model_name == 'LightGCN':
-        return LightGCN(
-            num_users=dataset.num_users,
-            num_items=dataset.num_items,
-            embedding_dim=config.embedding_dim,
-            num_layers=config.n_layers,
-        ).to(config.device)
-    elif config.model_name == 'ItemKNN':
-        return ItemKNN(
-            num_items=dataset.num_items,
-            topk=config.item_knn_topk,
-            shrink=config.shrink,
-        ).to(config.device)
-    elif config.model_name == 'MultiVAE':
-        return MultiVAE(
-            num_items=dataset.num_items,
-        ).to(config.device)
-    else:
-        raise ValueError(f"Unknown model type: {config.model_type}")
-
-
-def prepare_adj_tensor(dataset):
-    """Prepare adjacency tensor from dataset in the format (user_id, item_id, rating)"""
-    df = dataset.complete_df
-    adj_tens = torch.tensor(
-        np.column_stack([
-            df['user_encoded'].values,
-            df['item_encoded'].values,
-            df['rating'].values
-        ]),
-        dtype=torch.int64,
-        device=dataset.device
-    )
-    return adj_tens
-
-
-def prepare_training_data_gpu(train_df, device):
-    """Pre-convert training data to GPU tensors with memory-efficient dtypes"""
-    # Use int32 for user/item indices - sufficient for millions of users/items
-    all_users = torch.tensor(train_df['user_encoded'].values, dtype=torch.int32, device=device)
-    all_items = torch.tensor(train_df['item_encoded'].values, dtype=torch.int32, device=device)
-
-    # Create indices for shuffling (needs long for arange)
-    indices = torch.arange(len(train_df), device=device)
-
-    return all_users, all_items, indices
-
-
-def train_model(dataset, model, config, stage='loo', verbose=True):
+def train_model(dataset, model, config, stage='cv', fold_num=None, verbose=True):
     """
     Train LightGCN using the COMPLETE graph structure (train+val+test)
     but only compute loss on training interactions
-    stage: 'full_train' for full training evaluation, 'loo' for leave-one-out evaluation
+    stage: 'full_train' for full training evaluation, 'cv' for leave-one-out evaluation
+    fold_num: Current fold number for logging (None for final training)
     """
     print(f"Complete graph: {len(dataset.complete_df)} interactions")
     print(f"Training interactions: {len(dataset.train_df)} (used for loss)")
@@ -192,12 +109,10 @@ def train_model(dataset, model, config, stage='loo', verbose=True):
             if len(batch_indices) == 0:
                 continue
 
-            # Get batch data (already on GPU)
             batch_users = all_train_users[batch_indices]
             batch_pos_items = all_train_items[batch_indices]
 
-            # Sample negative items with optimized CPU-GPU transfer
-            batch_neg_items = sample_negative_items_optimized(
+            batch_neg_items = sample_negative_items(
                 batch_users,
                 batch_pos_items,
                 dataset.num_items,
@@ -205,17 +120,14 @@ def train_model(dataset, model, config, stage='loo', verbose=True):
                 device
             )
 
-            # Forward pass - embeddings are computed on GPU
+            # Forward pass
             user_emb, item_emb = model(dataset.complete_edge_index, current_edge_weight)
 
-            # Get embeddings for batch (cast indices to long for embedding lookup)
             batch_user_emb = user_emb[batch_users.long()]
             batch_pos_item_emb = item_emb[batch_pos_items.long()]
             batch_neg_item_emb = item_emb[batch_neg_items.long()]
 
-            # Compute loss ONLY on training interactions
-            loss = bpr_loss(batch_user_emb, batch_pos_item_emb, batch_neg_item_emb)
-
+            bpr_loss = calculate_bpr_loss(batch_user_emb, batch_pos_item_emb, batch_neg_item_emb)
             # Add L2 regularization
             l2_reg = config.reg * (
                     batch_user_emb.norm(2).pow(2) +
@@ -223,34 +135,48 @@ def train_model(dataset, model, config, stage='loo', verbose=True):
                     batch_neg_item_emb.norm(2).pow(2)
             ) / batch_size
 
-            total_loss_batch = loss + l2_reg
+            loss = bpr_loss + l2_reg
 
             # Backward pass with gradient clipping
             optimizer.zero_grad()
-            total_loss_batch.backward()
+            loss.backward()
 
             # Gradient clipping to prevent exploding gradients
             # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
 
             optimizer.step()
 
-            total_loss += total_loss_batch.item()
+            total_loss += loss.item()
             num_batches += 1
 
         if epoch % 10 == 0 or epoch == config.epochs - 1:
             # Use original edge weights for evaluation (no suppression)
-            # val_metrics = evaluate_model(
-            #     model=model, dataset=dataset, k_values=[10],
-            # )
-            # val_ndcg = val_metrics[10]['ndcg']  # Use k=10 for scheduler and early stopping
             val_ndcg = evaluate_current_model_ndcg(model, dataset, k=10)
             val_history.append(val_ndcg)
 
             # scheduler.step(val_ndcg)
-            # current_lr = optimizer.param_groups[0]['lr']
+            current_lr = optimizer.param_groups[0]['lr']
+            avg_loss = total_loss / max(num_batches, 1)
+
+            # WandB logging for training metrics
+            log_dict = {
+                'epoch': epoch,
+                'train_loss': avg_loss,
+                'val_ndcg@10': val_ndcg,
+                'learning_rate': current_lr,
+                'patience_counter': patience_counter,
+                'suppression_enabled': config.use_dropout
+            }
+
+            # Add fold-specific prefix if in cross-validation
+            if fold_num is not None:
+                log_dict = {f'fold_{fold_num}/{k}': v for k, v in log_dict.items()}
+            else:
+                log_dict = {f'final_training/{k}': v for k, v in log_dict.items()}
+
+            wandb.log(log_dict)
 
             if verbose:
-                avg_loss = total_loss / max(num_batches, 1)
                 suppression_status = "ON" if config.use_dropout else "OFF"
                 print(f'  Epoch {epoch:3d}/{config.epochs}, Loss: {avg_loss:.4f}, '
                       f'Val NDCG@10: {val_ndcg:.4f} (Suppression: {suppression_status})')
@@ -288,6 +214,21 @@ def train_model(dataset, model, config, stage='loo', verbose=True):
     if 'best_model_state' in locals():
         model.load_state_dict(best_model_state)
 
+    # Log final training results
+    final_log_dict = {
+        'best_epoch': best_epoch,
+        'best_val_ndcg@10': best_val_ndcg,
+        'total_epochs': epoch + 1,
+        'early_stopped': patience_counter >= patience
+    }
+
+    if fold_num is not None:
+        final_log_dict = {f'fold_{fold_num}/final_{k}': v for k, v in final_log_dict.items()}
+    else:
+        final_log_dict = {f'final_training/final_{k}': v for k, v in final_log_dict.items()}
+
+    wandb.log(final_log_dict)
+
     return model, dataset.complete_edge_index, dataset.complete_edge_weight
 
 
@@ -296,7 +237,7 @@ def main():
     config = Config()
     config.update_from_args(args)
     config.setup_model_config()
-    config.log_config()
+    init_wandb(config)
 
     dataset = RecommendationDataset(name=config.dataset_name, data_path=f'dataset/{config.dataset_name}')
     dataset.prepare_data()
@@ -308,6 +249,17 @@ def main():
 
     print(f"Train set: {len(dataset.train_val_df)} interactions")
     print(f"Test set: {len(dataset.test_df)} interactions")
+
+    # Log dataset statistics
+    wandb.log({
+        'dataset/dataset_name': dataset.name,
+        'dataset/num_users': dataset.num_users,
+        'dataset/num_items': dataset.num_items,
+        'dataset/total_interactions': len(dataset.complete_df),
+        'dataset/train_interactions': len(dataset.train_val_df),
+        'dataset/test_interactions': len(dataset.test_df),
+        'dataset/sparsity': 1 - (len(dataset.complete_df) / (dataset.num_users * dataset.num_items))
+    })
 
     # 5-fold cross validation using temporal splits within training set
     print("\nStarting 5-fold cross validation with complete graph...")
@@ -340,13 +292,14 @@ def main():
             dataset=dataset,
             model=model,
             config=config,
-            stage='loo',
+            stage='cv',
+            fold_num=fold + 1,  # Pass fold number for logging
         )
 
         if len(dataset.val_df) > 0:
             val_metrics = evaluate_model(
                 model=model, dataset=dataset,
-                k_values=config.evaluate_top_k, stage='loo'
+                k_values=config.evaluate_top_k, stage='cv'
             )
 
             fold_results = {
@@ -373,6 +326,9 @@ def main():
                 fold_results[f'val_popularity_calibration@{k}'] = val_metrics[k]['popularity_calibration']
 
             cv_results.append(fold_results)
+
+            # Log fold results to wandb
+            log_fold_metrics_to_wandb(fold + 1, fold_results, config)
 
             print(f"\nFold {fold + 1} Results:")
             print(f"{'Metric':<20} {'k=10':>10} {'k=20':>10} {'k=50':>10} {'k=100':>10}")
@@ -420,6 +376,9 @@ def main():
                 'Unique Genres': cv_df[f'val_unique_genres_count@{k}'].mean(),
                 'Pop. Calibration': cv_df[f'val_popularity_calibration@{k}'].mean(),
             }
+
+        # Log CV summary to wandb
+        log_cv_summary_to_wandb(cv_summary, config)
 
         print("\n" + "=" * 85)
         print("CROSS-VALIDATION SUMMARY (5-fold average)")
@@ -485,6 +444,7 @@ def main():
     # Final training: use ALL data in graph, but only train+val for loss
     final_model, final_edge_index, final_edge_weight = train_model(
         model=model, dataset=dataset, config=config, stage='full_train',
+        fold_num=None,  # No fold number for final training
     )
 
     # UPDATED TO INCLUDE DATASET_NAME
@@ -492,6 +452,37 @@ def main():
         model=final_model, dataset=dataset,
         k_values=config.evaluate_top_k, stage='full_train'
     )
+
+    # Log test metrics to wandb
+    log_test_metrics_to_wandb(test_metrics, config)
+
+    # Save model artifact to wandb
+    model_artifact = wandb.Artifact(
+        name=f"model_{config.model_name}_{config.dataset_name}",
+        type="model",
+        description=f"Trained {config.model_name} model on {config.dataset_name} dataset"
+    )
+
+    # Save model state dict
+    model_path = "final_model.pth"
+    torch.save(final_model.state_dict(), model_path)
+    model_artifact.add_file(model_path)
+
+    # Save model architecture info
+    model_info = {
+        'model_class': config.model_name,
+        'num_users': dataset.num_users,
+        'num_items': dataset.num_items,
+        'embedding_dim': config.embedding_dim,
+        'num_layers': config.n_layers if config.model_name == 'LightGCN' else None,
+        'total_parameters': sum(p.numel() for p in final_model.parameters()),
+        'trainable_parameters': sum(p.numel() for p in final_model.parameters() if p.requires_grad)}
+
+    wandb.log({
+        'model/total_parameters': model_info['total_parameters'],
+        'model/trainable_parameters': model_info['trainable_parameters']})
+
+    wandb.log_artifact(model_artifact)
 
     print(f"\nFINAL TEST SET RESULTS")
     print("=" * 85)
@@ -564,6 +555,20 @@ def main():
             value = test_metrics[k][metric_key]
             row += f"{value:>12.4f}"
         print(row)
+
+    # Log final summary statistics
+    wandb.log({
+        'experiment/total_folds': n_folds,
+        'experiment/best_cv_ndcg@10': max([cv_results[i]['val_ndcg@10'] for i in range(len(cv_results))]),
+        'experiment/final_test_ndcg@10': test_metrics[10]['ndcg'],
+        'experiment/cv_std_ndcg@10': cv_df['val_ndcg@10'].std() if cv_results else 0,
+        'experiment/completed': True})
+
+    # Clean up temporary files
+    if os.path.exists(model_path):
+        os.remove(model_path)
+
+    wandb.finish()
 
     return cv_results, cv_summary, test_metrics, final_model
 

@@ -4,7 +4,7 @@ import json
 from collections import defaultdict, Counter
 
 
-def evaluate_model(model, dataset, stage='loo', k_values=[10, 20, 50, 100]):
+def evaluate_model(model, dataset, stage='cv', k_values=[10, 20, 50, 100]):
     """
     Evaluate model using the complete graph structure but excluding training interactions
     stage: 'full_train' for full training evaluation, 'loo' for leave-one-out evaluation
@@ -25,11 +25,6 @@ def evaluate_model(model, dataset, stage='loo', k_values=[10, 20, 50, 100]):
     if stage == 'full_train':
         dataset.val_df = dataset.test_df
 
-    # Create a set of training interactions for each user to exclude from evaluation
-    # train_user_items = defaultdict(set)
-    # for _, row in dataset.train_df.iterrows():
-    #     train_user_items[row['user_encoded']].add(row['item_encoded'])
-    # Using pandas groupby (more efficient):
     train_user_items = dataset.train_df.groupby('user_encoded')['item_encoded'].apply(set).to_dict()
 
     # Initialize metric storage for each k_values (MODIFY THIS)

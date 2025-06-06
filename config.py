@@ -84,14 +84,6 @@ class Config:
             self.device = torch.device('cpu')
         return self.device
 
-    def log_config(self):
-        """Log current configuration."""
-        logger = logging.getLogger()
-        c_handler = logging.StreamHandler()
-        c_handler.setLevel(logging.INFO)
-        logger.addHandler(c_handler)
-        logger.info(vars(self))
-        return logger
 
 
 
