@@ -1,23 +1,19 @@
 import torch
-from torch_geometric.utils import degree, add_self_cvps
-from torch_geometric.data import Data
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split, KFold
-from sklearn.metrics import ndcg_score
 import os
 from collections import defaultdict
 import warnings
 from config import Config
 from evaluation import evaluate_model, calculate_ndcg, evaluate_current_model_ndcg
-from models import LightGCN, calculate_bpr_loss, ItemKNN, MultiVAE, multivae_loss, get_model
+from models import calculate_bpr_loss, multivae_loss, get_model
 import torch.optim as optim
 from dataset import RecommendationDataset, sample_negative_items, prepare_adj_tensor, prepare_training_data_gpu
 from argparse import ArgumentParser
 from utils_functions import (
     community_edge_suppression, get_community_data, get_biased_connectivity_data, set_seed,)
 import wandb
-from logging import init_wandb, log_fold_metrics_to_wandb, log_test_metrics_to_wandb, log_cv_summary_to_wandb
+from wanb_logging import init_wandb, log_fold_metrics_to_wandb, log_test_metrics_to_wandb, log_cv_summary_to_wandb
 
 warnings.filterwarnings('ignore')
 
@@ -96,6 +92,8 @@ def train_model(dataset, model, config, stage='cv', fold_num=None, verbose=True)
             # Use original edge weights
             current_edge_weight = dataset.complete_edge_weight
 
+        dataset.current_edge_weight = current_edge_weight
+
         total_loss = 0
         num_batches = 0
 
@@ -121,7 +119,7 @@ def train_model(dataset, model, config, stage='cv', fold_num=None, verbose=True)
             )
 
             # Forward pass
-            user_emb, item_emb = model(dataset.complete_edge_index, current_edge_weight)
+            user_emb, item_emb = model(dataset.complete_edge_index, dataset.current_edge_weight)
 
             batch_user_emb = user_emb[batch_users.long()]
             batch_pos_item_emb = item_emb[batch_pos_items.long()]

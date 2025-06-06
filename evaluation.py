@@ -35,7 +35,6 @@ def evaluate_model(model, dataset, stage='cv', k_values=[10, 20, 50, 100]):
         'mrr_scores': [],
         'hit_rate_scores': [],
         'all_recommended_items': set(),
-        # ADD THESE NEW METRICS
         'simpson_scores': [],
         'intra_list_diversity_scores': [],
         'popularity_lift_scores': [],
@@ -50,7 +49,7 @@ def evaluate_model(model, dataset, stage='cv', k_values=[10, 20, 50, 100]):
 
     with torch.no_grad():
         # Use the COMPLETE graph (including test edges) for embeddings
-        user_emb, item_emb = model(dataset.complete_edge_index, dataset.complete_edge_weight)
+        user_emb, item_emb = model(dataset.complete_edge_index, dataset.current_edge_weight)
 
         # Group test interactions by user
         user_test_items = dataset.val_df.groupby('user_encoded')['item_encoded'].apply(list).to_dict()
@@ -192,7 +191,7 @@ def evaluate_current_model_ndcg(model, dataset, k=10):
 
     with torch.no_grad():
         # Use the COMPLETE graph (including test edges) for embeddings
-        user_emb, item_emb = model(dataset.complete_edge_index, dataset.complete_edge_weight)
+        user_emb, item_emb = model(dataset.complete_edge_index, dataset.current_edge_weight)
 
         # Group validation interactions by user
         user_val_items = dataset.val_df.groupby('user_encoded')['item_encoded'].apply(list).to_dict()
