@@ -291,41 +291,6 @@ def plot_community_connectivity_distribution(user_connectivity_matrix, top_n_com
             print(f"Community {comm_idx}: {concentration_top10pct * 100:.1f}% of connections in top 10% of item communities")
 
 
-# via euclidean distance between user/item community connectivity matrices and uniform distribution
-# for each user and each item, the bias individually
-def get_community_bias(item_communities_each_user_dist=None, user_communities_each_item_dist=None):
-    """
-    Get the community bias of the users and items.
-
-    :param item_communities_each_user_dist: torch.tensor, item community distribution for each user
-    :param user_communities_each_item_dist: torch.tensor, user community distribution for each item
-    :return: tuple of torch.tensors, community bias for users and items
-    """
-
-    uniform_distribution_users = torch.full_like(item_communities_each_user_dist, 1.0 / item_communities_each_user_dist.size(1))
-    uniform_distribution_items = torch.full_like(user_communities_each_item_dist, 1.0 / user_communities_each_item_dist.size(1))
-
-    # torch.norm does L2 norm by default
-    user_bias = torch.linalg.norm(uniform_distribution_users - item_communities_each_user_dist, dim=1)
-    item_bias = torch.linalg.norm(uniform_distribution_items - user_communities_each_item_dist, dim=1)
-
-    # Normalize the bias to be between 0 and 1
-    # make worst possible distribution and divide by it to make it the maximum 1
-    worst_distribution_users = torch.zeros_like(item_communities_each_user_dist)
-    worst_distribution_items = torch.zeros_like(user_communities_each_item_dist)
-    worst_distribution_users[:, 0] = 1.0  # worst distribution is all in one community
-    worst_distribution_items[:, 0] = 1.0
-
-    # bias for each user and item, can be processed for distributions, averages, etc.
-    bias_worst_users = torch.linalg.norm(uniform_distribution_users - worst_distribution_users, dim=1)
-    bias_worst_items = torch.linalg.norm(uniform_distribution_items - worst_distribution_items, dim=1)
-
-    user_bias /= bias_worst_users
-    item_bias /= bias_worst_items
-
-    return user_bias.cpu(), item_bias.cpu()
-
-
 def initialize_wandb(config):
     """Initialize Weights & Biases for experiment tracking with config object."""
     wandb.login(key="d234bc98a4761bff39de0e5170df00094ac42269")
@@ -421,6 +386,11 @@ def get_community_data(config, adj_np):
         adj_np=adj_np,
         save_path=f'dataset/{config.dataset_name}/saved',
         get_probs=True)
+
+    config.item_labels_matrix_mask = torch.tensor(np.loadtxt(f'dataset/{config.dataset_name}/saved/item_labels_matrix_mask.csv',
+                                                        delimiter=','), dtype=torch.long, device=config.device)
+    # config.user_labels_matrix_mask = torch.tensor(np.loadtxt(f'dataset/{config.dataset_name}/saved/user_labels_matrix_mask.csv',
+    #                                                     delimiter=','), device=config.device)
 
     (config.power_users_ids,
      config.power_items_ids) = get_power_users_items(

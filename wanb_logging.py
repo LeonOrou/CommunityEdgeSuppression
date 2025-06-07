@@ -50,34 +50,23 @@ def init_wandb(config):
 
 def log_fold_metrics_to_wandb(fold_num, fold_results, config):
     """Log comprehensive fold metrics to wandb"""
-
-    # Prepare metrics for logging
     log_dict = {}
 
-    # Log all metrics for each k value
     for k in config.evaluate_top_k:
-        # Accuracy metrics
-        log_dict[f'fold_{fold_num}/val_ndcg@{k}'] = fold_results[f'val_ndcg@{k}']
-        log_dict[f'fold_{fold_num}/val_recall@{k}'] = fold_results[f'val_recall@{k}']
-        log_dict[f'fold_{fold_num}/val_precision@{k}'] = fold_results[f'val_precision@{k}']
-        log_dict[f'fold_{fold_num}/val_mrr@{k}'] = fold_results[f'val_mrr@{k}']
-        log_dict[f'fold_{fold_num}/val_hit_rate@{k}'] = fold_results[f'val_hit_rate@{k}']
-
-        # Coverage and distribution metrics
-        log_dict[f'fold_{fold_num}/val_item_coverage@{k}'] = fold_results[f'val_item_coverage@{k}']
-        log_dict[f'fold_{fold_num}/val_gini_index@{k}'] = fold_results[f'val_gini_index@{k}']
-        log_dict[f'fold_{fold_num}/val_simpson_index@{k}'] = fold_results[f'val_simpson_index@{k}']
-
-        # Diversity metrics
-        log_dict[f'fold_{fold_num}/val_simpson_index_genre@{k}'] = fold_results[f'val_simpson_index_genre@{k}']
-        log_dict[f'fold_{fold_num}/val_intra_list_diversity@{k}'] = fold_results[f'val_intra_list_diversity@{k}']
-        log_dict[f'fold_{fold_num}/val_normalized_genre_entropy@{k}'] = fold_results[
-            f'val_normalized_genre_entropy@{k}']
-        log_dict[f'fold_{fold_num}/val_unique_genres_count@{k}'] = fold_results[f'val_unique_genres_count@{k}']
-
-        # Popularity metrics
-        log_dict[f'fold_{fold_num}/val_popularity_lift@{k}'] = fold_results[f'val_popularity_lift@{k}']
-        log_dict[f'fold_{fold_num}/val_popularity_calibration@{k}'] = fold_results[f'val_popularity_calibration@{k}']
+        log_dict[f'fold_{fold_num}/val_ndcg@{k}'] = fold_results[k][f'NDCG']
+        log_dict[f'fold_{fold_num}/val_recall@{k}'] = fold_results[k][f'Recall']
+        log_dict[f'fold_{fold_num}/val_precision@{k}'] = fold_results[k][f'Precision']
+        log_dict[f'fold_{fold_num}/val_mrr@{k}'] = fold_results[k][f'MRR']
+        log_dict[f'fold_{fold_num}/val_hit_rate@{k}'] = fold_results[k][f'Hit Rate']
+        log_dict[f'fold_{fold_num}/val_item_coverage@{k}'] = fold_results[k][f'Item Coverage']
+        log_dict[f'fold_{fold_num}/val_gini_index@{k}'] = fold_results[k][f'Gini Index']
+        log_dict[f'fold_{fold_num}/val_simpson_index_genre@{k}'] = fold_results[k][f'Simpson Index Genre']
+        log_dict[f'fold_{fold_num}/val_intra_list_diversity@{k}'] = fold_results[k][f'Intra List Diversity']
+        log_dict[f'fold_{fold_num}/val_normalized_genre_entropy@{k}'] = fold_results[k][f'Normalized Genre Entropy']
+        log_dict[f'fold_{fold_num}/val_unique_genres_count@{k}'] = fold_results[k][f'Unique Genres Count']
+        log_dict[f'fold_{fold_num}/val_popularity_lift@{k}'] = fold_results[k][f'Popularity Lift']
+        log_dict[f'fold_{fold_num}/val_popularity_calibration@{k}'] = fold_results[k][f'Popularity Calibration']
+        log_dict[f'fold_{fold_num}/val_user_community_bias@{k}'] = fold_results[k][f'User Community Bias']
 
     wandb.log(log_dict)
 
@@ -94,21 +83,15 @@ def log_cv_summary_to_wandb(cv_summary, config):
         log_dict[f'cv_avg/precision@{k}'] = cv_summary[k]['Precision']
         log_dict[f'cv_avg/mrr@{k}'] = cv_summary[k]['MRR']
         log_dict[f'cv_avg/hit_rate@{k}'] = cv_summary[k]['Hit Rate']
-
-        # Coverage and distribution metrics
         log_dict[f'cv_avg/item_coverage@{k}'] = cv_summary[k]['Item Coverage']
         log_dict[f'cv_avg/gini_index@{k}'] = cv_summary[k]['Gini Index']
-        log_dict[f'cv_avg/simpson_index@{k}'] = cv_summary[k]['Simpson Index']
-
-        # Diversity metrics
-        log_dict[f'cv_avg/simpson_index_genre@{k}'] = cv_summary[k]['Simpson (Genre)']
-        log_dict[f'cv_avg/intra_list_diversity@{k}'] = cv_summary[k]['Intra-list Diversity']
+        log_dict[f'cv_avg/simpson_index_genre@{k}'] = cv_summary[k]['Simpson Index Genre']
+        log_dict[f'cv_avg/intra_list_diversity@{k}'] = cv_summary[k]['Intra List Diversity']
         log_dict[f'cv_avg/normalized_genre_entropy@{k}'] = cv_summary[k]['Genre Entropy']
-        log_dict[f'cv_avg/unique_genres_count@{k}'] = cv_summary[k]['Unique Genres']
-
-        # Popularity metrics
+        log_dict[f'cv_avg/unique_genres_count@{k}'] = cv_summary[k]['Unique Genres Count']
         log_dict[f'cv_avg/popularity_lift@{k}'] = cv_summary[k]['Popularity Lift']
-        log_dict[f'cv_avg/popularity_calibration@{k}'] = cv_summary[k]['Pop. Calibration']
+        log_dict[f'cv_avg/popularity_calibration@{k}'] = cv_summary[k]['Popularity Calibration']
+        log_dict[f'cv_avg/user_community_bias@{k}'] = cv_summary[k]['User Community Bias']
 
     wandb.log(log_dict)
 
@@ -120,26 +103,19 @@ def log_test_metrics_to_wandb(test_metrics, config):
 
     for k in config.evaluate_top_k:
         # Accuracy metrics
-        log_dict[f'test/ndcg@{k}'] = test_metrics[k]['ndcg']
-        log_dict[f'test/recall@{k}'] = test_metrics[k]['recall']
-        log_dict[f'test/precision@{k}'] = test_metrics[k]['precision']
-        log_dict[f'test/mrr@{k}'] = test_metrics[k]['mrr']
-        log_dict[f'test/hit_rate@{k}'] = test_metrics[k]['hit_rate']
-
-        # Coverage and distribution metrics
-        log_dict[f'test/item_coverage@{k}'] = test_metrics[k]['item_coverage']
-        log_dict[f'test/gini_index@{k}'] = test_metrics[k]['gini_index']
-        log_dict[f'test/simpson_index@{k}'] = test_metrics[k]['simpson_index']
-
-        # Diversity metrics
-        log_dict[f'test/simpson_index_genre@{k}'] = test_metrics[k]['simpson_index_genre']
-        log_dict[f'test/intra_list_diversity@{k}'] = test_metrics[k]['intra_list_diversity']
-        log_dict[f'test/normalized_genre_entropy@{k}'] = test_metrics[k]['normalized_genre_entropy']
-        log_dict[f'test/unique_genres_count@{k}'] = test_metrics[k]['unique_genres_count']
-
-        # Popularity metrics
-        log_dict[f'test/popularity_lift@{k}'] = test_metrics[k]['popularity_lift']
-        log_dict[f'test/popularity_calibration@{k}'] = test_metrics[k]['popularity_calibration']
+        log_dict[f'test/ndcg@{k}'] = test_metrics[k]['NDCG']
+        log_dict[f'test/recall@{k}'] = test_metrics[k]['Recall']
+        log_dict[f'test/precision@{k}'] = test_metrics[k]['Precision']
+        log_dict[f'test/mrr@{k}'] = test_metrics[k]['MRR']
+        log_dict[f'test/hit_rate@{k}'] = test_metrics[k]['Hit Rate']
+        log_dict[f'test/item_coverage@{k}'] = test_metrics[k]['Item Coverage']
+        log_dict[f'test/gini_index@{k}'] = test_metrics[k]['Gini Index']
+        log_dict[f'test/simpson_index_genre@{k}'] = test_metrics[k]['Simpson Index Genre']
+        log_dict[f'test/intra_list_diversity@{k}'] = test_metrics[k]['Intra List Diversity']
+        log_dict[f'test/normalized_genre_entropy@{k}'] = test_metrics[k]['Normalized Genre Entropy']
+        log_dict[f'test/unique_genres_count@{k}'] = test_metrics[k]['Unique Genres Count']
+        log_dict[f'test/popularity_lift@{k}'] = test_metrics[k]['Popularity Lift']
+        log_dict[f'test/popularity_calibration@{k}'] = test_metrics[k]['Popularity Calibration']
 
     wandb.log(log_dict)
 

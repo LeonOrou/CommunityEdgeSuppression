@@ -1,10 +1,10 @@
 import numpy as np
 import torch
 import json
-from collections import defaultdict, Counter
+from collections import defaultdict
 
 
-def evaluate_model(model, dataset, stage='cv', k_values=[10, 20, 50, 100]):
+def evaluate_model(model, dataset, config, stage='cv', k_values=[10, 20, 50, 100]):
     """
     Evaluate model using the complete graph structure but excluding training interactions
     stage: 'full_train' for full training evaluation, 'loo' for leave-one-out evaluation
@@ -12,11 +12,9 @@ def evaluate_model(model, dataset, stage='cv', k_values=[10, 20, 50, 100]):
     """
     model.eval()
 
-    # Convert k_values to list if it's a single value
     if isinstance(k_values, int):
         k_values = [k_values]
 
-    # Sort k_values values to ensure we process from smallest to largest
     k_values = sorted(k_values)
     max_k = max(k_values)
 
@@ -25,9 +23,9 @@ def evaluate_model(model, dataset, stage='cv', k_values=[10, 20, 50, 100]):
     if stage == 'full_train':
         dataset.val_df = dataset.test_df
 
-    train_user_items = dataset.train_df.groupby('user_encoded')['item_encoded'].apply(set).to_dict()
+    train_user_items = dataset.train_df.groupby('user_encoded')['item_encoded'].apply(list).to_dict()
 
-    # Initialize metric storage for each k_values (MODIFY THIS)
+    # Initialize metric storage for each k_values
     metrics_by_k = {k_val: {
         'ndcg_scores': [],
         'recall_scores': [],
@@ -45,20 +43,20 @@ def evaluate_model(model, dataset, stage='cv', k_values=[10, 20, 50, 100]):
 
     # Store recommendation frequencies and global recommendations for calibration
     item_recommendation_freq_by_k = {k_val: defaultdict(int) for k_val in k_values}
-    all_global_recommendations_by_k = {k_val: [] for k_val in k_values}  # ADD THIS
+    all_global_recommendations_by_k = {k_val: [] for k_val in k_values}
+
+    # Store community distributions for each user for community bias calculation
+    user_item_community_distributions = {k_val: [] for k_val in k_values}
 
     with torch.no_grad():
-        # Use the COMPLETE graph (including test edges) for embeddings
         user_emb, item_emb = model(dataset.complete_edge_index, dataset.current_edge_weight)
 
-        # Group test interactions by user
         user_test_items = dataset.val_df.groupby('user_encoded')['item_encoded'].apply(list).to_dict()
 
         for user_id, true_items in user_test_items.items():
             if user_id >= dataset.num_users:
                 continue
 
-            # Get user embedding and compute scores for all items
             user_embedding = user_emb[user_id:user_id + 1]
             scores = torch.matmul(user_embedding, item_emb.T).squeeze().cpu().numpy()
 
@@ -67,28 +65,28 @@ def evaluate_model(model, dataset, stage='cv', k_values=[10, 20, 50, 100]):
             scores_filtered = scores.copy()
             scores_filtered[train_items] = float('-inf')
 
-            # Get top-max_k predictions (excluding training items)
             top_max_k_items = np.argsort(scores_filtered)[::-1][:max_k]
 
             # Get full ranking for MRR calculation
             full_ranking = np.argsort(scores_filtered)[::-1]
 
-            # Calculate metrics for each k_values value
             for k_val in k_values:
-                # Get top-k_values items for this k_values value
                 top_k_items = top_max_k_items[:k_val]
 
-                # Add to recommended items set for coverage calculation
                 metrics_by_k[k_val]['all_recommended_items'].update(top_k_items)
 
-                # Add to global recommendations for calibration (ADD THIS)
                 all_global_recommendations_by_k[k_val].extend(top_k_items)
 
-                # Update recommendation frequency
                 for item in top_k_items:
                     item_recommendation_freq_by_k[k_val][item] += 1
 
-                # Calculate existing metrics
+                # Calculate community distribution for this user's recommendations
+                if hasattr(config, 'item_labels_matrix_mask'):
+                    user_community_dist = calculate_user_item_community_distribution(
+                        top_k_items.copy(), config.item_labels_matrix_mask, config.device
+                    )
+                    user_item_community_distributions[k_val].append(user_community_dist)
+
                 ndcg = calculate_ndcg(true_items, scores_filtered, k_val)
                 recall = calculate_recall(true_items, top_k_items, k_val)
                 precision = calculate_precision(true_items, top_k_items, k_val)
@@ -101,10 +99,8 @@ def evaluate_model(model, dataset, stage='cv', k_values=[10, 20, 50, 100]):
                 metrics_by_k[k_val]['mrr_scores'].append(mrr)
                 metrics_by_k[k_val]['hit_rate_scores'].append(hit_rate)
 
-                # ADD NEW METRICS CALCULATION
                 additional_metrics = calculate_additional_metrics(
-                    top_k_items, encoded_to_genres, dataset
-                )
+                    top_k_items, encoded_to_genres, dataset)
 
                 metrics_by_k[k_val]['simpson_scores'].append(additional_metrics['simpson_index'])
                 metrics_by_k[k_val]['intra_list_diversity_scores'].append(additional_metrics['intra_list_diversity'])
@@ -115,17 +111,14 @@ def evaluate_model(model, dataset, stage='cv', k_values=[10, 20, 50, 100]):
                     additional_metrics['normalized_genre_entropy'])
                 metrics_by_k[k_val]['unique_genres_count_scores'].append(additional_metrics['unique_genres_count'])
 
-    # Compute final metrics for each k_values (MODIFY THIS SECTION)
     results = {}
     for k_val in k_values:
-        # Calculate averages for existing metrics
         ndcg_scores = metrics_by_k[k_val]['ndcg_scores']
         recall_scores = metrics_by_k[k_val]['recall_scores']
         precision_scores = metrics_by_k[k_val]['precision_scores']
         mrr_scores = metrics_by_k[k_val]['mrr_scores']
         hit_rate_scores = metrics_by_k[k_val]['hit_rate_scores']
 
-        # Calculate averages for new metrics
         simpson_scores = metrics_by_k[k_val]['simpson_scores']
         intra_list_diversity_scores = metrics_by_k[k_val]['intra_list_diversity_scores']
         popularity_lift_scores = metrics_by_k[k_val]['popularity_lift_scores']
@@ -133,11 +126,9 @@ def evaluate_model(model, dataset, stage='cv', k_values=[10, 20, 50, 100]):
         normalized_genre_entropy_scores = metrics_by_k[k_val]['normalized_genre_entropy_scores']
         unique_genres_count_scores = metrics_by_k[k_val]['unique_genres_count_scores']
 
-        # Calculate item coverage
         all_recommended_items = metrics_by_k[k_val]['all_recommended_items']
         item_coverage = calculate_item_coverage(list(all_recommended_items), dataset.num_items)
 
-        # Calculate Gini index
         recommendation_counts = np.array(list(item_recommendation_freq_by_k[k_val].values()))
         if len(recommendation_counts) > 0:
             recommendation_probs = recommendation_counts / recommendation_counts.sum()
@@ -145,32 +136,39 @@ def evaluate_model(model, dataset, stage='cv', k_values=[10, 20, 50, 100]):
         else:
             gini_index = 0.0
 
-        # Calculate popularity calibration
         popularity_calibration = calculate_popularity_calibration(
             all_global_recommendations_by_k[k_val], dataset
         )
 
-        results[k_val] = {
-            # Existing metrics
-            'ndcg': np.mean(ndcg_scores) if ndcg_scores else 0.0,
-            'recall': np.mean(recall_scores) if recall_scores else 0.0,
-            'precision': np.mean(precision_scores) if precision_scores else 0.0,
-            'mrr': np.mean(mrr_scores) if mrr_scores else 0.0,
-            'hit_rate': np.mean(hit_rate_scores) if hit_rate_scores else 0.0,
-            'item_coverage': item_coverage,
-            'gini_index': gini_index,
-            'simpson_index': 1.0 - gini_index,  # Keep your existing calculation
+        # Calculate community bias if community data is available
+        user_community_bias = 0.0
+        if (hasattr(config, 'item_labels_matrix_mask') and
+                len(user_item_community_distributions[k_val]) > 0):
+            # Stack all user community distributions
+            all_user_community_dists = torch.stack(user_item_community_distributions[k_val])
 
-            # New metrics
-            'simpson_index_genre': np.mean(simpson_scores) if simpson_scores else 0.0,
-            'intra_list_diversity': np.mean(intra_list_diversity_scores) if intra_list_diversity_scores else 0.0,
-            'popularity_lift': np.mean(popularity_lift_scores) if popularity_lift_scores else 0.0,
-            'avg_recommended_popularity': np.mean(
+            # Calculate community bias using the existing function
+            user_bias, _ = get_community_bias(item_communities_each_user_dist=all_user_community_dists)
+            user_community_bias = float(torch.mean(user_bias)) if user_bias is not None else None
+
+        results[k_val] = {
+            'NDCG': np.mean(ndcg_scores) if ndcg_scores else 0.0,
+            'Recall': np.mean(recall_scores) if recall_scores else 0.0,
+            'Precision': np.mean(precision_scores) if precision_scores else 0.0,
+            'MRR': np.mean(mrr_scores) if mrr_scores else 0.0,
+            'Hit Rate': np.mean(hit_rate_scores) if hit_rate_scores else 0.0,
+            'Item Coverage': item_coverage,
+            'Gini Index': gini_index,
+            'Simpson Index Genre': np.mean(simpson_scores) if simpson_scores else 0.0,
+            'Intra List Diversity': np.mean(intra_list_diversity_scores) if intra_list_diversity_scores else 0.0,
+            'Popularity Lift': np.mean(popularity_lift_scores) if popularity_lift_scores else 0.0,
+            'Avg Recommended Popularity': np.mean(
                 avg_recommended_popularity_scores) if avg_recommended_popularity_scores else 0.0,
-            'normalized_genre_entropy': np.mean(
+            'Normalized Genre Entropy': np.mean(
                 normalized_genre_entropy_scores) if normalized_genre_entropy_scores else 0.0,
-            'unique_genres_count': np.mean(unique_genres_count_scores) if unique_genres_count_scores else 0.0,
-            'popularity_calibration': popularity_calibration
+            'Unique Genres Count': np.mean(unique_genres_count_scores) if unique_genres_count_scores else 0.0,
+            'Popularity Calibration': popularity_calibration,
+            'User Community Bias': user_community_bias
         }
 
     return results
@@ -186,21 +184,17 @@ def evaluate_current_model_ndcg(model, dataset, k=10):
     ndcg_scores = []
 
     # Create a set of training interactions for each user to exclude from evaluation
-    # Using pandas groupby (more efficient):
-    train_user_items = dataset.train_df.groupby('user_encoded')['item_encoded'].apply(set).to_dict()
+    train_user_items = dataset.train_df.groupby('user_encoded')['item_encoded'].apply(list).to_dict()
 
     with torch.no_grad():
-        # Use the COMPLETE graph (including test edges) for embeddings
-        user_emb, item_emb = model(dataset.complete_edge_index, dataset.current_edge_weight)
+        user_emb, item_emb = model(dataset.complete_edge_index, dataset.complete_edge_weight)
 
-        # Group validation interactions by user
         user_val_items = dataset.val_df.groupby('user_encoded')['item_encoded'].apply(list).to_dict()
 
         for user_id, true_items in user_val_items.items():
             if user_id >= dataset.num_users:
                 continue
 
-            # Get user embedding and compute scores for all items
             user_embedding = user_emb[user_id:user_id + 1]
             scores = torch.matmul(user_embedding, item_emb.T).squeeze().cpu().numpy()
 
@@ -209,12 +203,128 @@ def evaluate_current_model_ndcg(model, dataset, k=10):
             scores_filtered = scores.copy()
             scores_filtered[train_items] = float('-inf')
 
-            # Calculate NDCG
             ndcg = calculate_ndcg(true_items, scores_filtered, k)
             ndcg_scores.append(ndcg)
 
-    # Return average NDCG
     return np.mean(ndcg_scores) if ndcg_scores else 0.0
+
+
+# via euclidean distance between user/item community connectivity matrices and uniform distribution
+# for each user and each item, the bias individually
+def get_community_bias(item_communities_each_user_dist=None, user_communities_each_item_dist=None):
+    """
+    Get the community bias of the users and items.
+
+    :param item_communities_each_user_dist: torch.tensor, item community distribution for each user
+    :param user_communities_each_item_dist: torch.tensor, user community distribution for each item
+    :return: tuple of torch.tensors, community bias for users and items
+    """
+    user_bias, item_bias = None, None
+
+    if item_communities_each_user_dist is not None:
+        uniform_distribution_users = torch.full_like(item_communities_each_user_dist, 1.0 / item_communities_each_user_dist.size(1))
+        user_bias = torch.linalg.norm(uniform_distribution_users - item_communities_each_user_dist, dim=1)
+        # Normalize the bias to be between 0 and 1
+        # make worst possible distribution and divide by it to make it the maximum 1
+        worst_distribution_users = torch.zeros_like(item_communities_each_user_dist)
+        worst_distribution_users[:, 0] = 1.0  # worst distribution is all in one community
+        # bias for each user and item, can be processed for distributions, averages, etc.
+        bias_worst_users = torch.linalg.norm(uniform_distribution_users - worst_distribution_users, dim=1)
+        user_bias /= bias_worst_users
+
+    if user_communities_each_item_dist is not None:
+        uniform_distribution_items = torch.full_like(user_communities_each_item_dist,
+                                                     1.0 / user_communities_each_item_dist.size(1))
+        item_bias = torch.linalg.norm(uniform_distribution_items - user_communities_each_item_dist, dim=1)
+        worst_distribution_items = torch.zeros_like(user_communities_each_item_dist)
+        worst_distribution_items[:, 0] = 1.0
+        bias_worst_items = torch.linalg.norm(uniform_distribution_items - worst_distribution_items, dim=1)
+        item_bias /= bias_worst_items
+
+    return user_bias, item_bias
+
+
+def print_metric_results(metrics, title="Results"):
+    """Print metrics in a formatted table with k values as columns and metrics as rows."""
+    if not metrics:
+        print(f"No {title.lower()} available")
+        return
+
+    # Get available k values from metrics keys
+    k_values = sorted(metrics.keys())
+
+    # Get all metric names from the first k value
+    metric_names = list(metrics[k_values[0]].keys())
+
+    print(f"\n{title}")
+    print("=" * 85)
+
+    # Create header
+    header = f"{'Metric':<20}"
+    for k in k_values:
+        header += f"{'k=' + str(k):>12}"
+    print(header)
+    print("-" * (20 + 12 * len(k_values)))
+
+    # Print each metric row
+    for metric_name in metric_names:
+        row = f"{metric_name:<25}"
+        for k in k_values:
+            value = metrics[k][metric_name]
+            row += f"{value:>12.4f}"
+        print(row)
+
+
+def calculate_user_item_community_distribution(recommended_items, item_labels_matrix_mask, device):
+    """
+    Calculate the distribution of item communities for a user's recommended items.
+
+    Args:
+        recommended_items: list/array of recommended item IDs (encoded)
+        item_labels_matrix_mask: torch.tensor of shape (n_items, n_communities)
+                                where entry [i,j] = 1 if item i belongs to community j
+        device: torch device
+
+    Returns:
+        torch.tensor: normalized distribution over item communities for this user
+    """
+    if len(recommended_items) == 0:
+        # Return uniform distribution if no recommendations
+        n_communities = item_labels_matrix_mask.shape[1]
+        return torch.ones(n_communities, device=device) / n_communities
+
+    # Convert to tensor if needed
+    if not isinstance(recommended_items, torch.Tensor):
+        recommended_items = torch.tensor(recommended_items, device=device)
+
+    # Ensure item_labels_matrix_mask is on the correct device
+    if item_labels_matrix_mask.device != device:
+        item_labels_matrix_mask = item_labels_matrix_mask.to(device)
+
+    # Filter out items that are outside the matrix bounds
+    valid_items = recommended_items[recommended_items < item_labels_matrix_mask.shape[0]]
+
+    if len(valid_items) == 0:
+        # Return uniform distribution if no valid items
+        n_communities = item_labels_matrix_mask.shape[1]
+        return torch.ones(n_communities, device=device) / n_communities
+
+    # Get community memberships for recommended items
+    item_community_memberships = item_labels_matrix_mask[valid_items]  # shape: (n_recommended_items, n_communities)
+
+    # Sum across items to get total community counts
+    community_counts = torch.sum(item_community_memberships, dim=0).float()  # shape: (n_communities,)
+
+    # Normalize to get distribution
+    total_count = torch.sum(community_counts)
+    if total_count > 0:
+        community_distribution = community_counts / total_count
+    else:
+        # Return uniform distribution if no community memberships
+        n_communities = item_labels_matrix_mask.shape[1]
+        community_distribution = torch.ones(n_communities, device=device) / n_communities
+
+    return community_distribution
 
 
 def load_genre_mapping(dataset):
@@ -227,11 +337,8 @@ def load_genre_mapping(dataset):
 
     # Create mapping from encoded item ID to genres
     # Need to map: original_item_id -> encoded_item_id -> genres
-    # item_id_to_encoded = {}
-    # for _, row in dataset.complete_df.iterrows():
-    #     item_id_to_encoded[str(row['item_id'])] = row['item_encoded']
     item_id_to_encoded = dataset.complete_df.set_index('item_id')['item_encoded'].to_dict()
-    # Convert keys to strings for json indexing
+
     item_id_to_encoded = {str(k): v for k, v in item_id_to_encoded.items()}
 
     encoded_to_genres = {}
@@ -665,23 +772,6 @@ def calculate_gini_index(y_true, y_pred):
     return gini
 
 
-def calculate_simpson_index(y_true, y_pred):
-    """Calculate Simpson Index"""
-    if len(y_true) == 0 or len(y_pred) == 0:
-        return 0.0
-
-    top_k = set(y_pred)
-    relevant = set(y_true)
-
-    intersection = len(top_k.intersection(relevant))
-    union = len(top_k.union(relevant))
-
-    if union == 0:
-        return 0.0
-
-    return intersection / union
-
-
 def calculate_gini_coefficient(probabilities):
     """
     Calculate Gini coefficient for recommendation distribution
@@ -700,3 +790,5 @@ def calculate_gini_coefficient(probabilities):
     gini = (2 * np.sum(index * sorted_probs)) / (n * np.sum(sorted_probs)) - (n + 1) / n
 
     return gini
+
+

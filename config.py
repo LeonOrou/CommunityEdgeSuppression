@@ -49,16 +49,16 @@ class Config:
     def setup_model_config(self):
         """Setup model-specific configurations."""
         if self.model_name == 'LightGCN':
-            self.batch_size = 512  # For consistency
+            self.batch_size = 1024
             self.learning_rate = 0.005
-            self.epochs = 50  # because it's different for each model
+            self.epochs = 100  # because it's different for each model
             self.n_layers = 3
-            self.embedding_dim = 128
+            self.embedding_dim = 64
             self.A_split = False
             self.keep_prob = 0.0  # dropout rate
             self.dropout = False
             self.num_folds = 5
-            self.reg = 1e-5
+            self.reg = 1e-4
             self.weight_decay = 1
         elif self.model_name == 'ItemKNN':
             self.epochs = 1

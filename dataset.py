@@ -133,6 +133,7 @@ class RecommendationDataset:
         self.train_edge_weight = None
         self.complete_edge_index = None
         self.complete_edge_weight = None
+        self.current_edge_weight = None  # used for community suppression
 
         # Interaction mappings
         self.user_positive_items = defaultdict(set)  # {user_id: set(item_ids)}
