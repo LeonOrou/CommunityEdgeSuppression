@@ -166,10 +166,11 @@ class RecommendationDataset:
                                       usecols=[0, 1, 2], header=None)
         elif self.name == 'ml-20m':
             ratings_file = os.path.join(self.data_path, 'ratings.csv')
-            self.raw_df = pd.read_csv(ratings_file, sep='\t',
+            self.raw_df = pd.read_csv(ratings_file, sep=',',
                                       names=['user_id', 'item_id', 'rating'],
                                       usecols=[0, 1, 2], header=0)
-        self.raw_df = self.raw_df.sample(frac=1, random_state=42).reset_index(drop=True)
+        # we shuffle later with indices
+        # self.raw_df = self.raw_df.sample(frac=1, random_state=42).reset_index(drop=True)
 
     def _load_lastfm(self):
         """Load Last.fm dataset"""
@@ -204,11 +205,9 @@ class RecommendationDataset:
             (ratings_df['item_id'].isin(valid_items))
             ].copy()
 
-        # Filter out low ratings
         filtered_df = filtered_df[filtered_df['rating'] >= min_rating].reset_index(drop=True)
         filtered_df['rating'] = 1  # Treat all valid ratings as positive interactions
 
-        # Encode ALL users and items that appear in the dataset
         # This ensures consistent encoding across all splits
         user_encoder = LabelEncoder()
         item_encoder = LabelEncoder()
@@ -233,48 +232,51 @@ class RecommendationDataset:
 
     def split_interactions_by_user(self, test_ratio=0.2, n_folds=5):
         """
-        Split interactions for each user into train_val/test, then pre-compute k_values-fold CV splits
-        This ensures all users appear in training data
+        Split interactions for each user into train_val/test.
+        Optimized version using advanced NumPy techniques.
         """
-        train_val_list = []
-        test_list = []
+        # Sort by user_encoded
+        df = self.complete_df.sort_values('user_encoded')
 
-        for user_id, group in self.complete_df.groupby('user_encoded'):
-            # shuffle interactions for this user
-            user_interactions = group.sample(frac=1, random_state=42).reset_index(drop=True)
-            n_interactions = len(user_interactions)
+        # Get unique users and their counts efficiently
+        users = df['user_encoded'].values
+        unique_users, user_counts = np.unique(users, return_counts=True)
 
-            if n_interactions < 2:
-                # If user has only 1 interaction, put it in train_val
-                train_val_list.append(user_interactions)
+        # Pre-compute random permutations for all users at once
+        rng = np.random.RandomState(42)
+
+        # Create split mask
+        split_mask = np.zeros(len(df), dtype=bool)
+
+        # Process users in batches for better performance
+        cumsum = np.concatenate([[0], np.cumsum(user_counts)])
+
+        for i, (start, end, count) in enumerate(zip(cumsum[:-1], cumsum[1:], user_counts)):
+            if count < 2:
                 continue
 
-            # Calculate split points
-            n_test = max(1, int(n_interactions * test_ratio))
-            n_train_val = n_interactions - n_test
+            # Calculate split sizes
+            n_test = max(1, int(count * test_ratio))
+            n_train_val = count - n_test
 
             if n_train_val < 1:
-                # Ensure at least 1 interaction in train_val
                 n_train_val = 1
-                n_test = n_interactions - n_train_val
+                n_test = count - n_train_val
 
-            # Split interactions
-            train_val_interactions = user_interactions.iloc[:n_train_val]
-            test_interactions = user_interactions.iloc[n_train_val:]
+            # Generate random indices for this user
+            perm = rng.permutation(count)
+            test_indices = start + perm[-n_test:]
+            split_mask[test_indices] = True
 
-            train_val_list.append(train_val_interactions)
-            if len(test_interactions) > 0:
-                test_list.append(test_interactions)
-
-        self.train_val_df = pd.concat(train_val_list, ignore_index=True) if train_val_list else pd.DataFrame()
-        self.test_df = pd.concat(test_list, ignore_index=True) if test_list else pd.DataFrame()
-
-        # Update complete_df to ensure it contains all data
-        self.complete_df = pd.concat([self.train_val_df, self.test_df], ignore_index=True)
+        # Split using boolean indexing
+        self.test_df = df[split_mask].copy()
+        self.train_val_df = df[~split_mask].copy()
+        self.complete_df = df.copy()
 
     def get_fold_i(self, i, n_folds=5):
         """
-        Generate train and validation dataframes for fold i without storing all folds.
+        Generate train and validation dataframes for fold i.
+        Ultra-optimized version using NumPy operations.
 
         Parameters:
         -----------
@@ -290,49 +292,42 @@ class RecommendationDataset:
         if i < 0 or i >= n_folds:
             raise ValueError(f"Fold index must be between 0 and {n_folds - 1}, got {i}")
 
-        # Initialize empty lists for this fold
-        train_data = []
-        val_data = []
+        # Sort by user_encoded if not already sorted
+        df = self.train_val_df.sort_values('user_encoded')
 
-        # Process each user's interactions
-        for user_id, group in self.train_val_df.groupby('user_encoded'):
-            user_interactions = group.reset_index(drop=True)
-            n_interactions = len(user_interactions)
+        # Get user_encoded as numpy array for faster operations
+        users = df['user_encoded'].values
+
+        # Find boundaries between users
+        user_changes = np.concatenate([[True], users[1:] != users[:-1], [True]])
+        user_boundaries = np.where(user_changes)[0]
+
+        # Pre-allocate fold assignment array
+        fold_assignments = np.empty(len(df), dtype=np.int8)
+
+        # Vectorized fold assignment
+        for start, end in zip(user_boundaries[:-1], user_boundaries[1:]):
+            n_interactions = end - start
 
             if n_interactions < n_folds:
-                # If user has fewer interactions than folds, distribute them
-                for idx in range(n_interactions):
-                    fold_idx = idx % n_folds
-                    if fold_idx == i:
-                        # This interaction goes to validation for current fold
-                        val_data.append(user_interactions.iloc[idx])
-                    else:
-                        # This interaction goes to training for current fold
-                        train_data.append(user_interactions.iloc[idx])
+                # Distribute interactions
+                fold_assignments[start:end] = np.arange(n_interactions) % n_folds
             else:
-                # Standard k_values-fold split
+                # Standard k-fold split
                 fold_size = n_interactions // n_folds
                 remainder = n_interactions % n_folds
 
-                # Calculate boundaries for fold i
-                start_idx = 0
-                for j in range(i):
-                    start_idx += fold_size + (1 if j < remainder else 0)
+                # Create fold indices for this user
+                fold_indices = np.repeat(np.arange(n_folds),
+                                         [fold_size + (1 if j < remainder else 0)
+                                          for j in range(n_folds)])
+                fold_assignments[start:end] = fold_indices
 
-                end_idx = start_idx + fold_size + (1 if i < remainder else 0)
+        # Create boolean mask and split
+        val_mask = fold_assignments == i
 
-                # Get validation data for this fold
-                val_data.extend(user_interactions.iloc[start_idx:end_idx].to_dict('records'))
-
-                # Get training data (everything except validation)
-                if start_idx > 0:
-                    train_data.extend(user_interactions.iloc[:start_idx].to_dict('records'))
-                if end_idx < n_interactions:
-                    train_data.extend(user_interactions.iloc[end_idx:].to_dict('records'))
-
-        # Convert lists to dataframes
-        self.train_df = pd.DataFrame(train_data)
-        self.val_df = pd.DataFrame(val_data)
+        self.val_df = df[val_mask].copy()
+        self.train_df = df[~val_mask].copy()
 
     def prepare_data(self):
         """Filter, encode, and split data"""
@@ -354,14 +349,6 @@ class RecommendationDataset:
         self.calculate_item_popularities()
 
         self.to_device(self.device)
-        #
-        # # Build interaction mappings
-        # self._build_interaction_mappings()
-        #
-        # # Create graph structures
-        # self._create_graph_structures()
-        #
-        # return self
 
     def _create_graph_structures(self, rating_weights=None):
         """Create graph structures for graph-based models"""
@@ -560,14 +547,14 @@ def prepare_adj_tensor(dataset):
     return adj_tens
 
 
-def prepare_training_data_gpu(train_df, device):
+def prepare_training_data(train_df, device):
     """Pre-convert training data to GPU tensors with memory-efficient dtypes"""
     # Use int32 for user/item indices - sufficient for millions of users/items
     all_users = torch.tensor(train_df['user_encoded'].values, dtype=torch.int32, device=device)
     all_items = torch.tensor(train_df['item_encoded'].values, dtype=torch.int32, device=device)
 
     # Create indices for shuffling (needs long for arange)
-    indices = torch.arange(len(train_df), device=device)
+    indices = torch.arange(len(train_df), dtype=torch.long, device=device)
 
     return all_users, all_items, indices
 

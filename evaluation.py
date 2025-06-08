@@ -209,6 +209,36 @@ def evaluate_current_model_ndcg(model, dataset, k=10):
     return np.mean(ndcg_scores) if ndcg_scores else 0.0
 
 
+def print_metric_results(metrics, title="Results"):
+    """Print metrics in a formatted table with k values as columns and metrics as rows."""
+    if not metrics:
+        print(f"No {title.lower()} available")
+        return
+
+    # Get available k values from metrics keys
+    k_values = sorted(metrics.keys())
+
+    # Get all metric names from the first k value
+    metric_names = list(metrics[k_values[0]].keys())
+
+    print(f"\n{title}")
+    print("=" * 85)
+
+    # Create header
+    header = f"{'Metric':<25}"
+    for k in k_values:
+        header += f"{'k=' + str(k):>12}"
+    print(header)
+    print("-" * (20 + 12 * len(k_values)))
+
+    for metric_name in metric_names:
+        row = f"{metric_name:<28}"
+        for k in k_values:
+            value = metrics[k][metric_name]
+            row += f"{value:>12f}"
+        print(row)
+
+
 # via euclidean distance between user/item community connectivity matrices and uniform distribution
 # for each user and each item, the bias individually
 def get_community_bias(item_communities_each_user_dist=None, user_communities_each_item_dist=None):
@@ -242,37 +272,6 @@ def get_community_bias(item_communities_each_user_dist=None, user_communities_ea
         item_bias /= bias_worst_items
 
     return user_bias, item_bias
-
-
-def print_metric_results(metrics, title="Results"):
-    """Print metrics in a formatted table with k values as columns and metrics as rows."""
-    if not metrics:
-        print(f"No {title.lower()} available")
-        return
-
-    # Get available k values from metrics keys
-    k_values = sorted(metrics.keys())
-
-    # Get all metric names from the first k value
-    metric_names = list(metrics[k_values[0]].keys())
-
-    print(f"\n{title}")
-    print("=" * 85)
-
-    # Create header
-    header = f"{'Metric':<20}"
-    for k in k_values:
-        header += f"{'k=' + str(k):>12}"
-    print(header)
-    print("-" * (20 + 12 * len(k_values)))
-
-    # Print each metric row
-    for metric_name in metric_names:
-        row = f"{metric_name:<25}"
-        for k in k_values:
-            value = metrics[k][metric_name]
-            row += f"{value:>12.4f}"
-        print(row)
 
 
 def calculate_user_item_community_distribution(recommended_items, item_labels_matrix_mask, device):

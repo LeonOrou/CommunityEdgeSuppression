@@ -6,6 +6,7 @@ from RecSys_PyTorch.models.BaseModel import BaseModel
 import numpy as np
 import scipy.sparse as sp
 from torch_geometric.utils import degree
+from sklearn.metrics.pairwise import cosine_similarity
 
 
 # Custom LightGCN implementation with edge weights
@@ -67,7 +68,6 @@ class LightGCN(nn.Module):
 
         return out
 
-
     def predict(self, user_indices, item_indices):
         """
         Predict scores for given user-item pairs.
@@ -89,7 +89,7 @@ def calculate_bpr_loss(user_emb, pos_item_emb, neg_item_emb):
 
 
 class ItemKNN(nn.Module):
-    def __init__(self, num_users, num_items, topk, shrink, feature_weighting='bm25'):
+    def __init__(self, num_users, num_items, topk=350, shrink=12.5, feature_weighting='bm25'):
         super(ItemKNN, self).__init__()
         self.num_users = num_users
         self.num_items = num_items
@@ -106,6 +106,9 @@ class ItemKNN(nn.Module):
             train_matrix = self.okapi_BM25(train_matrix.T).T
 
         train_matrix = train_matrix.tocsc()
+        # computed weighted cosine similarity
+        train_matrix = self._compute_cosine_similarity(train_matrix)
+
         num_items = train_matrix.shape[1]
 
         start_col_local = 0
@@ -150,7 +153,7 @@ class ItemKNN(nn.Module):
                 this_column_weights[columnIndex] = 0.0
 
                 # cosine similarity
-                # denominator = sqrt(l2_norm(x)) * sqrt(l2_norm(y))+ shrinkage + eps
+                # denominator = sqrt(l2_norm(rating_weights)) * sqrt(l2_norm(y))+ shrinkage + eps
                 denominator = sumOfSquared[columnIndex] * sumOfSquared + self.shrink + 1e-6
                 this_column_weights = np.multiply(this_column_weights, 1 / denominator)
 
@@ -236,6 +239,25 @@ class ItemKNN(nn.Module):
 
         return rating_matrix.tocsr()
 
+    def _compute_cosine_similarity(self, rating_matrix):
+        """Compute weighted cosine similarity."""
+        # Convert to dense for easier computation (use sparse for large datasets)
+        if rating_matrix.nnz / (rating_matrix.shape[0] * rating_matrix.shape[1]) > 0.1:
+            # If matrix is dense enough, use dense computation
+            dense_matrix = rating_matrix.toarray()
+            similarity_matrix = cosine_similarity(dense_matrix.T)
+        else:
+            # Use sparse computation
+            # Normalize each item vector
+            norms = np.sqrt(np.array(rating_matrix.power(2).sum(axis=0))).flatten()
+            norms[norms == 0] = 1e-10  # Avoid division by zero
+
+            # Compute similarity
+            similarity_matrix = (rating_matrix.T @ rating_matrix).toarray()
+            similarity_matrix = similarity_matrix / (norms[:, None] * norms[None, :])
+
+        return similarity_matrix
+
     def TF_IDF(self, rating_matrix):
         """
         Items are assumed to be on rows
@@ -254,6 +276,56 @@ class ItemKNN(nn.Module):
         rating_matrix.data = np.sqrt(rating_matrix.data) * idf[rating_matrix.col]
 
         return rating_matrix.tocsr()
+
+
+def triplets_to_matrix(triplets, num_users, num_items):
+    """
+    Convert triplet format (user_id, item_id, rating) to user-item matrix.
+
+    Args:
+        triplets: np.array or tensor of shape (n_ratings, 3) with (user_id, item_id, rating)
+        num_users: Total number of users
+        num_items: Total number of items
+
+    Returns:
+        rating_matrix: scipy sparse matrix [users x items]
+    """
+    # Convert to numpy if torch tensor
+    if torch.is_tensor(triplets):
+        triplets = triplets.cpu().numpy()
+
+    # Extract components
+    user_ids = triplets[:, 0].astype(int)
+    item_ids = triplets[:, 1].astype(int)
+    ratings = triplets[:, 2].astype(np.float32)
+
+    # Create sparse matrix
+    rating_matrix = sp.coo_matrix(
+        (ratings, (user_ids, item_ids)),
+        shape=(num_users, num_items),
+        dtype=np.float32
+    ).tocsr()
+
+    return rating_matrix
+
+
+def matrix_to_triplets(rating_matrix):
+    """
+    Convert user-item matrix back to triplet format.
+
+    Args:
+        rating_matrix: scipy sparse matrix [users x items]
+
+    Returns:
+        triplets: np.array of shape (n_ratings, 3) with (user_id, item_id, rating)
+    """
+    rating_coo = rating_matrix.tocoo()
+    triplets = np.column_stack([
+        rating_coo.row.astype(int),
+        rating_coo.col.astype(int),
+        rating_coo.data.astype(np.float32)
+    ])
+    return triplets
 
 
 class MultiVAE(nn.Module):
@@ -286,6 +358,7 @@ class MultiVAE(nn.Module):
         self.init_weights()
 
     def forward(self, input):
+
         mu, logvar = self.encode(input)
         z = self.reparameterize(mu, logvar)
         return self.decode(z), mu, logvar
@@ -343,12 +416,15 @@ class MultiVAE(nn.Module):
             layer.bias.data.normal_(0.0, 0.001)
 
 
-def multivae_loss(recon_x, x, mu, logvar, anneal=1.0):
-    # BCE = F.binary_cross_entropy(recon_x, x)
-    BCE = -torch.mean(torch.sum(F.log_softmax(recon_x, 1) * x, -1))
+def multivae_loss(recon_batch, rating_weights, mu, logvar, weights, anneal=1.0):
+    # BCE = F.binary_cross_entropy(recon_batch, rating_weights)
+    BCE = -torch.mean(torch.sum(F.log_softmax(recon_batch, 1) * rating_weights, -1))
+    weighted_BCE = BCE * weights
+    normalized_BCE = weighted_BCE.sum() / weights.sum()
+
     KLD = -0.5 * torch.mean(torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=1))
 
-    return BCE + anneal * KLD
+    return normalized_BCE + anneal * KLD
 
 
 def get_model(dataset, config):

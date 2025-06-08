@@ -7,7 +7,7 @@ from config import Config
 from evaluation import evaluate_model, evaluate_current_model_ndcg, print_metric_results
 from models import calculate_bpr_loss, multivae_loss, get_model
 import torch.optim as optim
-from dataset import RecommendationDataset, sample_negative_items, prepare_adj_tensor, prepare_training_data_gpu
+from dataset import RecommendationDataset, sample_negative_items, prepare_adj_tensor, prepare_training_data
 from argparse import ArgumentParser
 from utils_functions import (
     community_edge_suppression, get_community_data, get_biased_connectivity_data, set_seed,)
@@ -36,7 +36,7 @@ def train_model(dataset, model, config, stage='cv', fold_num=None, verbose=True)
 
     scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
         optimizer,
-        T_0=config.epochs // 5,
+        T_0=config.epochs // 5 if config.epochs >= 5 else 1,
         T_mult=1,
         eta_min=config.min_lr,
         last_epoch=-1
@@ -68,7 +68,13 @@ def train_model(dataset, model, config, stage='cv', fold_num=None, verbose=True)
     # Pre-convert training data to GPU
     # TODO: make big batches with 200k interactions maximum and have only this one big batch on GPU
     # TODO get smaller batches with batch_size = config.batch_size from this big batch
-    all_train_users, all_train_items, train_indices = prepare_training_data_gpu(dataset.train_df, device)
+    if len(dataset.train_df) < 200000:
+        all_train_users, all_train_items, train_indices = prepare_training_data(
+            dataset.train_val_df, device=device)
+    else:
+        all_train_users, all_train_items, train_indices = prepare_training_data(
+            dataset.train_df, device='cpu')
+
     num_train = len(train_indices)
 
     adj_tens = prepare_adj_tensor(dataset)
@@ -89,51 +95,58 @@ def train_model(dataset, model, config, stage='cv', fold_num=None, verbose=True)
         total_loss = 0
         num_batches = 0
 
-        # Shuffle indices on GPU
-        perm = torch.randperm(num_train, device=device)
+        perm = torch.randperm(num_train)
         train_indices_shuffled = train_indices[perm]
 
-        for i in range(0, num_train, batch_size):
-            batch_indices = train_indices_shuffled[i:i + batch_size]
+        # make big batches with 200k interactions maximum to run locally
+        for start_idx in range(0, num_train, 200000):
+            biggi_batch_indices = train_indices_shuffled[start_idx:start_idx + 200000]
 
-            if len(batch_indices) == 0:
-                continue
+            biggi_train_users = all_train_users[biggi_batch_indices].to(device)
+            biggi_train_items = all_train_items[biggi_batch_indices].to(device)
+            biggi_batch_indices = biggi_batch_indices.to(device)  # only have big batch on GPU
 
-            batch_users = all_train_users[batch_indices]
-            batch_pos_items = all_train_items[batch_indices]
+            for i in range(0, num_train, batch_size):
+                batch_indices = biggi_batch_indices[i:i + batch_size]
 
-            batch_neg_items = sample_negative_items(
-                batch_users,
-                batch_pos_items,
-                dataset.num_items,
-                user_positive_items,
-                device)
+                if len(batch_indices) == 0:
+                    continue
 
-            # Forward pass
-            user_emb, item_emb = model(dataset.complete_edge_index, dataset.current_edge_weight)
+                batch_users = biggi_train_users[batch_indices]
+                batch_pos_items = biggi_train_items[batch_indices]
 
-            batch_user_emb = user_emb[batch_users.long()]
-            batch_pos_item_emb = item_emb[batch_pos_items.long()]
-            batch_neg_item_emb = item_emb[batch_neg_items.long()]
+                batch_neg_items = sample_negative_items(
+                    batch_users,
+                    batch_pos_items,
+                    dataset.num_items,
+                    user_positive_items,
+                    device)
 
-            bpr_loss = calculate_bpr_loss(batch_user_emb, batch_pos_item_emb, batch_neg_item_emb)
-            # Add L2 regularization
-            l2_reg = config.reg * (
-                    batch_user_emb.norm(2).pow(2) +
-                    batch_pos_item_emb.norm(2).pow(2) +
-                    batch_neg_item_emb.norm(2).pow(2)
-            ) / batch_size
+                # Forward pass
+                user_emb, item_emb = model(dataset.complete_edge_index, dataset.current_edge_weight)
 
-            loss = bpr_loss + l2_reg
+                batch_user_emb = user_emb[batch_users.long()]
+                batch_pos_item_emb = item_emb[batch_pos_items.long()]
+                batch_neg_item_emb = item_emb[batch_neg_items.long()]
 
-            # Backward pass with gradient clipping
-            optimizer.zero_grad()
-            loss.backward()
+                bpr_loss = calculate_bpr_loss(batch_user_emb, batch_pos_item_emb, batch_neg_item_emb)
+                # Add L2 regularization
+                l2_reg = config.reg * (
+                        batch_user_emb.norm(2).pow(2) +
+                        batch_pos_item_emb.norm(2).pow(2) +
+                        batch_neg_item_emb.norm(2).pow(2)
+                ) / batch_size
 
-            optimizer.step()
+                loss = bpr_loss + l2_reg
 
-            total_loss += loss.item()
-            num_batches += 1
+                # Backward pass with gradient clipping
+                optimizer.zero_grad()
+                loss.backward()
+
+                optimizer.step()
+
+                total_loss += loss.item()
+                num_batches += 1
 
         if epoch % 10 == 0 or epoch == config.epochs - 1:
             # Use original edge weights for evaluation (no suppression)
@@ -298,15 +311,15 @@ def main():
         # get average metrics across folds
         cv_summary = {}
         for fold_result in cv_results:
-            for k, metrics in fold_result.items():
-                if k not in cv_summary:
-                    cv_summary[k] = defaultdict(list)
+            for k_, metrics in fold_result.items():
+                if k_ not in cv_summary:
+                    cv_summary[k_] = defaultdict(list)
                 for metric_name, value in metrics.items():
-                    cv_summary[k][metric_name].append(value)
-            # Calculate averages
-            for k, metrics in cv_summary.items():
-                for metric_name, values in metrics.items():
-                    cv_summary[k][metric_name] = np.mean(values)
+                    cv_summary[k_][metric_name].append(value)
+        # Calculate averages
+        for k_, metrics in cv_summary.items():
+            for metric_name, values in metrics.items():
+                cv_summary[k_][metric_name] = np.mean(values)
 
         log_cv_summary_to_wandb(cv_summary, config)
         print_metric_results(cv_summary, "CROSS-VALIDATION SUMMARY (5-fold average)")
@@ -385,7 +398,7 @@ def parse_arguments():
     parser.add_argument("--items_dec_perc_drop", type=float, default=0.05)
     parser.add_argument("--community_suppression", type=float, default=0.4)
     parser.add_argument("--drop_only_power_nodes", type=bool, default=True)
-    parser.add_argument("--use_dropout", type=bool, default=False)
+    parser.add_argument("--use_dropout", type=bool, default=True)
 
     # model hyperparameters
     # parser.add_argument("--embedding_dim", type=int, default=128)
