@@ -1,248 +1,699 @@
-import optuna
-import wandb
-from recbole.config import Config
-from recbole.data import create_dataset, data_preparation
-from recbole.model.general_recommender import LightGCN, ItemKNN, MultiVAE
-from recbole.utils import init_seed, init_logger
-from PowerDropoutTrainer import PowerDropoutTrainer
-from utils_functions import set_seed
-from precompute import get_community_connectivity_matrix, get_community_labels, get_power_users_items
-import yaml
 import torch
+import torch.nn as nn
+import torch.optim as optim
+import pandas as pd
 import numpy as np
-import os
-import copy
-import logging
-from logging import getLogger
-import gc
+import argparse
+from sklearn.metrics import ndcg_score
+import itertools
+import time
+from collections import defaultdict
+import random
+from scipy.sparse import csr_matrix, coo_matrix
+from models import LightGCN, ItemKNN, MultiVAE, calculate_bpr_loss, multivae_loss
+from dataset import RecommendationDataset
+import scipy as sp
 
-# Constants
-SEED = 42
-DATASET_NAME = "ml-100k"
-N_TRIALS = 30  # Number of hyperparameter combinations to try
-USERS_TOP_PERCENT = 0.05
-ITEMS_TOP_PERCENT = 0.05
-
-
-def load_config(dataset_name):
-    """Load the configuration file"""
-    with open(f'{dataset_name}_config.yaml', 'r') as file:
-        config_file = yaml.safe_load(file)
-    return config_file
+# Set random seeds for reproducibility
+torch.manual_seed(42)
+np.random.seed(42)
+random.seed(42)
 
 
-def prepare_data_and_communities(config, device, users_top_percent, items_top_percent,
-                                 do_power_nodes_from_community=True):
-    """Prepare data and compute communities for the model"""
-    init_seed(seed=SEED, reproducibility=config['reproducibility'])
-    init_logger(config)
-    logger = getLogger()
+def create_sparse_matrices(train_df, test_df, num_users, num_items):
+    """Create sparse matrices for efficient computation"""
+    # Training matrix
+    train_matrix = csr_matrix(
+        (np.ones(len(train_df)), (train_df['user_encoded'], train_df['item_encoded'])),
+        shape=(num_users, num_items), dtype=np.float32
+    )
 
-    dataset = create_dataset(config)
-    train_data, valid_data, test_data = data_preparation(config, dataset)
+    # Test matrix
+    test_matrix = csr_matrix(
+        (np.ones(len(test_df)), (test_df['user_encoded'], test_df['item_encoded'])),
+        shape=(num_users, num_items), dtype=np.float32
+    )
 
-    train_data_coo = copy.deepcopy(train_data.dataset).inter_matrix()
-    indices = torch.tensor((train_data_coo.row, train_data_coo.col), dtype=torch.int32, device=device).T
-    values = torch.unsqueeze(torch.tensor(train_data_coo.data, dtype=torch.int32, device=device), dim=0).T
-    adj_np = np.array(torch.cat((indices, values), dim=1).cpu(), dtype=np.int64)
-    del train_data_coo, indices, values
+    return train_matrix, test_matrix
 
-    bipartite_connect = True
 
-    # Cache path checking
-    if not os.path.exists(f'dataset/{config["dataset"]}'):
-        os.makedirs(f'dataset/{config["dataset"]}')
+def calculate_ndcg(y_true, y_scores, k=10):
+    """Calculate NDCG@k_values"""
+    if len(y_true) == 0:
+        return 0.0
 
-    # Get or load community labels
-    if f'user_labels_undir_bip{bipartite_connect}_Leiden.csv' not in os.listdir(f'dataset/{config["dataset"]}'):
-        config.variable_config_dict['user_com_labels'], config.variable_config_dict[
-            'item_com_labels'] = get_community_labels(
-            adj_np=adj_np,
-            save_path=f'dataset/{config["dataset"]}',
-            get_probs=True
+    # Create relevance scores (1 for relevant, 0 for non-relevant)
+    relevance_scores = np.zeros(len(y_scores))
+    relevance_scores[y_true] = 1
+
+    # Get top-k_values predictions
+    top_k_indices = np.argsort(y_scores)[::-1][:k]
+    top_k_relevance = relevance_scores[top_k_indices]
+
+    if np.sum(top_k_relevance) == 0:
+        return 0.0
+
+    # Calculate DCG@k_values
+    dcg = np.sum((2 ** top_k_relevance - 1) / np.log2(np.arange(2, k + 2)))
+
+    # Calculate IDCG@k_values
+    ideal_relevance = np.sort(relevance_scores)[::-1][:k]
+    idcg = np.sum((2 ** ideal_relevance - 1) / np.log2(np.arange(2, k + 2)))
+
+    if idcg == 0:
+        return 0.0
+
+    return dcg / idcg
+
+
+def evaluate_current_model_ndcg(model, dataset, k=10):
+    """
+    only get ndcg for early stopping, minimum calculations
+    only necessary steps to calculate ndcg = calculate_ndcg(true_items, scores_filtered, k) for val_df
+    """
+    model.eval()
+
+    ndcg_scores = []
+
+    # Create a set of training interactions for each user to exclude from evaluation
+    train_user_items = dataset.train_df.groupby('user_encoded')['item_encoded'].apply(list).to_dict()
+
+    with torch.no_grad():
+        user_emb, item_emb = model(dataset.complete_edge_index, dataset.complete_edge_weight)
+
+        user_val_items = dataset.val_df.groupby('user_encoded')['item_encoded'].apply(list).to_dict()
+
+        for user_id, true_items in user_val_items.items():
+            if user_id >= dataset.num_users:
+                continue
+
+            user_embedding = user_emb[user_id:user_id + 1]
+            scores = torch.matmul(user_embedding, item_emb.T).squeeze().cpu().numpy()
+
+            # Exclude items that the user interacted with during training
+            train_items = list(train_user_items[user_id])
+            scores_filtered = scores.copy()
+            scores_filtered[train_items] = float('-inf')
+
+            ndcg = calculate_ndcg(true_items, scores_filtered, k)
+            ndcg_scores.append(ndcg)
+
+    return np.mean(ndcg_scores) if ndcg_scores else 0.0
+
+
+def vectorized_ndcg_at_k(y_true_matrix, y_pred_matrix, k=10):
+    """
+    Vectorized NDCG@K calculation for all users at once
+
+    Args:
+        y_true_matrix: sparse matrix (num_users x num_items) with ground truth
+        y_pred_matrix: dense matrix (num_users x num_items) with predictions
+        k: top-k for NDCG calculation
+
+    Returns:
+        ndcg_scores: array of NDCG scores for each user
+    """
+    num_users, num_items = y_pred_matrix.shape
+    ndcg_scores = np.zeros(num_users)
+
+    # Convert sparse to dense for ground truth
+    y_true_dense = y_true_matrix.toarray()
+
+    # Get top-k predictions for all users at once
+    top_k_indices = np.argpartition(-y_pred_matrix, k - 1, axis=1)[:, :k]
+
+    # Vectorized NDCG calculation
+    for user_idx in range(num_users):
+        if y_true_matrix[user_idx].nnz == 0:  # No ground truth items
+            continue
+
+        # Get top-k items for this user
+        user_top_k = top_k_indices[user_idx]
+        user_pred_scores = y_pred_matrix[user_idx, user_top_k]
+
+        # Sort by prediction scores (descending)
+        sorted_indices = np.argsort(-user_pred_scores)
+        sorted_items = user_top_k[sorted_indices]
+
+        # Get relevance scores (binary: 1 if in ground truth, 0 otherwise)
+        relevance = y_true_dense[user_idx, sorted_items]
+
+        # Calculate DCG
+        dcg = np.sum(relevance / np.log2(np.arange(2, len(relevance) + 2)))
+
+        # Calculate IDCG (ideal DCG)
+        ideal_relevance = np.sort(y_true_dense[user_idx])[::-1][:k]
+        idcg = np.sum(ideal_relevance / np.log2(np.arange(2, len(ideal_relevance) + 2)))
+
+        # Calculate NDCG
+        if idcg > 0:
+            ndcg_scores[user_idx] = dcg / idcg
+
+    # Return mean NDCG for users with ground truth items
+    valid_users = y_true_matrix.getnnz(axis=1) > 0
+    return np.mean(ndcg_scores[valid_users]) if np.any(valid_users) else 0.0
+
+
+def evaluate_model_vectorized(model, train_matrix, test_matrix, model_type, device, dataset=None, k=10):
+    """Vectorized model evaluation"""
+    model.eval()
+    num_users, num_items = train_matrix.shape
+
+    with torch.no_grad():
+        if model_type == 'ItemKNN':
+            # Batch prediction for all users
+            predictions = np.zeros((num_users, num_items))
+
+            # Process users in batches to manage memory
+            batch_size = 1000
+            for start_idx in range(0, num_users, batch_size):
+                end_idx = min(start_idx + batch_size, num_users)
+
+                for user_idx in range(start_idx, end_idx):
+                    if train_matrix[user_idx].nnz > 0:  # User has training interactions
+                        user_predictions = model.predict(user_idx)
+                        predictions[user_idx] = user_predictions
+
+            # Mask training items (set to -inf)
+            train_mask = train_matrix.toarray() > 0
+            predictions[train_mask] = -np.inf
+
+        elif model_type == 'LightGCN':
+            # Use the optimized LightGCN evaluation
+            if dataset is not None:
+                return evaluate_current_model_ndcg(model, dataset, k)
+            else:
+                # Fallback to original method if dataset not provided
+                user_embs = model.user_embedding.weight.detach()  # (num_users, emb_dim)
+                item_embs = model.item_embedding.weight.detach()  # (num_items, emb_dim)
+
+                # Batch matrix multiplication for all predictions
+                predictions = torch.mm(user_embs, item_embs.t()).cpu().numpy()  # (num_users, num_items)
+
+                # Mask training items
+                train_mask = train_matrix.toarray() > 0
+                predictions[train_mask] = -np.inf
+
+        elif model_type == 'MultiVAE':
+            # Batch process all users
+            train_tensor = torch.FloatTensor(train_matrix.toarray()).to(device)
+
+            # Process in batches to manage GPU memory
+            predictions = np.zeros((num_users, num_items))
+            batch_size = 500
+
+            for start_idx in range(0, num_users, batch_size):
+                end_idx = min(start_idx + batch_size, num_users)
+                batch_users = train_tensor[start_idx:end_idx]
+
+                # Forward pass for batch
+                recon_batch, _, _ = model(batch_users)
+                batch_predictions = recon_batch.detach().cpu().numpy()
+
+                predictions[start_idx:end_idx] = batch_predictions
+
+            # Mask training items
+            train_mask = train_matrix.toarray() > 0
+            predictions[train_mask] = -np.inf
+
+    # For LightGCN, we already returned the NDCG score above
+    if model_type == 'LightGCN' and dataset is not None:
+        return evaluate_current_model_ndcg(model, dataset, k)
+
+    # Calculate NDCG using vectorized function for other models
+    return vectorized_ndcg_at_k(test_matrix, predictions, k)
+
+
+def create_edge_index(df, num_users):
+    """Create edge index for GNN models"""
+    users = df['user_encoded'].values
+    items = df['item_encoded'].values + num_users  # Offset items
+
+    # Create bidirectional edges
+    edge_index = torch.stack([
+        torch.tensor(np.concatenate([users, items]), dtype=torch.long),
+        torch.tensor(np.concatenate([items, users]), dtype=torch.long)
+    ], dim=0)
+
+    return edge_index
+
+
+def train_lightgcn_efficient(model, dataset, device, epochs=30, lr=0.001, batch_size=1024):
+    """Fixed LightGCN training - compute embeddings inside each batch"""
+    model.train()
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+
+    # Create edge index once
+    edge_index = create_edge_index(dataset.train_df, dataset.num_users).to(device)
+
+    # Prepare training data
+    users = torch.tensor(dataset.train_df['user_encoded'].values, dtype=torch.long)
+    pos_items = torch.tensor(dataset.train_df['item_encoded'].values, dtype=torch.long)
+
+    # Create dataset and dataloader for efficient batching
+    train_dataset = torch.utils.data.TensorDataset(users, pos_items)
+    dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+
+    for epoch in range(epochs):
+        total_loss = 0
+        num_batches = 0
+
+        for batch_users, batch_pos_items in dataloader:
+            batch_users = batch_users.to(device)
+            batch_pos_items = batch_pos_items.to(device)
+
+            # Vectorized negative sampling
+            batch_neg_items = torch.randint(0, model.num_items, (len(batch_users),), device=device)
+
+            # FIXED: Compute embeddings inside the batch loop
+            user_emb, item_emb = model(edge_index)
+
+            # Get embeddings for batch
+            user_batch_emb = user_emb[batch_users]
+            pos_item_batch_emb = item_emb[batch_pos_items]
+            neg_item_batch_emb = item_emb[batch_neg_items]
+
+            # Calculate BPR loss
+            loss = calculate_bpr_loss(user_batch_emb, pos_item_batch_emb, neg_item_batch_emb)
+
+            # Backward pass
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            total_loss += loss.item()
+            num_batches += 1
+
+        if epoch % 10 == 0:
+            print(f"Epoch {epoch}, Loss: {total_loss / num_batches:.4f}")
+
+
+def train_multivae_efficient(model, train_matrix, device, epochs=80, lr=0.001, batch_size=500, anneal_cap=0.2):
+    """Efficient MultiVAE training with sparse matrix input"""
+    model.train()
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+
+    # Convert sparse matrix to dense tensor (only once)
+    train_tensor = torch.FloatTensor(train_matrix.toarray())
+    train_dataset = torch.utils.data.TensorDataset(train_tensor)
+    dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+
+    for epoch in range(epochs):
+        total_loss = 0
+        num_batches = 0
+
+        # Annealing factor
+        anneal = min(anneal_cap, 1.0 * epoch / 200)
+
+        for batch_data, in dataloader:
+            batch_data = batch_data.to(device)
+
+            # Forward pass
+            recon_batch, mu, logvar = model(batch_data)
+
+            # Calculate loss
+            loss = multivae_loss(recon_batch, batch_data, mu, logvar, anneal)
+
+            # Backward pass
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            total_loss += loss.item()
+            num_batches += 1
+
+        if epoch % 20 == 0:
+            print(f"Epoch {epoch}, Loss: {total_loss / num_batches:.4f}")
+
+
+def hyperparameter_search():
+    """Efficient hyperparameter search for all models using RecommendationDataset"""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--batch_size", type=int, default=512)
+    parser.add_argument("--dataset", type=str, default="ml-100k", help="Dataset name")
+    parser.add_argument("--models", type=str, nargs='+', default=['ItemKNN', 'MultiVAE'],
+                        help="Models to search: LightGCN, ItemKNN, MultiVAE")
+    # LightGCN
+    parser.add_argument("--embedding_dim", type=int, default=128)
+    parser.add_argument("--n_layers", type=int, default=3)
+    # ItemKNN
+    parser.add_argument("--item_knn_topk", type=int, default=250)
+    parser.add_argument("--shrink", type=int, default=10)
+    # MultiVAE
+    parser.add_argument("--hidden_dimension", type=int, default=800)
+    parser.add_argument("--anneal_cap", type=float, default=0.2)
+
+    args = parser.parse_args()
+
+    # Generate unique run ID based on timestamp and dataset
+    import datetime
+    run_id = f"{args.dataset}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    print(f"Run ID: {run_id}")
+
+    # Load dataset using RecommendationDataset
+    print("Loading dataset...")
+    if args.dataset == "LFM1M":
+        dataset = RecommendationDataset(
+            name='lfm',
+            data_path='dataset/LFM1M/preprocessed',
+            min_interactions=5
         )
     else:
-        config.variable_config_dict['user_com_labels'] = torch.tensor(
-            np.loadtxt(f'dataset/{config["dataset"]}/user_labels_undir_bip{bipartite_connect}_Leiden.csv'),
-            dtype=torch.int64, device=device
-        )
-        config.variable_config_dict['item_com_labels'] = torch.tensor(
-            np.loadtxt(f'dataset/{config["dataset"]}/item_labels_undir_bip{bipartite_connect}_Leiden.csv'),
-            dtype=torch.int64, device=device
+        dataset = RecommendationDataset(
+            name=args.dataset.lower(),
+            min_interactions=5
         )
 
-    # Get or load power users/items
-    if f'power_users_ids_com_wise_{do_power_nodes_from_community}_top{users_top_percent}users.csv' not in os.listdir(
-            f'dataset/{config["dataset"]}') or \
-            f'power_items_ids_com_wise_{do_power_nodes_from_community}_top{items_top_percent}items.csv' not in os.listdir(
-        f'dataset/{config["dataset"]}'):
-        config.variable_config_dict['power_users_ids'], config.variable_config_dict[
-            'power_items_ids'] = get_power_users_items(
-            adj_tens=torch.tensor(adj_np, device=device),
-            user_com_labels=config.variable_config_dict['user_com_labels'],
-            item_com_labels=config.variable_config_dict['item_com_labels'],
-            users_top_percent=users_top_percent,
-            items_top_percent=items_top_percent,
-            do_power_nodes_from_community=do_power_nodes_from_community,
-            save_path=f'dataset/{config["dataset"]}'
-        )
-    else:
-        config.variable_config_dict['power_users_ids'] = torch.tensor(
-            np.loadtxt(
-                f'dataset/{config["dataset"]}/power_users_ids_com_wise_{do_power_nodes_from_community}_top{users_top_percent}users.csv'),
-            dtype=torch.int64, device=device
-        )
-        config.variable_config_dict['power_items_ids'] = torch.tensor(
-            np.loadtxt(
-                f'dataset/{config["dataset"]}/power_items_ids_com_wise_{do_power_nodes_from_community}_top{items_top_percent}items.csv'),
-            dtype=torch.int64, device=device
-        )
+    # Load and prepare data
+    dataset.load_data()
+    dataset.prepare_data()
 
-    # Calculate community average degrees
-    config.variable_config_dict['com_avg_dec_degrees'] = torch.zeros(
-        torch.max(config.variable_config_dict['user_com_labels']) + 1, device=device)
-    adj_tens = torch.tensor(adj_np, device=device)
-    for com_label in torch.unique(config.variable_config_dict['user_com_labels']):
-        nr_nodes_in_com = torch.count_nonzero(config.variable_config_dict['user_com_labels'] == com_label)
-        nr_edges_in_com = torch.sum(config.variable_config_dict['user_com_labels'][adj_tens[:, 0]] == com_label)
-        # decimal_avg_degree_com_label = nr_edges_in_com / nr_nodes_in_com / nr_nodes_in_com
-        # config.variable_config_dict['com_avg_dec_degrees'][com_label] = decimal_avg_degree_com_label
+    # Use fold 0 for hyperparameter search
+    dataset.train_df = dataset.train_val_df
+    dataset.val_df = dataset.test_df
 
-    return train_data, valid_data, test_data
+    # Create sparse matrices once
+    train_matrix, test_matrix = create_sparse_matrices(
+        dataset.train_df, dataset.val_df, dataset.num_users, dataset.num_items
+    )
 
-
-def create_model(model_name, config, train_data):
-    """Create a recommendation model based on model name"""
-    if model_name == 'LightGCN':
-        return LightGCN(config, train_data.dataset).to(config['device'])
-    elif model_name == 'ItemKNN':
-        return ItemKNN(config, train_data.dataset).to(config['device'])
-    elif model_name == 'MultiVAE':
-        return MultiVAE(config, train_data.dataset).to(config['device'])
-    else:
-        raise ValueError(f"Model {model_name} not supported")
-
-
-def objective(trial):
-    """Optuna objective function for hyperparameter optimization"""
-    # Sample hyperparameters
-    torch.cuda.empty_cache()
-
-    model_name = trial.suggest_categorical("model_name", ["LightGCN"])
-    users_dec_perc_drop = trial.suggest_categorical("users_dec_perc_drop", [0.0, 0.1])
-    items_dec_perc_drop = trial.suggest_categorical("items_dec_perc_drop", [0.0, 0.2])
-    community_dropout_strength = trial.suggest_categorical("community_dropout_strength", [0.0, 0.5, 0.9])
-    do_power_nodes_from_community = True
-    DATASET_NAME = "ml-100k"
-
-    set_seed(SEED)
-
-    # Load base config
-    config_file = load_config(DATASET_NAME)
-
-    # Setup device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
+    print(f"Dataset: {dataset.num_users} users, {dataset.num_items} items")
+    print(f"Train: {len(dataset.train_df)} interactions, Val: {len(dataset.val_df)} interactions")
 
-    # Initialize config
-    config = Config(
-        model=model_name,
-        dataset=DATASET_NAME,
-        config_file_list=[f'{DATASET_NAME}_config.yaml'],
-        config_dict={
-            'users_dec_perc_drop': users_dec_perc_drop,
-            'items_dec_perc_drop': items_dec_perc_drop,
-            'community_dropout_strength': community_dropout_strength
+    # Initialize results dictionaries for each model
+    all_results = {model: [] for model in args.models}
+    best_results = {}
+
+    # Define hyperparameter spaces
+    hyperparams = {
+        'LightGCN': {
+            'embedding_dim': [64, 128],
+            'n_layers': [3, 4],
+            'batch_size': [1024]  # Larger batches for efficiency
+        },
+        'ItemKNN': {
+            'topk': [100, 200, 300, 400],
+            'shrink': [15, 30, 50, 75, 100]
+        },
+        'MultiVAE': {
+            'hidden_dimension': [600, 800, 1000],
+            'anneal_cap': [0.2, 0.35, 0.5],
+            'batch_size': [4096]  # Larger batches for efficiency
         }
-    )
-    config['device'] = device
+    }
 
-    # Initialize WandB for this trial
-    trial_name = f"{model_name}_{DATASET_NAME}_u{users_dec_perc_drop}_i{items_dec_perc_drop}_c{community_dropout_strength}_trial{trial.number}"
-    wandb.init(
-        project="RecSys_HPSearch",
-        name=trial_name,
-        config={
-            "epochs": config_file['epochs'],
-            "dataset": DATASET_NAME,
-            "model": model_name,
-            "users_top_percent": USERS_TOP_PERCENT,
-            "items_top_percent": ITEMS_TOP_PERCENT,
-            "users_dec_perc_drop": users_dec_perc_drop,
-            "items_dec_perc_drop": items_dec_perc_drop,
-            "community_dropout_strength": community_dropout_strength,
-            "do_power_nodes_from_community": do_power_nodes_from_community,
-            "batch_size": config_file['train_batch_size'],
-            "TopK": config_file['topk'],
-            "trial": trial.number
-        }
-    )
+    # Search LightGCN
+    if 'LightGCN' in args.models:
+        print("\n=== Searching LightGCN Hyperparameters ===")
+        best_lightgcn_ndcg = 0
+        best_lightgcn_params = {}
 
-    # Prepare data and communities
-    train_data, valid_data, test_data = prepare_data_and_communities(
-        config, device, USERS_TOP_PERCENT, ITEMS_TOP_PERCENT, do_power_nodes_from_community
-    )
+        for emb_dim, n_layers, batch_size in itertools.product(
+                hyperparams['LightGCN']['embedding_dim'],
+                hyperparams['LightGCN']['n_layers'],
+                hyperparams['LightGCN']['batch_size']
+        ):
+            print(f"Testing LightGCN: emb_dim={emb_dim}, n_layers={n_layers}, batch_size={batch_size}")
 
-    # Create and train model
-    model = create_model(model_name, config, train_data)
-    logger = getLogger()
-    logger.info(model)
+            model = LightGCN(
+                num_users=dataset.num_users,
+                num_items=dataset.num_items,
+                embedding_dim=emb_dim,
+                num_layers=n_layers
+            ).to(device)
 
-    # Use PowerDropoutTrainer for training (or regular Trainer if needed)
-    trainer = PowerDropoutTrainer(config, model)
-    # trainer = Trainer(config, model)  # Alternative
+            start_time = time.time()
+            train_lightgcn_efficient(model, dataset, device, epochs=30, batch_size=batch_size)
+            training_time = time.time() - start_time
 
-    best_valid_score, best_valid_result = trainer.fit(
-        train_data, valid_data, saved=True, show_progress=config['show_progress']
-    )
+            ndcg = evaluate_model_vectorized(model, train_matrix, test_matrix, 'LightGCN', device, dataset)
 
-    # Log results to WandB
-    wandb.log({
-        "best_valid_score": best_valid_score,
-        **best_valid_result
-    })
+            result = {
+                'model': 'LightGCN',
+                'embedding_dim': emb_dim,
+                'n_layers': n_layers,
+                'batch_size': batch_size,
+                'ndcg@10': ndcg,
+                'training_time': training_time,
+                'run_id': run_id
+            }
+            all_results['LightGCN'].append(result)
 
-    # Clean up
-    # del model
-    # del trainer
-    # del model
-    del train_data
-    del valid_data
-    del test_data
-    wandb.finish()
-    gc.collect()
-    torch.cuda.empty_cache()
+            print(f"NDCG@10: {ndcg:.4f}, Time: {training_time:.2f}s")
 
-    # Return metric to optimize (using whichever metric is most important)
-    # Assuming we want to maximize NDCG@50
-    return best_valid_result.get(f"ndcg@{config_file['topk']}", 0.0)
+            if ndcg > best_lightgcn_ndcg:
+                best_lightgcn_ndcg = ndcg
+                best_lightgcn_params = result
+
+            # Clear GPU memory
+            del model
+            torch.cuda.empty_cache() if torch.cuda.is_available() else None
+
+        best_results['LightGCN'] = best_lightgcn_params
+
+        # Save LightGCN results immediately
+        save_model_results('LightGCN', all_results['LightGCN'], best_lightgcn_params, run_id, dataset)
+
+    # Search ItemKNN
+    if 'ItemKNN' in args.models:
+        print("\n=== Searching ItemKNN Hyperparameters ===")
+        best_itemknn_ndcg = 0
+        best_itemknn_params = {}
+
+        for topk, shrink in itertools.product(
+                hyperparams['ItemKNN']['topk'],
+                hyperparams['ItemKNN']['shrink']
+        ):
+            print(f"Testing ItemKNN: topk={topk}, shrink={shrink}")
+
+            model = ItemKNN(
+                num_items=dataset.num_items,
+                num_users=dataset.num_users,
+                k=topk,
+                shrink=shrink
+            )
+
+            start_time = time.time()
+            # Prepare interactions for ItemKNN
+
+            model.fit(dataset.train_df[['user_encoded', 'item_encoded', 'rating']].values)
+            training_time = time.time() - start_time
+
+            ndcg = evaluate_model_vectorized(model, train_matrix, test_matrix, 'ItemKNN', device)
+
+            result = {
+                'model': 'ItemKNN',
+                'topk': topk,
+                'shrink': shrink,
+                'ndcg@10': ndcg,
+                'training_time': training_time,
+                'run_id': run_id
+            }
+            all_results['ItemKNN'].append(result)
+
+            print(f"NDCG@10: {ndcg:.4f}, Time: {training_time:.2f}s")
+
+            if ndcg > best_itemknn_ndcg:
+                best_itemknn_ndcg = ndcg
+                best_itemknn_params = result
+
+        best_results['ItemKNN'] = best_itemknn_params
+
+        # Save ItemKNN results immediately
+        save_model_results('ItemKNN', all_results['ItemKNN'], best_itemknn_params, run_id, dataset)
+
+    # Search MultiVAE
+    if 'MultiVAE' in args.models:
+        print("\n=== Searching MultiVAE Hyperparameters ===")
+        best_multivae_ndcg = 0
+        best_multivae_params = {}
+
+        for hidden_dim, anneal_cap, batch_size in itertools.product(
+                hyperparams['MultiVAE']['hidden_dimension'],
+                hyperparams['MultiVAE']['anneal_cap'],
+                hyperparams['MultiVAE']['batch_size']
+        ):
+            print(f"Testing MultiVAE: hidden_dim={hidden_dim}, anneal_cap={anneal_cap}, batch_size={batch_size}")
+
+            model = MultiVAE(
+                p_dims=[200, hidden_dim, dataset.num_items],  # latent_dim=200
+                dropout=0.5
+            ).to(device)
+
+            start_time = time.time()
+            train_multivae_efficient(model, train_matrix, device, epochs=80, batch_size=batch_size,
+                                     anneal_cap=anneal_cap)
+            training_time = time.time() - start_time
+
+            ndcg = evaluate_model_vectorized(model, train_matrix, test_matrix, 'MultiVAE', device)
+
+            result = {
+                'model': 'MultiVAE',
+                'hidden_dimension': hidden_dim,
+                'anneal_cap': anneal_cap,
+                'batch_size': batch_size,
+                'ndcg@10': ndcg,
+                'training_time': training_time,
+                'run_id': run_id
+            }
+            all_results['MultiVAE'].append(result)
+
+            print(f"NDCG@10: {ndcg:.4f}, Time: {training_time:.2f}s")
+
+            if ndcg > best_multivae_ndcg:
+                best_multivae_ndcg = ndcg
+                best_multivae_params = result
+
+            # Clear GPU memory
+            del model
+            torch.cuda.empty_cache() if torch.cuda.is_available() else None
+
+        best_results['MultiVAE'] = best_multivae_params
+
+        # Save MultiVAE results immediately
+        save_model_results('MultiVAE', all_results['MultiVAE'], best_multivae_params, run_id, dataset)
+
+    # Print final summary
+    print_final_summary(best_results, run_id)
+
+    # Save combined summary
+    save_combined_summary(all_results, best_results, run_id, dataset, args)
 
 
-def run_hyperparameter_search():
-    """Run the hyperparameter search"""
-    set_seed(SEED)
+def save_model_results(model_name, model_results, best_params, run_id, dataset):
+    """Save results for a specific model immediately after completion"""
+    filename = f'results_{model_name}_{run_id}.txt'
 
-    # Create an Optuna study that maximizes the objective
-    study = optuna.create_study(direction="maximize",
-                                pruner=optuna.pruners.MedianPruner(n_warmup_steps=3))
+    with open(filename, 'w') as f:
+        f.write(f"Hyperparameter Search Results - {model_name}\n")
+        f.write("=" * 50 + "\n\n")
 
-    study.optimize(objective, n_trials=N_TRIALS)
+        f.write(f"Run ID: {run_id}\n")
+        f.write(f"Model: {model_name}\n")
+        f.write(f"Dataset: {dataset.num_users} users, {dataset.num_items} items\n")
+        f.write(f"Train interactions: {len(dataset.train_df)}\n")
+        f.write(f"Validation interactions: {len(dataset.val_df)}\n\n")
 
-    optuna.visualization.plot_param_importances(study).write_html("param_importances.html")
-    optuna.visualization.plot_optimization_history(study).write_html("optimization_history.html")
+        # Performance summary
+        total_time = sum(r['training_time'] for r in model_results)
+        f.write(f"Total {model_name} Search Time: {total_time:.2f} seconds\n")
+        f.write(f"Average Time per Experiment: {total_time / len(model_results):.2f} seconds\n")
+        f.write(f"Number of Experiments: {len(model_results)}\n\n")
 
-    # Print results
-    print("Best trial:")
-    trial = study.best_trial
-    print(f"  Value: {trial.value}")
-    print("  Params: ")
-    for key, value in trial.params.items():
-        print(f"    {key}: {value}")
+        # Best result
+        f.write(f"BEST {model_name} RESULT:\n")
+        f.write("-" * 25 + "\n")
+        f.write(f"NDCG@10: {best_params['ndcg@10']:.4f}\n")
+        f.write("Parameters:\n")
+        for key, value in best_params.items():
+            if key not in ['model', 'ndcg@10', 'training_time', 'run_id']:
+                f.write(f"  {key}: {value}\n")
+        f.write(f"Training Time: {best_params['training_time']:.2f} seconds\n\n")
 
-    # Log best hyperparameters to a file
-    with open(f"best_hyperparams_{DATASET_NAME}.yaml", "w") as f:
-        yaml.dump(trial.params, f)
+        # All results sorted by NDCG@10
+        f.write(f"ALL {model_name} RESULTS (sorted by NDCG@10):\n")
+        f.write("-" * 40 + "\n")
+        for result in sorted(model_results, key=lambda x: x['ndcg@10'], reverse=True):
+            f.write(f"NDCG@10: {result['ndcg@10']:.4f} | ")
+            f.write(f"Time: {result['training_time']:.2f}s | ")
+            params = {k: v for k, v in result.items()
+                      if k not in ['model', 'ndcg@10', 'training_time', 'run_id']}
+            f.write(f"Params: {params}\n")
+
+    print(f"✓ {model_name} results saved to '{filename}'")
+
+
+def print_final_summary(best_results, run_id):
+    """Print final summary of all models"""
+    print("\n" + "=" * 80)
+    print("FINAL HYPERPARAMETER SEARCH SUMMARY")
+    print("=" * 80)
+    print(f"Run ID: {run_id}")
+
+    if not best_results:
+        print("No models were searched.")
+        return
+
+    # Find overall best model
+    overall_best = max(best_results.items(), key=lambda x: x[1]['ndcg@10'])
+
+    print(f"\n🏆 OVERALL BEST MODEL: {overall_best[0]} (NDCG@10: {overall_best[1]['ndcg@10']:.4f})\n")
+
+    # Print best for each model
+    for model_name, best_params in best_results.items():
+        print(f"{model_name}: NDCG@10 = {best_params['ndcg@10']:.4f}")
+        for key, value in best_params.items():
+            if key not in ['model', 'ndcg@10', 'training_time', 'run_id']:
+                print(f"  {key}: {value}")
+        print(f"  training_time: {best_params['training_time']:.2f}s")
+        print()
+
+
+def save_combined_summary(all_results, best_results, run_id, dataset, args):
+    """Save combined summary of all models"""
+    filename = f'results_summary_{run_id}.txt'
+
+    with open(filename, 'w') as f:
+        f.write("HYPERPARAMETER SEARCH SUMMARY - ALL MODELS\n")
+        f.write("=" * 60 + "\n\n")
+
+        f.write(f"Run ID: {run_id}\n")
+        f.write(f"Dataset: {args.dataset}\n")
+        f.write(f"Models Searched: {', '.join(args.models)}\n")
+        f.write(f"Users: {dataset.num_users}, Items: {dataset.num_items}\n")
+        f.write(f"Train interactions: {len(dataset.train_df)}\n")
+        f.write(f"Validation interactions: {len(dataset.val_df)}\n\n")
+
+        # Overall statistics
+        total_experiments = sum(len(results) for results in all_results.values())
+        total_time = sum(sum(r['training_time'] for r in results) for results in all_results.values())
+
+        f.write("SEARCH STATISTICS:\n")
+        f.write("-" * 20 + "\n")
+        f.write(f"Total Experiments: {total_experiments}\n")
+        f.write(f"Total Search Time: {total_time:.2f} seconds ({total_time / 60:.1f} minutes)\n")
+        f.write(f"Average Time per Experiment: {total_time / total_experiments:.2f} seconds\n\n")
+
+        # Best results summary
+        if best_results:
+            overall_best = max(best_results.items(), key=lambda x: x[1]['ndcg@10'])
+            f.write(f"🏆 OVERALL BEST: {overall_best[0]} (NDCG@10: {overall_best[1]['ndcg@10']:.4f})\n\n")
+
+        f.write("BEST RESULTS BY MODEL:\n")
+        f.write("-" * 25 + "\n")
+        for model_name, best_params in best_results.items():
+            f.write(f"{model_name}: NDCG@10 = {best_params['ndcg@10']:.4f}\n")
+            f.write(f"  Parameters: ")
+            params = {k: v for k, v in best_params.items()
+                      if k not in ['model', 'ndcg@10', 'training_time', 'run_id']}
+            f.write(f"{params}\n")
+            f.write(f"  Training Time: {best_params['training_time']:.2f}s\n\n")
+
+        # Model comparison table
+        f.write("MODEL COMPARISON TABLE:\n")
+        f.write("-" * 25 + "\n")
+        f.write(f"{'Model':<12} {'NDCG@10':<10} {'Time(s)':<10} {'Experiments':<12}\n")
+        f.write("-" * 50 + "\n")
+        for model_name in args.models:
+            if model_name in best_results:
+                best_ndcg = best_results[model_name]['ndcg@10']
+                best_time = best_results[model_name]['training_time']
+                num_exp = len(all_results[model_name])
+                f.write(f"{model_name:<12} {best_ndcg:<10.4f} {best_time:<10.2f} {num_exp:<12}\n")
+        f.write("\n")
+
+        # Individual result files created
+        f.write("INDIVIDUAL RESULT FILES:\n")
+        f.write("-" * 25 + "\n")
+        for model_name in args.models:
+            if model_name in all_results and all_results[model_name]:
+                f.write(f"results_{model_name}_{run_id}.txt\n")
+
+    print(f"✓ Combined summary saved to '{filename}'")
 
 
 if __name__ == "__main__":
-    run_hyperparameter_search()
+    hyperparameter_search()
 

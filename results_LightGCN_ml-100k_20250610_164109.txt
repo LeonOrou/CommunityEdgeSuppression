@@ -1,0 +1,28 @@
+Hyperparameter Search Results - LightGCN
+==================================================
+
+Run ID: ml-100k_20250610_164109
+Model: LightGCN
+Dataset: 942 users, 1303 items
+Train interactions: 44493
+Validation interactions: 10672
+
+Total LightGCN Search Time: 111.89 seconds
+Average Time per Experiment: 27.97 seconds
+Number of Experiments: 4
+
+BEST LightGCN RESULT:
+-------------------------
+NDCG@10: 0.2465
+Parameters:
+  embedding_dim: 128
+  n_layers: 3
+  batch_size: 1024
+Training Time: 27.43 seconds
+
+ALL LightGCN RESULTS (sorted by NDCG@10):
+----------------------------------------
+NDCG@10: 0.2465 | Time: 27.43s | Params: {'embedding_dim': 128, 'n_layers': 3, 'batch_size': 1024}
+NDCG@10: 0.2368 | Time: 27.55s | Params: {'embedding_dim': 64, 'n_layers': 3, 'batch_size': 1024}
+NDCG@10: 0.2358 | Time: 27.09s | Params: {'embedding_dim': 128, 'n_layers': 4, 'batch_size': 1024}
+NDCG@10: 0.2206 | Time: 29.83s | Params: {'embedding_dim': 64, 'n_layers': 4, 'batch_size': 1024}

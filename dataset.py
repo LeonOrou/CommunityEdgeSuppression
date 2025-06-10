@@ -147,10 +147,11 @@ class RecommendationDataset:
         if self.name.startswith('ml-'):
             if not os.path.exists(f'dataset/{self.name}/saved'):
                 os.makedirs(f'dataset/{self.name}/saved')
-
             self._load_movielens()
         elif self.name == 'lfm':
-            self._load_lastfm()
+            if not os.path.exists(f'dataset/{self.name}/saved'):
+                os.makedirs(f'dataset/{self.name}/saved')
+            self._load_lfm()
         else:
             raise ValueError(f"Unknown dataset: {self.name}")
 
@@ -158,7 +159,6 @@ class RecommendationDataset:
         return self
 
     def _load_movielens(self):
-        """Load MovieLens dataset"""
         if self.name == 'ml-100k':
             ratings_file = os.path.join(f'{self.data_path}', 'u.data')
             self.raw_df = pd.read_csv(ratings_file, sep='\t',
@@ -172,10 +172,12 @@ class RecommendationDataset:
         # we shuffle later with indices
         # self.raw_df = self.raw_df.sample(frac=1, random_state=42).reset_index(drop=True)
 
-    def _load_lastfm(self):
-        """Load Last.fm dataset"""
-        # Implement Last.fm specific loading
-        pass
+    def _load_lfm(self):
+        if self.name == 'lfm':
+            ratings_file = os.path.join(self.data_path, 'interactions.csv')
+            self.raw_df = pd.read_csv(ratings_file, sep=',',
+                                      names=['user_id', 'item_id', 'rating'],
+                                      usecols=[0, 1, 2], header=None)
 
     def calculate_item_popularities(self):
         """Calculate item popularities based on interaction counts"""
@@ -194,19 +196,22 @@ class RecommendationDataset:
         min_interactions = 5
         min_rating = 4
 
-        user_counts = ratings_df['user_id'].value_counts()
-        item_counts = ratings_df['item_id'].value_counts()
+        if ratings_df['rating'].all() != 1:
+            user_counts = ratings_df['user_id'].value_counts()
+            item_counts = ratings_df['item_id'].value_counts()
 
-        valid_users = user_counts[user_counts >= min_interactions].index
-        valid_items = item_counts[item_counts >= min_interactions].index
+            valid_users = user_counts[user_counts >= min_interactions].index
+            valid_items = item_counts[item_counts >= min_interactions].index
 
-        filtered_df = ratings_df[
-            (ratings_df['user_id'].isin(valid_users)) &
-            (ratings_df['item_id'].isin(valid_items))
-            ].copy()
+            filtered_df = ratings_df[
+                (ratings_df['user_id'].isin(valid_users)) &
+                (ratings_df['item_id'].isin(valid_items))
+                ].copy()
 
-        filtered_df = filtered_df[filtered_df['rating'] >= min_rating].reset_index(drop=True)
-        filtered_df['rating'] = 1  # Treat all valid ratings as positive interactions
+            filtered_df = filtered_df[filtered_df['rating'] >= min_rating].reset_index(drop=True)
+            filtered_df['rating'] = 1  # Treat all valid ratings as positive interactions
+        else:
+            filtered_df = ratings_df.copy()
 
         # This ensures consistent encoding across all splits
         user_encoder = LabelEncoder()
@@ -487,10 +492,10 @@ class RecommendationDataset:
             edge_weights = df['rating'].values
 
         # Create bidirectional edges (user->item and item->user)
-        edge_index = torch.tensor([
-            np.concatenate([users, items]),
-            np.concatenate([items, users])
-        ], dtype=torch.long)
+        edge_index = torch.stack([
+            torch.tensor(np.concatenate([users, items]), dtype=torch.long),
+            torch.tensor(np.concatenate([items, users]), dtype=torch.long)
+        ], dim=0)
 
         edge_weight = torch.tensor(
             np.concatenate([edge_weights, edge_weights]),

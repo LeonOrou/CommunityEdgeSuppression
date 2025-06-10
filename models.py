@@ -1,17 +1,16 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn import MessagePassing
-from RecSys_PyTorch.models.BaseModel import BaseModel
 import numpy as np
-import scipy.sparse as sp
 from torch_geometric.utils import degree
-from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.preprocessing import normalize
+from scipy.sparse import csr_matrix
+import scipy.sparse as sp
 
 
 # Custom LightGCN implementation with edge weights
 class LightGCN(nn.Module):
-    def __init__(self, num_users, num_items, embedding_dim=64, num_layers=3, reg=1e-5):
+    def __init__(self, num_users, num_items, embedding_dim=12, num_layers=3, reg=1e-5):
         super().__init__()
         self.num_users = num_users
         self.num_items = num_items
@@ -88,255 +87,267 @@ def calculate_bpr_loss(user_emb, pos_item_emb, neg_item_emb):
     return loss
 
 
-class ItemKNN(nn.Module):
-    def __init__(self, num_users, num_items, topk=350, shrink=12.5, feature_weighting='bm25'):
-        super(ItemKNN, self).__init__()
+import numpy as np
+import scipy.sparse as sp
+from sklearn.preprocessing import normalize
+from scipy.sparse import csr_matrix, coo_matrix
+import warnings
+
+
+class ItemKNN:
+    def __init__(self, num_users, num_items, k=50, shrink=100, bm25_k1=1.2, bm25_b=0.75):
+        """
+        Weighted ItemKNN with BM25 feature weighting for sparse matrices.
+
+        Args:
+            num_users: Number of users
+            num_items: Number of items
+            k: Number of nearest neighbors
+            shrink: Shrinkage parameter for similarity computation
+            bm25_k1: BM25 k1 parameter (controls term frequency saturation)
+            bm25_b: BM25 b parameter (controls length normalization)
+        """
         self.num_users = num_users
         self.num_items = num_items
-
-        self.topk = topk
+        self.k = k
         self.shrink = shrink
-        self.feature_weighting = feature_weighting
-        assert self.feature_weighting in ['tf-idf', 'bm25', 'none']
+        self.bm25_k1 = bm25_k1
+        self.bm25_b = bm25_b
+        self.similarity_matrix = None
+        self.user_item_matrix = None
 
-    def fit_knn(self, train_matrix, block_size=500):
-        if self.feature_weighting == 'tf-idf':
-            train_matrix = self.TF_IDF(train_matrix.T).T
-        elif self.feature_weighting == 'bm25':
-            train_matrix = self.okapi_BM25(train_matrix.T).T
+    def _compute_bm25_weights(self, user_item_matrix):
+        """
+        Compute BM25 weights for the user-item matrix.
+        """
+        # Convert to CSR for efficient operations
+        if not isinstance(user_item_matrix, csr_matrix):
+            user_item_matrix = user_item_matrix.tocsr()
 
-        train_matrix = train_matrix.tocsc()
-        # computed weighted cosine similarity
-        train_matrix = self._compute_cosine_similarity(train_matrix)
+        # Number of items each user has interacted with (document lengths)
+        item_lengths = np.array(user_item_matrix.sum(axis=0)).flatten()
+        avg_length = item_lengths.mean()
 
-        num_items = train_matrix.shape[1]
+        # Number of users who interacted with each item (document frequencies)
+        df = np.array((user_item_matrix > 0).sum(axis=0)).flatten()
 
-        start_col_local = 0
-        end_col_local = num_items
+        # Compute IDF
+        idf = np.log((self.num_users - df + 0.5) / (df + 0.5) + 1.0)
 
-        start_col_block = start_col_local
+        # Create BM25 weighted matrix
+        rows, cols = user_item_matrix.nonzero()
+        data = user_item_matrix.data
 
-        block_size = block_size.copy()
+        # Compute BM25 scores
+        bm25_scores = []
+        for idx, (user, item, weight) in enumerate(zip(rows, cols, data)):
+            tf = weight
+            doc_len = item_lengths[item]
 
-        sumOfSquared = np.array(train_matrix.power(2).sum(axis=0)).ravel()
-        sumOfSquared = np.sqrt(sumOfSquared)
+            # BM25 formula
+            numerator = idf[item] * tf * (self.bm25_k1 + 1)
+            denominator = tf + self.bm25_k1 * (1 - self.bm25_b + self.bm25_b * doc_len / avg_length)
+            bm25_score = numerator / denominator
+            bm25_scores.append(bm25_score)
 
-        values = []
+        bm25_matrix = csr_matrix((bm25_scores, (rows, cols)), shape=user_item_matrix.shape)
+        return bm25_matrix
+
+    def _weighted_cosine_similarity_sparse(self, bm25_matrix):
+        """
+        Compute weighted cosine similarity between items using sparse operations.
+        """
+        # Transpose to get item-user matrix
+        item_user_matrix = bm25_matrix.T.tocsr()
+
+        # Compute norms for each item
+        norms = np.sqrt(np.array(item_user_matrix.power(2).sum(axis=1)).flatten())
+
+        # Avoid division by zero
+        norms[norms == 0] = 1.0
+
+        # Normalize the matrix
+        item_user_normalized = item_user_matrix.multiply(1 / norms[:, np.newaxis])
+
+        # Compute similarity matrix (item x item)
+        similarity = item_user_normalized @ item_user_normalized.T
+
+        # Apply shrinkage
+        if self.shrink > 0:
+            # Get the number of common users between items
+            common_users = (item_user_matrix > 0).astype(float) @ (item_user_matrix > 0).T
+
+            # Apply shrinkage formula
+            shrink_factor = common_users.multiply(1 / (common_users + self.shrink))
+            similarity = similarity.multiply(shrink_factor)
+
+        # Set diagonal to 0 (item shouldn't be similar to itself)
+        similarity.setdiag(0)
+
+        return similarity.tocsr()
+
+    def fit(self, interactions):
+        """
+        Fit the model on interaction data.
+
+        Args:
+            interactions: torch tensor of shape (nr_interactions, 3) with
+                         columns [user_id, item_id, rating_weight]
+        """
+        # Convert torch tensor to numpy
+        if isinstance(interactions, torch.Tensor):
+            interactions_np = interactions.cpu().numpy()
+        else:
+            interactions_np = interactions
+
+        users = interactions_np[:, 0].astype(int)
+        items = interactions_np[:, 1].astype(int)
+        weights = interactions_np[:, 2].astype(float)
+
+        # Create sparse user-item matrix
+        self.user_item_matrix = csr_matrix(
+            (weights, (users, items)),
+            shape=(self.num_users, self.num_items)
+        )
+
+        # Apply BM25 weighting
+        bm25_matrix = self._compute_bm25_weights(self.user_item_matrix)
+
+        # Compute weighted cosine similarity
+        self.similarity_matrix = self._weighted_cosine_similarity_sparse(bm25_matrix)
+
+        # For each item, keep only top-k similar items
+        self._prune_similarity_matrix()
+
+    def _prune_similarity_matrix(self):
+        """
+        Keep only top-k similar items for each item to save memory.
+        """
         rows = []
         cols = []
-        while start_col_block < end_col_local:
-            end_col_block = min(start_col_block + block_size, end_col_local)
-            this_block_size = end_col_block - start_col_block
+        data = []
 
-            # All data points for a given item
-            # item_data: user, item blocks
-            item_data = train_matrix[:, start_col_block:end_col_block]
-            item_data = item_data.toarray().squeeze()
+        for item_idx in range(self.num_items):
+            # Get similarities for this item
+            item_similarities = self.similarity_matrix.getrow(item_idx).toarray().flatten()
 
-            # If only 1 feature avoid last dimension to disappear
-            if item_data.ndim == 1:
-                item_data = np.atleast_2d(item_data)
+            # Get top-k indices (excluding the item itself)
+            top_k_indices = np.argpartition(item_similarities, -self.k)[-self.k:]
+            top_k_indices = top_k_indices[item_similarities[top_k_indices] > 0]
 
-            this_block_weights = train_matrix.T.dot(item_data)
+            # Sort by similarity
+            top_k_indices = top_k_indices[np.argsort(item_similarities[top_k_indices])[::-1]]
 
-            for col_index_in_block in range(this_block_size):
-                # this_block_size: (item,)
-                # similarity between 'one block item' and whole items
-                if this_block_size == 1:
-                    this_column_weights = this_block_weights
-                else:
-                    this_column_weights = this_block_weights[:, col_index_in_block]
+            # Add to sparse matrix data
+            for neighbor_idx in top_k_indices:
+                rows.append(item_idx)
+                cols.append(neighbor_idx)
+                data.append(item_similarities[neighbor_idx])
 
-                # columnIndex = item index
-                # zero out self similarity
-                columnIndex = col_index_in_block + start_col_block
-                this_column_weights[columnIndex] = 0.0
+        # Create pruned similarity matrix
+        self.similarity_matrix = csr_matrix(
+            (data, (rows, cols)),
+            shape=(self.num_items, self.num_items)
+        )
 
-                # cosine similarity
-                # denominator = sqrt(l2_norm(rating_weights)) * sqrt(l2_norm(y))+ shrinkage + eps
-                denominator = sumOfSquared[columnIndex] * sumOfSquared + self.shrink + 1e-6
-                this_column_weights = np.multiply(this_column_weights, 1 / denominator)
+    def predict(self, user_ids, item_ids=None, n_items=10):
+        """
+        Predict ratings or get top-n recommendations.
 
-                relevant_items_partition = (-this_column_weights).argpartition(self.topk - 1)[0:self.topk]
-                relevant_items_partition_sorting = np.argsort(-this_column_weights[relevant_items_partition])
-                top_k_idx = relevant_items_partition[relevant_items_partition_sorting]
+        Args:
+            user_ids: User IDs to predict for (can be single ID or array)
+            item_ids: Specific items to predict ratings for (optional)
+            n_items: Number of items to recommend if item_ids is None
 
-                # Incrementally build sparse matrix, do not add zeros
-                notZerosMask = this_column_weights[top_k_idx] != 0.0
-                numNotZeros = np.sum(notZerosMask)
+        Returns:
+            If item_ids provided: predicted ratings
+            Otherwise: top-n item recommendations with scores
+        """
+        if np.isscalar(user_ids):
+            user_ids = [user_ids]
 
-                values.extend(this_column_weights[top_k_idx][notZerosMask])
-                rows.extend(top_k_idx[notZerosMask])
-                cols.extend(np.ones(numNotZeros) * columnIndex)
-
-            start_col_block += block_size
-
-        self.W_sparse = sp.csr_matrix((values, (rows, cols)),
-                                      shape=(num_items, num_items),
-                                      dtype=np.float32)
-
-    def fit(self, dataset, exp_config, evaluator=None, early_stop=None, loggers=None):
-        train_matrix = dataset.train_data
-        self.fit_knn(train_matrix)
-
-        output = train_matrix @ self.W_sparse
-
-        loss = F.binary_cross_entropy(torch.tensor(train_matrix.toarray()), torch.tensor(output.toarray()))
-
-        if evaluator is not None:
-            scores = evaluator.evaluate(self)
+        if item_ids is not None:
+            # Predict specific ratings
+            return self._predict_ratings(user_ids, item_ids)
         else:
-            scores = None
+            # Get top-n recommendations
+            return self._recommend_items(user_ids, n_items)
 
-        if loggers is not None:
-            if evaluator is not None:
-                for logger in loggers:
-                    logger.log_metrics(scores, epoch=1)
+    def _predict_ratings(self, user_ids, item_ids):
+        """
+        Predict ratings for specific user-item pairs.
+        """
+        predictions = []
 
-        return {'scores': scores, 'loss': loss}
+        for user_id in user_ids:
+            # Get user's item ratings
+            user_items = self.user_item_matrix.getrow(user_id)
 
-    def predict(self, eval_users, eval_pos, test_batch_size):
-        input_matrix = eval_pos.toarray()
-        preds = np.zeros_like(input_matrix)
+            if isinstance(item_ids, (list, np.ndarray)):
+                user_predictions = []
+                for item_id in item_ids:
+                    # Get similarities between target item and user's items
+                    item_similarities = self.similarity_matrix.getrow(item_id)
 
-        num_data = input_matrix.shape[0]
-        num_batches = int(np.ceil(num_data / test_batch_size))
-        perm = list(range(num_data))
-        for b in range(num_batches):
-            if (b + 1) * test_batch_size >= num_data:
-                batch_idx = perm[b * test_batch_size:]
+                    # Compute weighted average
+                    numerator = user_items.multiply(item_similarities).sum()
+                    denominator = np.abs(item_similarities.toarray()).sum()
+
+                    if denominator > 0:
+                        prediction = numerator / denominator
+                    else:
+                        prediction = 0.0
+
+                    user_predictions.append(prediction)
+                predictions.append(user_predictions)
             else:
-                batch_idx = perm[b * test_batch_size: (b + 1) * test_batch_size]
-            test_batch_matrix = input_matrix[batch_idx]
-            batch_pred_matrix = (test_batch_matrix @ self.W_sparse)
-            preds[batch_idx] = batch_pred_matrix
+                # Single item prediction
+                item_similarities = self.similarity_matrix.getrow(item_ids)
+                numerator = user_items.multiply(item_similarities).sum()
+                denominator = np.abs(item_similarities.toarray()).sum()
 
-        preds[eval_pos.nonzero()] = float('-inf')
+                if denominator > 0:
+                    prediction = numerator / denominator
+                else:
+                    prediction = 0.0
+                predictions.append(prediction)
 
-        return preds
+        return np.array(predictions)
 
-    def okapi_BM25(self, rating_matrix, K1=1.2, B=0.75):
-        assert B > 0 and B < 1, "okapi_BM_25: B must be in (0,1)"
-        assert K1 > 0, "okapi_BM_25: K1 must be > 0"
-
-        # Weighs each row of a sparse matrix by OkapiBM25 weighting
-        # calculate idf per term (user)
-
-        rating_matrix = sp.coo_matrix(rating_matrix)
-
-        N = float(rating_matrix.shape[0])
-        idf = np.log(N / (1 + np.bincount(rating_matrix.col)))
-
-        # calculate length_norm per document
-        row_sums = np.ravel(rating_matrix.sum(axis=1))
-
-        average_length = row_sums.mean()
-        length_norm = (1.0 - B) + B * row_sums / average_length
-
-        # weight matrix rows by bm25
-        rating_matrix.data = rating_matrix.data * (K1 + 1.0) / (
-                    K1 * length_norm[rating_matrix.row] + rating_matrix.data) * idf[rating_matrix.col]
-
-        return rating_matrix.tocsr()
-
-    def _compute_cosine_similarity(self, rating_matrix):
-        """Compute weighted cosine similarity."""
-        # Convert to dense for easier computation (use sparse for large datasets)
-        if rating_matrix.nnz / (rating_matrix.shape[0] * rating_matrix.shape[1]) > 0.1:
-            # If matrix is dense enough, use dense computation
-            dense_matrix = rating_matrix.toarray()
-            similarity_matrix = cosine_similarity(dense_matrix.T)
-        else:
-            # Use sparse computation
-            # Normalize each item vector
-            norms = np.sqrt(np.array(rating_matrix.power(2).sum(axis=0))).flatten()
-            norms[norms == 0] = 1e-10  # Avoid division by zero
-
-            # Compute similarity
-            similarity_matrix = (rating_matrix.T @ rating_matrix).toarray()
-            similarity_matrix = similarity_matrix / (norms[:, None] * norms[None, :])
-
-        return similarity_matrix
-
-    def TF_IDF(self, rating_matrix):
+    def _recommend_items(self, user_ids, n_items):
         """
-        Items are assumed to be on rows
-        :param dataMatrix:
-        :return:
+        Get top-n item recommendations for users.
         """
+        recommendations = []
 
-        # TFIDF each row of a sparse amtrix
-        rating_matrix = sp.coo_matrix(rating_matrix)
-        N = float(rating_matrix.shape[0])
+        for user_id in user_ids:
+            # Get user's item ratings
+            user_items = self.user_item_matrix.getrow(user_id)
+            user_item_indices = user_items.nonzero()[1]
 
-        # calculate IDF
-        idf = np.log(N / (1 + np.bincount(rating_matrix.col)))
+            # Compute scores for all items
+            scores = user_items @ self.similarity_matrix.T
+            scores = scores.toarray().flatten()
 
-        # apply TF-IDF adjustment
-        rating_matrix.data = np.sqrt(rating_matrix.data) * idf[rating_matrix.col]
+            # Normalize by sum of similarities
+            sim_sums = np.array(self.similarity_matrix.sum(axis=0)).flatten()
+            sim_sums[sim_sums == 0] = 1.0
+            scores = scores / sim_sums
 
-        return rating_matrix.tocsr()
+            # Remove items user already interacted with
+            scores[user_item_indices] = -np.inf
 
+            # Get top-n items
+            top_items = np.argpartition(scores, -n_items)[-n_items:]
+            top_items = top_items[np.argsort(scores[top_items])[::-1]]
 
-def triplets_to_matrix(triplets, num_users, num_items):
-    """
-    Convert triplet format (user_id, item_id, rating) to user-item matrix.
+            # Create recommendation list
+            user_recs = [(item_id, scores[item_id]) for item_id in top_items if scores[item_id] > 0]
+            recommendations.append(user_recs)
 
-    Args:
-        triplets: np.array or tensor of shape (n_ratings, 3) with (user_id, item_id, rating)
-        num_users: Total number of users
-        num_items: Total number of items
-
-    Returns:
-        rating_matrix: scipy sparse matrix [users x items]
-    """
-    # Convert to numpy if torch tensor
-    if torch.is_tensor(triplets):
-        triplets = triplets.cpu().numpy()
-
-    # Extract components
-    user_ids = triplets[:, 0].astype(int)
-    item_ids = triplets[:, 1].astype(int)
-    ratings = triplets[:, 2].astype(np.float32)
-
-    # Create sparse matrix
-    rating_matrix = sp.coo_matrix(
-        (ratings, (user_ids, item_ids)),
-        shape=(num_users, num_items),
-        dtype=np.float32
-    ).tocsr()
-
-    return rating_matrix
-
-
-def matrix_to_triplets(rating_matrix):
-    """
-    Convert user-item matrix back to triplet format.
-
-    Args:
-        rating_matrix: scipy sparse matrix [users x items]
-
-    Returns:
-        triplets: np.array of shape (n_ratings, 3) with (user_id, item_id, rating)
-    """
-    rating_coo = rating_matrix.tocoo()
-    triplets = np.column_stack([
-        rating_coo.row.astype(int),
-        rating_coo.col.astype(int),
-        rating_coo.data.astype(np.float32)
-    ])
-    return triplets
-
+        return recommendations
 
 class MultiVAE(nn.Module):
-    """
-    Container module for Multi-VAE.
-
-    Multi-VAE : Variational Autoencoder with Multinomial Likelihood
-    See Variational Autoencoders for Collaborative Filtering
-    https://arxiv.org/abs/1802.05814
-    """
-
     def __init__(self, p_dims, q_dims=None, dropout=0.5):
         super(MultiVAE, self).__init__()
         self.p_dims = p_dims
@@ -358,7 +369,6 @@ class MultiVAE(nn.Module):
         self.init_weights()
 
     def forward(self, input):
-
         mu, logvar = self.encode(input)
         z = self.reparameterize(mu, logvar)
         return self.decode(z), mu, logvar
@@ -416,15 +426,11 @@ class MultiVAE(nn.Module):
             layer.bias.data.normal_(0.0, 0.001)
 
 
-def multivae_loss(recon_batch, rating_weights, mu, logvar, weights, anneal=1.0):
-    # BCE = F.binary_cross_entropy(recon_batch, rating_weights)
-    BCE = -torch.mean(torch.sum(F.log_softmax(recon_batch, 1) * rating_weights, -1))
-    weighted_BCE = BCE * weights
-    normalized_BCE = weighted_BCE.sum() / weights.sum()
-
+def multivae_loss(recon_batch, rating_weights, mu, logvar, anneal=1.0):
+    BCE = -torch.mean(torch.sum(F.log_softmax(recon_batch, 1) * rating_weights, dim=1))
     KLD = -0.5 * torch.mean(torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=1))
 
-    return normalized_BCE + anneal * KLD
+    return BCE + anneal * KLD
 
 
 def get_model(dataset, config):
@@ -450,3 +456,5 @@ def get_model(dataset, config):
         ).to(config.device)
     else:
         raise ValueError(f"Unknown model type: {config.model_type}")
+
+
