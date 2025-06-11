@@ -434,13 +434,6 @@ class MultiVAE(nn.Module):
             layer.bias.data.normal_(0.0, 0.001)
 
 
-def multivae_loss(recon_batch, rating_weights, mu, logvar, anneal=1.0):
-    BCE = -torch.mean(torch.sum(F.log_softmax(recon_batch, 1) * rating_weights, dim=1))
-    KLD = -0.5 * torch.mean(torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=1))
-
-    return BCE + anneal * KLD
-
-
 def get_model(dataset, config):
     """Initialize model based on type"""
     if config.model_name == 'LightGCN':

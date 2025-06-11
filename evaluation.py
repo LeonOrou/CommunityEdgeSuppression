@@ -6,8 +6,9 @@ from collections import defaultdict
 
 def evaluate_model(model, dataset, config, stage='cv', k_values=[10, 20, 50, 100]):
     """
-    Evaluate model using the complete graph structure but excluding training interactions
-    stage: 'full_train' for full training evaluation, 'loo' for leave-one-out evaluation
+    Evaluate model using the complete graph structure but excluding training interactions.
+    Adapted for different model types: LightGCN, MultiVAE, or ItemKNN.
+    stage: 'full_train' for full training evaluation, 'cv' for cross-validation evaluation
     k_values: list of k_values values to evaluate (e.g., [10, 20, 50])
     """
     model.eval()
@@ -48,70 +49,177 @@ def evaluate_model(model, dataset, config, stage='cv', k_values=[10, 20, 50, 100
     # Store community distributions for each user for community bias calculation
     user_item_community_distributions = {k_val: [] for k_val in k_values}
 
+    user_test_items = dataset.val_df.groupby('user_encoded')['item_encoded'].apply(list).to_dict()
+
     with torch.no_grad():
-        user_emb, item_emb = model(dataset.complete_edge_index, dataset.current_edge_weight)
+        if config.model_name == 'LightGCN':
+            # LightGCN evaluation
+            user_emb, item_emb = model(dataset.complete_edge_index, dataset.current_edge_weight)
 
-        user_test_items = dataset.val_df.groupby('user_encoded')['item_encoded'].apply(list).to_dict()
+            for user_id, true_items in user_test_items.items():
+                if user_id >= dataset.num_users:
+                    continue
 
-        for user_id, true_items in user_test_items.items():
-            if user_id >= dataset.num_users:
-                continue
+                user_embedding = user_emb[user_id:user_id + 1]
+                scores = torch.matmul(user_embedding, item_emb.T).squeeze().cpu().numpy()
 
-            user_embedding = user_emb[user_id:user_id + 1]
-            scores = torch.matmul(user_embedding, item_emb.T).squeeze().cpu().numpy()
+                # Exclude items that the user interacted with during training
+                train_items = list(train_user_items.get(user_id, []))
+                scores_filtered = scores.copy()
+                scores_filtered[train_items] = float('-inf')
 
-            # Exclude items that the user interacted with during training
-            train_items = list(train_user_items[user_id])
-            scores_filtered = scores.copy()
-            scores_filtered[train_items] = float('-inf')
+                _process_user_recommendations(
+                    user_id, true_items, scores_filtered, train_items, max_k, k_values,
+                    metrics_by_k, item_recommendation_freq_by_k, all_global_recommendations_by_k,
+                    user_item_community_distributions, config, encoded_to_genres, dataset
+                )
 
-            top_max_k_items = np.argsort(scores_filtered)[::-1][:max_k]
+        elif config.model_name == 'MultiVAE':
+            # MultiVAE evaluation using sparse matrices
+            from scipy.sparse import csr_matrix
 
-            # Get full ranking for MRR calculation
-            full_ranking = np.argsort(scores_filtered)[::-1]
+            # Create sparse training matrix
+            train_data = dataset.train_df
+            train_users = train_data['user_encoded'].values
+            train_items = train_data['item_encoded'].values
+            train_ratings = train_data['rating'].values
 
-            for k_val in k_values:
-                top_k_items = top_max_k_items[:k_val]
+            train_matrix = csr_matrix(
+                (train_ratings, (train_users, train_items)),
+                shape=(dataset.num_users, dataset.num_items),
+                dtype=np.float32
+            )
 
-                metrics_by_k[k_val]['all_recommended_items'].update(top_k_items)
+            device = next(model.parameters()).device
 
-                all_global_recommendations_by_k[k_val].extend(top_k_items)
+            for user_id, true_items in user_test_items.items():
+                if user_id >= dataset.num_users:
+                    continue
 
-                for item in top_k_items:
-                    item_recommendation_freq_by_k[k_val][item] += 1
+                # Get user's training data as dense tensor
+                user_row = train_matrix.getrow(user_id).toarray().flatten()
+                user_input = torch.tensor(user_row, device=device, dtype=torch.float32).unsqueeze(0)
 
-                # Calculate community distribution for this user's recommendations
-                if hasattr(config, 'item_labels_matrix_mask'):
-                    user_community_dist = calculate_user_item_community_distribution(
-                        top_k_items.copy(), config.item_labels_matrix_mask, config.device
-                    )
-                    user_item_community_distributions[k_val].append(user_community_dist)
+                # Get recommendations from MultiVAE
+                recon, _, _ = model(user_input)
+                scores = recon.squeeze().cpu().numpy()
 
-                ndcg = calculate_ndcg(true_items, scores_filtered, k_val)
-                recall = calculate_recall(true_items, top_k_items, k_val)
-                precision = calculate_precision(true_items, top_k_items, k_val)
-                mrr = calculate_mrr(true_items, full_ranking)
-                hit_rate = calculate_hit_rate(true_items, top_k_items, k_val)
+                # Exclude items that the user interacted with during training
+                train_items = list(train_user_items.get(user_id, []))
+                scores_filtered = scores.copy()
+                scores_filtered[train_items] = float('-inf')
 
-                metrics_by_k[k_val]['ndcg_scores'].append(ndcg)
-                metrics_by_k[k_val]['recall_scores'].append(recall)
-                metrics_by_k[k_val]['precision_scores'].append(precision)
-                metrics_by_k[k_val]['mrr_scores'].append(mrr)
-                metrics_by_k[k_val]['hit_rate_scores'].append(hit_rate)
+                _process_user_recommendations(
+                    user_id, true_items, scores_filtered, train_items, max_k, k_values,
+                    metrics_by_k, item_recommendation_freq_by_k, all_global_recommendations_by_k,
+                    user_item_community_distributions, config, encoded_to_genres, dataset
+                )
 
-                additional_metrics = calculate_additional_metrics(
-                    top_k_items, encoded_to_genres, dataset)
+        elif config.model_name == 'ItemKNN':
+            # ItemKNN evaluation
+            for user_id, true_items in user_test_items.items():
+                if user_id >= dataset.num_users:
+                    continue
 
-                metrics_by_k[k_val]['simpson_scores'].append(additional_metrics['simpson_index'])
-                metrics_by_k[k_val]['intra_list_diversity_scores'].append(additional_metrics['intra_list_diversity'])
-                metrics_by_k[k_val]['popularity_lift_scores'].append(additional_metrics['popularity_lift'])
-                metrics_by_k[k_val]['avg_recommended_popularity_scores'].append(
-                    additional_metrics['avg_recommended_popularity'])
-                metrics_by_k[k_val]['normalized_genre_entropy_scores'].append(
-                    additional_metrics['normalized_genre_entropy'])
-                metrics_by_k[k_val]['unique_genres_count_scores'].append(additional_metrics['unique_genres_count'])
+                # Get recommendations from ItemKNN
+                recommendations = model.predict(user_id, n_items=dataset.num_items)
 
+                # ItemKNN returns [(item_id, score), ...] for each user
+                if len(recommendations) > 0 and len(recommendations[0]) > 0:
+                    # Extract scores and create score array
+                    scores_filtered = np.full(dataset.num_items, float('-inf'))
+                    for item_id, score in recommendations[0]:
+                        if 0 <= item_id < dataset.num_items:
+                            scores_filtered[item_id] = score
+
+                    # Training items are already excluded by ItemKNN internally
+                    train_items = list(train_user_items.get(user_id, []))
+                else:
+                    # No recommendations available
+                    scores_filtered = np.full(dataset.num_items, float('-inf'))
+                    train_items = list(train_user_items.get(user_id, []))
+
+                _process_user_recommendations(
+                    user_id, true_items, scores_filtered, train_items, max_k, k_values,
+                    metrics_by_k, item_recommendation_freq_by_k, all_global_recommendations_by_k,
+                    user_item_community_distributions, config, encoded_to_genres, dataset
+                )
+
+        else:
+            raise ValueError(f"Unsupported model type: {config.model_name}")
+
+    # Calculate final results
+    results = _calculate_final_results(
+        k_values, metrics_by_k, item_recommendation_freq_by_k,
+        all_global_recommendations_by_k, user_item_community_distributions,
+        config, dataset
+    )
+
+    return results
+
+
+def _process_user_recommendations(user_id, true_items, scores_filtered, train_items, max_k, k_values,
+                                  metrics_by_k, item_recommendation_freq_by_k, all_global_recommendations_by_k,
+                                  user_item_community_distributions, config, encoded_to_genres, dataset):
+    """
+    Process recommendations for a single user across all k values.
+    """
+    top_max_k_items = np.argsort(scores_filtered)[::-1][:max_k]
+
+    # Get full ranking for MRR calculation
+    full_ranking = np.argsort(scores_filtered)[::-1]
+
+    for k_val in k_values:
+        top_k_items = top_max_k_items[:k_val]
+
+        metrics_by_k[k_val]['all_recommended_items'].update(top_k_items)
+        all_global_recommendations_by_k[k_val].extend(top_k_items)
+
+        for item in top_k_items:
+            item_recommendation_freq_by_k[k_val][item] += 1
+
+        # Calculate community distribution for this user's recommendations
+        if hasattr(config, 'item_labels_matrix_mask'):
+            user_community_dist = calculate_user_item_community_distribution(
+                top_k_items.copy(), config.item_labels_matrix_mask, config.device
+            )
+            user_item_community_distributions[k_val].append(user_community_dist)
+
+        # Calculate standard metrics
+        ndcg = calculate_ndcg(true_items, scores_filtered, k_val)
+        recall = calculate_recall(true_items, top_k_items, k_val)
+        precision = calculate_precision(true_items, top_k_items, k_val)
+        mrr = calculate_mrr(true_items, full_ranking)
+        hit_rate = calculate_hit_rate(true_items, top_k_items, k_val)
+
+        metrics_by_k[k_val]['ndcg_scores'].append(ndcg)
+        metrics_by_k[k_val]['recall_scores'].append(recall)
+        metrics_by_k[k_val]['precision_scores'].append(precision)
+        metrics_by_k[k_val]['mrr_scores'].append(mrr)
+        metrics_by_k[k_val]['hit_rate_scores'].append(hit_rate)
+
+        # Calculate additional metrics
+        additional_metrics = calculate_additional_metrics(
+            top_k_items, encoded_to_genres, dataset)
+
+        metrics_by_k[k_val]['simpson_scores'].append(additional_metrics['simpson_index'])
+        metrics_by_k[k_val]['intra_list_diversity_scores'].append(additional_metrics['intra_list_diversity'])
+        metrics_by_k[k_val]['popularity_lift_scores'].append(additional_metrics['popularity_lift'])
+        metrics_by_k[k_val]['avg_recommended_popularity_scores'].append(
+            additional_metrics['avg_recommended_popularity'])
+        metrics_by_k[k_val]['normalized_genre_entropy_scores'].append(
+            additional_metrics['normalized_genre_entropy'])
+        metrics_by_k[k_val]['unique_genres_count_scores'].append(additional_metrics['unique_genres_count'])
+
+
+def _calculate_final_results(k_values, metrics_by_k, item_recommendation_freq_by_k,
+                             all_global_recommendations_by_k, user_item_community_distributions,
+                             config, dataset):
+    """
+    Calculate final aggregated results for all k values.
+    """
     results = {}
+
     for k_val in k_values:
         ndcg_scores = metrics_by_k[k_val]['ndcg_scores']
         recall_scores = metrics_by_k[k_val]['recall_scores']
@@ -152,59 +260,127 @@ def evaluate_model(model, dataset, config, stage='cv', k_values=[10, 20, 50, 100
             user_community_bias = float(torch.mean(user_bias)) if user_bias is not None else None
 
         results[k_val] = {
-            'NDCG': np.mean(ndcg_scores) if ndcg_scores else 0.0,
-            'Recall': np.mean(recall_scores) if recall_scores else 0.0,
-            'Precision': np.mean(precision_scores) if precision_scores else 0.0,
-            'MRR': np.mean(mrr_scores) if mrr_scores else 0.0,
-            'Hit Rate': np.mean(hit_rate_scores) if hit_rate_scores else 0.0,
-            'Item Coverage': item_coverage,
-            'Gini Index': gini_index,
-            'Simpson Index Genre': np.mean(simpson_scores) if simpson_scores else 0.0,
-            'Intra List Diversity': np.mean(intra_list_diversity_scores) if intra_list_diversity_scores else 0.0,
-            'Popularity Lift': np.mean(popularity_lift_scores) if popularity_lift_scores else 0.0,
-            'Avg Recommended Popularity': np.mean(
+            'ndcg': np.mean(ndcg_scores) if ndcg_scores else 0.0,
+            'recall': np.mean(recall_scores) if recall_scores else 0.0,
+            'precision': np.mean(precision_scores) if precision_scores else 0.0,
+            'mrr': np.mean(mrr_scores) if mrr_scores else 0.0,
+            'hit_rate': np.mean(hit_rate_scores) if hit_rate_scores else 0.0,
+            'item_coverage': item_coverage,
+            'gini_index': gini_index,
+            'simpson_index_genre': np.mean(simpson_scores) if simpson_scores else 0.0,
+            'intra_list_diversity': np.mean(intra_list_diversity_scores) if intra_list_diversity_scores else 0.0,
+            'popularity_lift': np.mean(popularity_lift_scores) if popularity_lift_scores else 0.0,
+            'avg_recommended_popularity': np.mean(
                 avg_recommended_popularity_scores) if avg_recommended_popularity_scores else 0.0,
-            'Normalized Genre Entropy': np.mean(
+            'normalized_genre_entropy': np.mean(
                 normalized_genre_entropy_scores) if normalized_genre_entropy_scores else 0.0,
-            'Unique Genres Count': np.mean(unique_genres_count_scores) if unique_genres_count_scores else 0.0,
-            'Popularity Calibration': popularity_calibration,
-            'User Community Bias': user_community_bias
+            'unique_genres_count': np.mean(unique_genres_count_scores) if unique_genres_count_scores else 0.0,
+            'popularity_calibration': popularity_calibration,
+            'user_community_bias': user_community_bias
         }
 
     return results
 
 
-def evaluate_current_model_ndcg(model, dataset, k=10):
+def evaluate_current_model_ndcg(model, dataset, model_type='LightGCN', k=10):
     """
-    only get ndcg for early stopping, minimum calculations
-    only necessary steps to calculate ndcg = calculate_ndcg(true_items, scores_filtered, k) for val_df
+    Adapted NDCG evaluation for different model types: LightGCN, MultiVAE, or ItemKNN.
+    Only calculates NDCG for early stopping with minimum calculations.
     """
-    model.eval()
-
+    if model_type != 'ItemKNN':
+        model.eval()
     ndcg_scores = []
 
     # Create a set of training interactions for each user to exclude from evaluation
     train_user_items = dataset.train_df.groupby('user_encoded')['item_encoded'].apply(list).to_dict()
+    user_val_items = dataset.val_df.groupby('user_encoded')['item_encoded'].apply(list).to_dict()
 
     with torch.no_grad():
-        user_emb, item_emb = model(dataset.complete_edge_index, dataset.complete_edge_weight)
+        if model_type == 'LightGCN':
+            # LightGCN evaluation
+            user_emb, item_emb = model(dataset.complete_edge_index, dataset.complete_edge_weight)
 
-        user_val_items = dataset.val_df.groupby('user_encoded')['item_encoded'].apply(list).to_dict()
+            for user_id, true_items in user_val_items.items():
+                if user_id >= dataset.num_users:
+                    continue
 
-        for user_id, true_items in user_val_items.items():
-            if user_id >= dataset.num_users:
-                continue
+                user_embedding = user_emb[user_id:user_id + 1]
+                scores = torch.matmul(user_embedding, item_emb.T).squeeze().cpu().numpy()
 
-            user_embedding = user_emb[user_id:user_id + 1]
-            scores = torch.matmul(user_embedding, item_emb.T).squeeze().cpu().numpy()
+                # Exclude items that the user interacted with during training
+                train_items = list(train_user_items.get(user_id, []))
+                scores_filtered = scores.copy()
+                scores_filtered[train_items] = float('-inf')
 
-            # Exclude items that the user interacted with during training
-            train_items = list(train_user_items[user_id])
-            scores_filtered = scores.copy()
-            scores_filtered[train_items] = float('-inf')
+                ndcg = calculate_ndcg(true_items, scores_filtered, k)
+                ndcg_scores.append(ndcg)
 
-            ndcg = calculate_ndcg(true_items, scores_filtered, k)
-            ndcg_scores.append(ndcg)
+        elif model_type == 'MultiVAE':
+            # MultiVAE evaluation using sparse matrices
+            from scipy.sparse import csr_matrix
+
+            # Create sparse training matrix
+            train_data = dataset.train_df
+            train_users = train_data['user_encoded'].values
+            train_items = train_data['item_encoded'].values
+            train_ratings = train_data['rating'].values
+
+            train_matrix = csr_matrix(
+                (train_ratings, (train_users, train_items)),
+                shape=(dataset.num_users, dataset.num_items),
+                dtype=np.float32
+            )
+
+            device = next(model.parameters()).device
+
+            for user_id, true_items in user_val_items.items():
+                if user_id >= dataset.num_users:
+                    continue
+
+                # Get user's training data as dense tensor
+                user_row = train_matrix.getrow(user_id).toarray().flatten()
+                user_input = torch.tensor(user_row, device=device, dtype=torch.float32).unsqueeze(0)
+
+                # Get recommendations from MultiVAE
+                recon, _, _ = model(user_input)
+                scores = recon.squeeze().cpu().numpy()
+
+                # Exclude items that the user interacted with during training
+                train_items = list(train_user_items.get(user_id, []))
+                scores_filtered = scores.copy()
+                scores_filtered[train_items] = float('-inf')
+
+                ndcg = calculate_ndcg(true_items, scores_filtered, k)
+                ndcg_scores.append(ndcg)
+
+        elif model_type == 'ItemKNN':
+            # ItemKNN evaluation
+            for user_id, true_items in user_val_items.items():
+                # if user_id >= dataset.num_users:
+                #     continue
+
+                # Get recommendations from ItemKNN
+                recommendations = model.predict(user_id, n_items=dataset.num_items)
+
+                # ItemKNN returns [(item_id, score), ...] for each user
+                if len(recommendations) > 0 and len(recommendations[0]) > 0:
+                    # Extract scores and create score array
+                    scores = np.full(dataset.num_items, float('-inf'))
+                    for item_id, score in recommendations[0]:
+                        if 0 <= item_id < dataset.num_items:
+                            scores[item_id] = score
+
+                    # Training items are already excluded by ItemKNN internally
+                    scores_filtered = scores
+                else:
+                    # No recommendations available
+                    scores_filtered = np.full(dataset.num_items, float('-inf'))
+
+                ndcg = calculate_ndcg(true_items, scores_filtered, k)
+                ndcg_scores.append(ndcg)
+
+        else:
+            raise ValueError(f"Unsupported model type: {model_type}")
 
     return np.mean(ndcg_scores) if ndcg_scores else 0.0
 

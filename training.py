@@ -1,0 +1,743 @@
+import time
+from collections import defaultdict
+import wandb
+from evaluation import evaluate_current_model_ndcg
+from dataset import RecommendationDataset, sample_negative_items, prepare_adj_tensor, prepare_training_data
+from models import calculate_bpr_loss
+from utils_functions import community_edge_suppression
+from scipy.sparse import csr_matrix
+import torch
+import torch.optim as optim
+from models import ItemKNN
+from models import LightGCN
+from models import get_model
+from config import Config
+import numpy as np
+
+
+def train_itemknn(model, dataset, config, stage='cv', fold_num=None, verbose=True):
+    """
+    General ItemKNN training function that handles the complete training process.
+
+    Args:
+        model: The ItemKNN model to train
+        dataset: Dataset object containing train/val/test data
+        config: Configuration object with hyperparameters
+        stage: 'cv' for cross-validation, 'full_train' for final training
+        fold_num: Current fold number for logging (None for final training)
+        verbose: Whether to print training progress
+
+    Returns:
+        tuple: (trained_model, training_time, validation_ndcg)
+    """
+    print(f"Starting ItemKNN training...")
+
+    training_interactions = dataset.train_df[['user_encoded', 'item_encoded', 'rating']].values
+
+    start_time = time.time()
+
+    # TODO: make multiple training iterations to proof community edge suppression as one-shot learning
+    if config.use_dropout:
+        training_interactions = community_edge_suppression(
+            training_interactions, config)
+
+    _log_itemknn_training_start(model, len(training_interactions), fold_num, verbose)
+
+    # Train the model (compute similarities)
+    model.fit(training_interactions)
+
+    training_time = time.time() - start_time
+
+    # Validate the model if validation data is available
+    validation_ndcg = None
+    if len(dataset.val_df) > 0:
+        from evaluation import evaluate_current_model_ndcg
+        validation_ndcg = evaluate_current_model_ndcg(model, dataset, k=10)
+
+    # Log training results
+    _log_itemknn_training_results(
+        model, training_time, validation_ndcg, fold_num, verbose
+    )
+
+    return model, training_time, validation_ndcg
+
+
+def _log_itemknn_training_start(model, num_interactions, fold_num, verbose):
+    """Log ItemKNN training start information."""
+    log_dict = {
+        'training_start': True,
+        'num_neighbors': model.k,
+        'shrinkage': model.shrink,
+        'bm25_k1': model.bm25_k1,
+        'bm25_b': model.bm25_b,
+        'num_training_interactions': num_interactions,
+        'num_users': model.num_users,
+        'num_items': model.num_items
+    }
+
+    # Add fold-specific prefix if in cross-validation
+    if fold_num is not None:
+        log_dict = {f'fold_{fold_num}/itemknn_{k}': v for k, v in log_dict.items()}
+    else:
+        log_dict = {f'final_training/itemknn_{k}': v for k, v in log_dict.items()}
+
+    wandb.log(log_dict)
+
+    if verbose:
+        print(f"  Building item similarity matrix...")
+        print(f"  Parameters: k={model.k}, shrink={model.shrink}, "
+              f"BM25(k1={model.bm25_k1}, b={model.bm25_b})")
+
+
+def _log_itemknn_training_results(model, training_time, validation_ndcg, fold_num, verbose):
+    """Log ItemKNN training completion and results."""
+    # Calculate model statistics
+    sparsity = _calculate_similarity_sparsity(model.similarity_matrix)
+    avg_neighbors = _calculate_avg_neighbors(model.similarity_matrix)
+
+    log_dict = {
+        'training_time': training_time,
+        'similarity_sparsity': sparsity,
+        'avg_neighbors_per_item': avg_neighbors,
+        'training_completed': True
+    }
+
+    if validation_ndcg is not None:
+        log_dict['val_ndcg@10'] = validation_ndcg
+
+    # Add fold-specific prefix if in cross-validation
+    if fold_num is not None:
+        log_dict = {f'fold_{fold_num}/itemknn_{k}': v for k, v in log_dict.items()}
+    else:
+        log_dict = {f'final_training/itemknn_{k}': v for k, v in log_dict.items()}
+
+    wandb.log(log_dict)
+
+    if verbose:
+        print(f"  Training completed in {training_time:.2f} seconds")
+        print(f"  Similarity matrix sparsity: {sparsity:.4f}")
+        print(f"  Average neighbors per item: {avg_neighbors:.1f}")
+        if validation_ndcg is not None:
+            print(f"  Validation NDCG@10: {validation_ndcg:.4f}")
+
+
+def _calculate_similarity_sparsity(similarity_matrix):
+    """Calculate sparsity of the similarity matrix."""
+    total_elements = similarity_matrix.shape[0] * similarity_matrix.shape[1]
+    non_zero_elements = similarity_matrix.nnz
+    sparsity = 1 - (non_zero_elements / total_elements)
+    return sparsity
+
+def _prepare_multivae_sparse_matrices(dataset):
+    train_matrix = _create_sparse_user_item_matrix(
+        dataset.train_df, dataset.num_users, dataset.num_items)
+
+    val_matrix = _create_sparse_user_item_matrix(
+        dataset.val_df, dataset.num_users, dataset.num_items)
+
+    return train_matrix, val_matrix
+
+def _create_sparse_user_item_matrix(data_df, num_users, num_items):
+    users = data_df['user_encoded'].values
+    items = data_df['item_encoded'].values
+    ratings = data_df['rating'].values
+
+    # Create sparse matrix
+    matrix = csr_matrix(
+        (ratings, (users, items)),
+        shape=(num_users, num_items),
+        dtype=np.float32)
+
+    return matrix
+
+
+def _sparse_to_dense_batch(sparse_matrix, user_indices, device):
+    return torch.tensor(sparse_matrix[user_indices].toarray(), device=device, dtype=torch.float32)
+
+
+def multivae_loss(recon_batch, rating_weights, mu, logvar, anneal=1.0):
+    BCE = -torch.mean(torch.sum(torch.nn.functional.log_softmax(recon_batch, 1) * rating_weights, dim=1))
+    KLD = -0.5 * torch.mean(torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=1))
+
+    return BCE + anneal * KLD
+
+
+def _train_multivae_epoch_sparse(model, train_sparse_matrix, optimizer, batch_size,
+                                 epoch, config, device):
+    """
+    Train MultiVAE for one epoch using sparse matrices.
+
+    Args:
+        model: MultiVAE model
+        train_sparse_matrix: Training sparse user-item matrix
+        optimizer: PyTorch optimizer
+        batch_size: Batch size
+        epoch: Current epoch number
+        config: Configuration object
+        device: Training device
+
+    Returns:
+        tuple: (average_loss, kl_annealing_weight)
+    """
+    model.train()
+    total_loss = 0
+    num_batches = 0
+    num_users = train_sparse_matrix.shape[0]
+
+    # KL annealing schedule
+    if hasattr(config, 'total_anneal_steps') and config.total_anneal_steps > 0:
+        anneal_cap = getattr(config, 'anneal_cap', 0.2)
+        kl_weight = min(anneal_cap, 1.0 * epoch / config.total_anneal_steps)
+    else:
+        kl_weight = getattr(config, 'kl_weight', 1.0)
+
+    # Create user indices for batching
+    user_indices = np.random.permutation(num_users)
+
+    for start_idx in range(0, num_users, batch_size):
+        end_idx = min(start_idx + batch_size, num_users)
+        batch_user_indices = user_indices[start_idx:end_idx]
+
+        # Convert sparse batch to dense tensor
+        batch_data = _sparse_to_dense_batch(train_sparse_matrix, batch_user_indices, device)
+
+        # Forward pass
+        recon_batch, mu, logvar = model(batch_data)
+
+        # Calculate loss
+        loss = multivae_loss(recon_batch, batch_data, mu, logvar, kl_weight)
+
+        # Backward pass
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        total_loss += loss.item()
+        num_batches += 1
+
+    avg_loss = total_loss / max(num_batches, 1)
+    return avg_loss, kl_weight
+
+
+def _log_multivae_training_metrics(epoch, epoch_loss, val_ndcg, current_lr, kl_weight,
+                                   patience_counter, fold_num):
+    log_dict = {
+        'epoch': epoch,
+        'train_loss': epoch_loss,
+        'val_ndcg@10': val_ndcg,
+        'learning_rate': current_lr,
+        'kl_annealing_weight': kl_weight,
+        'patience_counter': patience_counter
+    }
+
+    if fold_num is not None:
+        log_dict = {f'fold_{fold_num}/{k}': v for k, v in log_dict.items()}
+    else:
+        log_dict = {f'final_training/{k}': v for k, v in log_dict.items()}
+
+    wandb.log(log_dict)
+
+
+def _check_multivae_early_stopping(val_ndcg, best_val_ndcg, patience_counter, patience,
+                                   val_history, model, epoch, verbose):
+    """Check early stopping conditions for MultiVAE and update best model."""
+    best_model_state = None
+    best_epoch = epoch
+
+    # Check for improvement
+    if val_ndcg > best_val_ndcg:
+        improvement = (val_ndcg - best_val_ndcg) / best_val_ndcg if best_val_ndcg > 0 else 1.0
+
+        # Only update best if improvement is significant (> 0.1%)
+        if improvement > 0.001 or best_val_ndcg == 0:
+            best_val_ndcg = val_ndcg
+            patience_counter = 0
+            best_model_state = model.state_dict().copy()
+            best_epoch = epoch
+        else:
+            patience_counter += 1
+    else:
+        patience_counter += 1
+
+    # Check if learning has plateaued
+    if len(val_history) >= 5:
+        recent_std = np.std(val_history[-5:])
+        if recent_std < 0.0001 and patience_counter >= patience // 2:
+            if verbose:
+                print(f"  Early stopping at epoch {epoch} - validation plateaued")
+            return True, best_val_ndcg, patience_counter, best_model_state, best_epoch
+
+    # Check patience limit
+    if patience_counter >= patience:
+        if verbose:
+            print(f"  Early stopping at epoch {epoch} - no improvement for {patience} checks")
+            print(f"  Best epoch was {best_epoch} with NDCG@10: {best_val_ndcg:.4f}")
+        return True, best_val_ndcg, patience_counter, best_model_state, best_epoch
+
+    return False, best_val_ndcg, patience_counter, best_model_state, best_epoch
+
+
+def _log_multivae_final_results(best_epoch, best_val_ndcg, total_epochs, early_stopped, fold_num):
+    """Log final MultiVAE training results to WandB."""
+    final_log_dict = {
+        'best_epoch': best_epoch,
+        'best_val_ndcg@10': best_val_ndcg,
+        'total_epochs': total_epochs,
+        'early_stopped': early_stopped
+    }
+
+    if fold_num is not None:
+        final_log_dict = {f'fold_{fold_num}/final_{k}': v for k, v in final_log_dict.items()}
+    else:
+        final_log_dict = {f'final_training/final_{k}': v for k, v in final_log_dict.items()}
+
+    wandb.log(final_log_dict)
+
+
+def train_multivae(model, dataset, config, optimizer, scheduler, device,
+                   stage='cv', fold_num=None, verbose=True):
+    """
+    General MultiVAE training function that handles the complete training loop with sparse matrices.
+
+    Args:
+        model: The MultiVAE model to train
+        dataset: Dataset object containing train/val/test data
+        config: Configuration object with hyperparameters
+        optimizer: PyTorch optimizer
+        scheduler: Learning rate scheduler
+        device: Training device (cuda/cpu)
+        stage: 'cv' for cross-validation, 'full_train' for final training
+        fold_num: Current fold number for logging (None for final training)
+        verbose: Whether to print training progress
+
+    Returns:
+        tuple: (trained_model, best_epoch, best_val_ndcg)
+    """
+    print(f"Starting MultiVAE...")
+
+    batch_size = config.batch_size
+    best_val_ndcg = 0
+    patience = config.patience if hasattr(config, 'patience') else 50
+    patience_counter = 0
+    val_history = []
+    best_epoch = 0
+    best_model_state = None
+
+    # Prepare sparse user-item matrices for MultiVAE
+    train_sparse_matrix, val_sparse_matrix = _prepare_multivae_sparse_matrices(dataset)
+
+    num_users = train_sparse_matrix.shape[0]
+    model.train()
+
+    # Main training loop
+    for epoch in range(config.epochs):
+        if config.use_dropout:
+            train_sparse_matrix = community_edge_suppression(
+                train_sparse_matrix, config)
+
+        epoch_loss, kl_weight = _train_multivae_epoch_sparse(
+            model, train_sparse_matrix, optimizer, batch_size,
+            epoch, config, device
+        )
+
+        # Evaluation and logging
+        if epoch % 10 == 0 or epoch == config.epochs - 1:
+            val_ndcg = evaluate_current_model_ndcg(model, dataset, model_type='MultiVAE', k=10)
+            val_history.append(val_ndcg)
+            current_lr = optimizer.param_groups[0]['lr']
+
+            # Log metrics to WandB
+            _log_multivae_training_metrics(
+                epoch, epoch_loss, val_ndcg, current_lr, kl_weight,
+                patience_counter, fold_num
+            )
+
+            if verbose:
+                print(f'  Epoch {epoch + 1:3d}/{config.epochs}, Loss: {epoch_loss:.4f}, '
+                      f'Val NDCG@10: {val_ndcg:.4f}, KL Weight: {kl_weight:.4f}')
+
+            # Early stopping logic
+            should_stop, best_val_ndcg, patience_counter, best_model_state, best_epoch = _check_multivae_early_stopping(
+                val_ndcg, best_val_ndcg, patience_counter, patience, val_history,
+                model, epoch, verbose
+            )
+
+            if should_stop:
+                break
+
+    # Load best model if available
+    if best_model_state is not None:
+        model.load_state_dict(best_model_state)
+
+    # Log final training results
+    _log_multivae_final_results(best_epoch, best_val_ndcg, epoch + 1,
+                                patience_counter >= patience, fold_num)
+
+    return model, best_epoch, best_val_ndcg
+
+
+def train_lightgcn(model, dataset, config, optimizer, scheduler, user_positive_items,
+                   device, stage='cv', fold_num=None, verbose=True):
+    """
+    General LightGCN training function that handles the complete training loop.
+
+    Args:
+        model: The LightGCN model to train
+        dataset: Dataset object containing train/val/test data
+        config: Configuration object with hyperparameters
+        optimizer: PyTorch optimizer
+        scheduler: Learning rate scheduler
+        user_positive_items: Dict mapping users to their positive items
+        device: Training device (cuda/cpu)
+        stage: 'cv' for cross-validation, 'full_train' for final training
+        fold_num: Current fold number for logging (None for final training)
+        verbose: Whether to print training progress
+
+    Returns:
+        tuple: (trained_model, best_epoch, best_val_ndcg)
+    """
+    print(f"Starting LightGCN training...")
+    print(f"Complete graph: {len(dataset.complete_df)} interactions")
+    print(f"Training interactions: {len(dataset.train_df)} (used for loss)")
+    print(f"Val interactions: {len(dataset.val_df)} (used for evaluation)")
+    print(f"Test interactions: {len(dataset.test_df)} (used for evaluation)")
+
+    # Training parameters
+    batch_size = config.batch_size
+    best_val_ndcg = 0
+    patience = config.patience if hasattr(config, 'patience') else 50
+    patience_counter = 0
+    val_history = []
+    best_epoch = 0
+    best_model_state = None
+
+    # Pre-convert training data to GPU or CPU based on size
+    if len(dataset.train_df) < 200000:
+        all_train_users, all_train_items, train_indices = prepare_training_data(
+            dataset.train_val_df, device=device)
+    else:
+        all_train_users, all_train_items, train_indices = prepare_training_data(
+            dataset.train_df, device='cpu')
+
+    num_train = len(train_indices)
+    adj_tens = prepare_adj_tensor(dataset)
+    model.train()
+
+    # Main training loop
+    for epoch in range(config.epochs):
+        # Handle edge weight modification for dropout
+        if config.use_dropout:
+            edge_weights_modified = community_edge_suppression(adj_tens, config)
+            # bidirectional edges for LightGCN
+            edge_weights_modified = torch.concatenate((edge_weights_modified, edge_weights_modified))
+            current_edge_weight = edge_weights_modified.to(device)
+        else:
+            current_edge_weight = dataset.complete_edge_weight
+
+        dataset.current_edge_weight = current_edge_weight
+
+        # Training step
+        epoch_loss = _train_lightgcn_epoch(
+            model, dataset, config, optimizer, all_train_users, all_train_items,
+            train_indices, user_positive_items, batch_size, device
+        )
+
+        # Evaluation and logging
+        if epoch == 0 or epoch + 1 % 10 == 0 or epoch + 1 == config.epochs:
+            val_ndcg = evaluate_current_model_ndcg(model, dataset, k=10)
+            val_history.append(val_ndcg)
+            current_lr = optimizer.param_groups[0]['lr']
+
+            # Log metrics to WandB
+            _log_training_metrics(epoch, epoch_loss, val_ndcg, current_lr,
+                                  patience_counter, config, fold_num)
+
+            if verbose:
+                suppression_status = "ON" if config.use_dropout else "OFF"
+                print(f'  Epoch {epoch+1:3d}/{config.epochs}, Loss: {epoch_loss:.4f}, '
+                      f'Val NDCG@10: {val_ndcg:.4f} (Suppression: {suppression_status})')
+
+            # Early stopping logic
+            should_stop, best_val_ndcg, patience_counter, best_model_state, best_epoch = _check_early_stopping(
+                val_ndcg, best_val_ndcg, patience_counter, patience, val_history,
+                model, epoch, verbose
+            )
+
+            if should_stop:
+                break
+
+    # Load best model if available
+    if best_model_state is not None:
+        model.load_state_dict(best_model_state)
+
+    # Log final training results
+    _log_final_training_results(best_epoch, best_val_ndcg, epoch + 1,
+                                patience_counter >= patience, fold_num)
+
+    return model, best_epoch, best_val_ndcg
+
+
+def _train_lightgcn_epoch(model, dataset, config, optimizer, all_train_users, all_train_items,
+                          train_indices, user_positive_items, batch_size, device):
+    """Train for one epoch and return average loss."""
+    total_loss = 0
+    num_batches = 0
+    num_train = len(train_indices)
+
+    # Shuffle training indices
+    perm = torch.randperm(num_train)
+    train_indices_shuffled = train_indices[perm]
+
+    # Process in big batches of 200k to manage memory
+    for start_idx in range(0, num_train, 200000):
+        biggi_batch_indices = train_indices_shuffled[start_idx:start_idx + 200000]
+        biggi_train_users = all_train_users[biggi_batch_indices].to(device)
+        biggi_train_items = all_train_items[biggi_batch_indices].to(device)
+        biggi_batch_indices = biggi_batch_indices.to(device)
+
+        # Process smaller batches within the big batch
+        for i in range(0, len(biggi_batch_indices), batch_size):
+            batch_indices = biggi_batch_indices[i:i + batch_size]
+            if len(batch_indices) == 0:
+                continue
+
+            batch_users = biggi_train_users[i:i + batch_size]
+            batch_pos_items = biggi_train_items[i:i + batch_size]
+
+            # Sample negative items
+            batch_neg_items = sample_negative_items(
+                batch_users, batch_pos_items, dataset.num_items,
+                user_positive_items, device
+            )
+
+            # Forward pass
+            user_emb, item_emb = model(dataset.complete_edge_index, dataset.current_edge_weight)
+            batch_user_emb = user_emb[batch_users.long()]
+            batch_pos_item_emb = item_emb[batch_pos_items.long()]
+            batch_neg_item_emb = item_emb[batch_neg_items.long()]
+
+            # Calculate loss
+            bpr_loss = calculate_bpr_loss(batch_user_emb, batch_pos_item_emb, batch_neg_item_emb)
+
+            # Add L2 regularization
+            l2_reg = config.reg * (
+                    batch_user_emb.norm(2).pow(2) +
+                    batch_pos_item_emb.norm(2).pow(2) +
+                    batch_neg_item_emb.norm(2).pow(2)
+            ) / batch_size
+
+            loss = bpr_loss + l2_reg
+
+            # Backward pass
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            total_loss += loss.item()
+            num_batches += 1
+
+    return total_loss / max(num_batches, 1)
+
+
+def _log_training_metrics(epoch, epoch_loss, val_ndcg, current_lr, patience_counter,
+                          config, fold_num):
+    """Log training metrics to WandB."""
+    log_dict = {
+        'epoch': epoch,
+        'train_loss': epoch_loss,
+        'val_ndcg@10': val_ndcg,
+        'learning_rate': current_lr,
+        'patience_counter': patience_counter,
+        'suppression_enabled': config.use_dropout
+    }
+
+    # Add fold-specific prefix if in cross-validation
+    if fold_num is not None:
+        log_dict = {f'fold_{fold_num}/{k}': v for k, v in log_dict.items()}
+    else:
+        log_dict = {f'final_training/{k}': v for k, v in log_dict.items()}
+
+    wandb.log(log_dict)
+
+
+def _check_early_stopping(val_ndcg, best_val_ndcg, patience_counter, patience,
+                          val_history, model, epoch, verbose):
+    """Check early stopping conditions and update best model."""
+    best_model_state = None
+    best_epoch = epoch
+
+    # Check for improvement
+    if val_ndcg > best_val_ndcg:
+        improvement = (val_ndcg - best_val_ndcg) / best_val_ndcg if best_val_ndcg > 0 else 1.0
+
+        # Only update best if improvement is significant (> 0.1%)
+        if improvement > 0.001 or best_val_ndcg == 0:
+            best_val_ndcg = val_ndcg
+            patience_counter = 0
+            best_model_state = model.state_dict().copy()
+            best_epoch = epoch
+        else:
+            patience_counter += 1
+    else:
+        patience_counter += 1
+
+    # Check if learning has plateaued
+    if len(val_history) >= 5:
+        recent_std = np.std(val_history[-5:])
+        if recent_std < 0.0001 and patience_counter >= patience // 2:
+            if verbose:
+                print(f"  Early stopping at epoch {epoch} - validation plateaued")
+            return True, best_val_ndcg, patience_counter, best_model_state, best_epoch
+
+    # Check patience limit
+    if patience_counter >= patience:
+        if verbose:
+            print(f"  Early stopping at epoch {epoch} - no improvement for {patience} checks")
+            print(f"  Best epoch was {best_epoch} with NDCG@10: {best_val_ndcg:.4f}")
+        return True, best_val_ndcg, patience_counter, best_model_state, best_epoch
+
+    return False, best_val_ndcg, patience_counter, best_model_state, best_epoch
+
+
+def _log_final_training_results(best_epoch, best_val_ndcg, total_epochs, early_stopped, fold_num):
+    """Log final training results to WandB."""
+    final_log_dict = {
+        'best_epoch': best_epoch,
+        'best_val_ndcg@10': best_val_ndcg,
+        'total_epochs': total_epochs,
+        'early_stopped': early_stopped
+    }
+
+    if fold_num is not None:
+        final_log_dict = {f'fold_{fold_num}/final_{k}': v for k, v in final_log_dict.items()}
+    else:
+        final_log_dict = {f'final_training/final_{k}': v for k, v in final_log_dict.items()}
+
+    wandb.log(final_log_dict)
+
+
+def _calculate_avg_neighbors(similarity_matrix):
+    """Calculate average number of neighbors per item."""
+    neighbors_per_item = np.array((similarity_matrix > 0).sum(axis=1)).flatten()
+    return neighbors_per_item.mean()
+
+
+def train_model_itemknn(dataset, model, config, stage='cv', fold_num=None, verbose=True):
+    """
+    Main training function for ItemKNN that sets up the training environment and calls train_itemknn.
+
+    Args:
+        dataset: Dataset object
+        model: ItemKNN model to train
+        config: Configuration object
+        stage: 'cv' for cross-validation, 'full_train' for final training
+        fold_num: Current fold number for logging (None for final training)
+        verbose: Whether to print training progress
+
+    Returns:
+        tuple: (trained_model, training_time, validation_ndcg)
+    """
+    print(f"Training ItemKNN model...")
+
+    # Adjust dataset for final training stage
+    if stage == 'full_train':
+        dataset.train_df = dataset.train_val_df  # Use all training+validation data
+        dataset.val_df = dataset.test_df  # Use test set as validation
+
+    # Train the model using the general training function
+    trained_model, training_time, validation_ndcg = train_itemknn(
+        model=model,
+        dataset=dataset,
+        config=config,
+        stage=stage,
+        fold_num=fold_num,
+        verbose=verbose
+    )
+
+    return trained_model, training_time, validation_ndcg
+
+
+def train_model(dataset, model, config, stage='cv', fold_num=None, verbose=True):
+    """
+    Main training function that sets up the training environment and calls train_lightgcn.
+
+    Args:
+        dataset: Dataset object
+        model: Model to train
+        config: Configuration object
+        stage: 'cv' for cross-validation, 'full_train' for final training
+        fold_num: Current fold number for logging (None for final training)
+        verbose: Whether to print training progress
+
+    Returns:
+        tuple: (trained_model, complete_edge_index, complete_edge_weight)
+    """
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Training on device: {device}")
+
+    # Setup optimizer and scheduler
+    optimizer = torch.optim.Adam(model.parameters(),
+                                 lr=config.learning_rate,
+                                 weight_decay=getattr(config, 'weight_decay', 0.0))
+
+    scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
+        optimizer,
+        T_0=config.epochs // 5 if config.epochs >= 5 else 1,
+        T_mult=1,
+        eta_min=config.min_lr,
+        last_epoch=-1)
+
+    if stage == 'full_train':
+        dataset.train_df = dataset.train_val_df  # Use all training+validation data
+        dataset.val_df = dataset.test_df  # Use test set as validation
+
+    elif config.model_name == 'ItemKNN':
+        trained_model, training_time, validation_ndcg = train_itemknn(
+            model=model,
+            dataset=dataset,
+            config=config,
+            stage=stage,
+            fold_num=fold_num,
+            verbose=verbose
+        )
+        return trained_model
+
+    elif config.model_name == 'MultiVAE':
+        trained_model, best_epoch, best_val_ndcg = train_multivae(
+            model=model,
+            dataset=dataset,
+            config=config,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            device=device,
+            stage=stage,
+            fold_num=fold_num,
+            verbose=verbose
+        )
+        return trained_model
+
+    if config.model_name == 'LightGCN':
+        dataset.complete_edge_index = dataset.complete_edge_index.to(device)
+        dataset.complete_edge_weight = dataset.complete_edge_weight.to(device)
+
+        # Create user positive items mapping for better negative sampling
+        user_positive_items = defaultdict(set)
+        for user_id, group in dataset.complete_df.groupby('user_encoded')['item_encoded']:
+            user_positive_items[user_id] = set(group.values)
+
+        trained_model, best_epoch, best_val_ndcg = train_lightgcn(
+            model=model,
+            dataset=dataset,
+            config=config,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            user_positive_items=user_positive_items,
+            device=device,
+            stage=stage,
+            fold_num=fold_num,
+            verbose=verbose)
+
+        return trained_model
+
+
+
