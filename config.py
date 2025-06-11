@@ -49,31 +49,27 @@ class Config:
     def setup_model_config(self):
         """Setup model-specific configurations."""
         if self.model_name == 'LightGCN':
-            self.batch_size = 1024
+            self.batch_size = 236
             self.learning_rate = 0.005
             self.epochs = 20  # because it's different for each model
             self.n_layers = 3
-            self.embedding_dim = 64
-            self.A_split = False
-            self.keep_prob = 0.0  # dropout rate
-            self.dropout = False
+            self.embedding_dim = 128
             self.num_folds = 5
             self.reg = 1e-4
             self.weight_decay = 1
         elif self.model_name == 'ItemKNN':
-            self.epochs = 1
-            self.item_knn_topk = 250
-            self.shrink = 10
+            self.item_knn_topk = 125
+            self.shrink = 50
             self.feature_weighting = 'bm25'
         elif self.model_name == 'MultiVAE':
             self.epochs = 200
-            self.batch_size = 4096  # For consistency
+            self.batch_size = 2048  # For consistency
             self.hidden_dimension = 800
             self.latent_dimension = 200
             self.q_dims = [self.hidden_dimension, self.latent_dimension]
             self.p_dims = [self.latent_dimension, self.hidden_dimension, self.nr_items]
-            self.drop = 0.7
-            self.anneal_cap = 0.3
+            self.drop = 0.5
+            self.anneal_cap = 0.4
             self.total_anneal_steps = 200000
 
     def setup_device(self, try_gpu=True):

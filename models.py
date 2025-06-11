@@ -178,7 +178,13 @@ class ItemKNN:
             common_users = (item_user_matrix > 0).astype(float) @ (item_user_matrix > 0).T
 
             # Apply shrinkage formula
-            shrink_factor = common_users.multiply(1 / (common_users + self.shrink))
+            # Convert to COO format for efficient element-wise operations
+            common_users_coo = common_users.tocoo()
+            shrink_data = common_users_coo.data / (common_users_coo.data + self.shrink)
+            shrink_factor = csr_matrix(
+                (shrink_data, (common_users_coo.row, common_users_coo.col)),
+                shape=common_users.shape
+            )
             similarity = similarity.multiply(shrink_factor)
 
         # Set diagonal to 0 (item shouldn't be similar to itself)
@@ -326,13 +332,15 @@ class ItemKNN:
             user_item_indices = user_items.nonzero()[1]
 
             # Compute scores for all items
-            scores = user_items @ self.similarity_matrix.T
-            scores = scores.toarray().flatten()
-
-            # Normalize by sum of similarities
-            sim_sums = np.array(self.similarity_matrix.sum(axis=0)).flatten()
-            sim_sums[sim_sums == 0] = 1.0
-            scores = scores / sim_sums
+            # scores = (user_items @ self.similarity_matrix).toarray().flatten()
+            # scores = scores.toarray().flatten()
+            #
+            # # Normalize by sum of similarities
+            # sim_sums = np.array(self.similarity_matrix.sum(axis=0)).flatten()
+            # sim_sums[sim_sums == 0] = 1.0
+            # scores = scores / sim_sums
+            item_similarities = self.similarity_matrix[:, user_item_indices]
+            scores = np.array(item_similarities.sum(axis=1)).flatten()
 
             # Remove items user already interacted with
             scores[user_item_indices] = -np.inf
@@ -345,7 +353,7 @@ class ItemKNN:
             user_recs = [(item_id, scores[item_id]) for item_id in top_items if scores[item_id] > 0]
             recommendations.append(user_recs)
 
-        return recommendations
+        return np.array(recommendations)
 
 class MultiVAE(nn.Module):
     def __init__(self, p_dims, q_dims=None, dropout=0.5):

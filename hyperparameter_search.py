@@ -156,7 +156,8 @@ def vectorized_ndcg_at_k(y_true_matrix, y_pred_matrix, k=10):
 
 def evaluate_model_vectorized(model, train_matrix, test_matrix, model_type, device, dataset=None, k=10):
     """Vectorized model evaluation"""
-    model.eval()
+    if model_type != 'ItemKNN':
+        model.eval()
     num_users, num_items = train_matrix.shape
 
     with torch.no_grad():
@@ -171,8 +172,10 @@ def evaluate_model_vectorized(model, train_matrix, test_matrix, model_type, devi
 
                 for user_idx in range(start_idx, end_idx):
                     if train_matrix[user_idx].nnz > 0:  # User has training interactions
-                        user_predictions = model.predict(user_idx)
-                        predictions[user_idx] = user_predictions
+                        preds = model.predict(user_idx)[0]  # 0 as we only take one user always
+                        item_ids = np.array(preds[:, 0], dtype=np.int64)  # Get item IDs
+                        scores = preds[:, 1]  # Get predicted scores
+                        predictions[user_idx, item_ids] = scores
 
             # Mask training items (set to -inf)
             train_mask = train_matrix.toarray() > 0
@@ -331,7 +334,7 @@ def hyperparameter_search():
     parser = argparse.ArgumentParser()
     parser.add_argument("--batch_size", type=int, default=512)
     parser.add_argument("--dataset", type=str, default="ml-100k", help="Dataset name")
-    parser.add_argument("--models", type=str, nargs='+', default=['ItemKNN', 'MultiVAE'],
+    parser.add_argument("--models", type=str, nargs='+', default=['MultiVAE'],
                         help="Models to search: LightGCN, ItemKNN, MultiVAE")
     # LightGCN
     parser.add_argument("--embedding_dim", type=int, default=128)
@@ -389,18 +392,19 @@ def hyperparameter_search():
     # Define hyperparameter spaces
     hyperparams = {
         'LightGCN': {
-            'embedding_dim': [64, 128],
-            'n_layers': [3, 4],
-            'batch_size': [1024]  # Larger batches for efficiency
+            'embedding_dim': [128],
+            'n_layers': [3],
+            'batch_size': [128, 256, 512, 1024]  # Larger batches for efficiency
         },
         'ItemKNN': {
-            'topk': [100, 200, 300, 400],
-            'shrink': [15, 30, 50, 75, 100]
+            'topk': [50, 80, 100, 150],
+            'shrink': [125, 150, 200, 300, 400]  # Wider range for shrink
         },
         'MultiVAE': {
-            'hidden_dimension': [600, 800, 1000],
-            'anneal_cap': [0.2, 0.35, 0.5],
-            'batch_size': [4096]  # Larger batches for efficiency
+            'hidden_dimension': [800],
+            'latent_dimension': [200, 300, 400],
+            'anneal_cap': [0.4],
+            'batch_size': [2048]  # Larger batches for efficiency
         }
     }
 
@@ -425,7 +429,7 @@ def hyperparameter_search():
             ).to(device)
 
             start_time = time.time()
-            train_lightgcn_efficient(model, dataset, device, epochs=30, batch_size=batch_size)
+            train_lightgcn_efficient(model, dataset, device, epochs=170, batch_size=batch_size)
             training_time = time.time() - start_time
 
             ndcg = evaluate_model_vectorized(model, train_matrix, test_matrix, 'LightGCN', device, dataset)
@@ -510,20 +514,21 @@ def hyperparameter_search():
         best_multivae_ndcg = 0
         best_multivae_params = {}
 
-        for hidden_dim, anneal_cap, batch_size in itertools.product(
+        for hidden_dim, latent_dim, anneal_cap, batch_size in itertools.product(
                 hyperparams['MultiVAE']['hidden_dimension'],
+                hyperparams['MultiVAE']['latent_dimension'],
                 hyperparams['MultiVAE']['anneal_cap'],
-                hyperparams['MultiVAE']['batch_size']
+                hyperparams['MultiVAE']['batch_size'],
         ):
-            print(f"Testing MultiVAE: hidden_dim={hidden_dim}, anneal_cap={anneal_cap}, batch_size={batch_size}")
+            print(f"Testing MultiVAE: hidden_dim={hidden_dim}, latent_dim={latent_dim}, anneal_cap={anneal_cap}, batch_size={batch_size}")
 
             model = MultiVAE(
-                p_dims=[200, hidden_dim, dataset.num_items],  # latent_dim=200
+                p_dims=[latent_dim, hidden_dim, dataset.num_items],  # latent_dim=200
                 dropout=0.5
             ).to(device)
 
             start_time = time.time()
-            train_multivae_efficient(model, train_matrix, device, epochs=80, batch_size=batch_size,
+            train_multivae_efficient(model, train_matrix, device, epochs=200, batch_size=batch_size,
                                      anneal_cap=anneal_cap)
             training_time = time.time() - start_time
 
@@ -532,6 +537,7 @@ def hyperparameter_search():
             result = {
                 'model': 'MultiVAE',
                 'hidden_dimension': hidden_dim,
+                'latent_dimension': latent_dim,
                 'anneal_cap': anneal_cap,
                 'batch_size': batch_size,
                 'ndcg@10': ndcg,
@@ -564,7 +570,7 @@ def hyperparameter_search():
 
 def save_model_results(model_name, model_results, best_params, run_id, dataset):
     """Save results for a specific model immediately after completion"""
-    filename = f'results_{model_name}_{run_id}.txt'
+    filename = f'hyperparameter_search/results_{model_name}_{run_id}.txt'
 
     with open(filename, 'w') as f:
         f.write(f"Hyperparameter Search Results - {model_name}\n")
@@ -656,42 +662,7 @@ def save_combined_summary(all_results, best_results, run_id, dataset, args):
         f.write(f"Total Search Time: {total_time:.2f} seconds ({total_time / 60:.1f} minutes)\n")
         f.write(f"Average Time per Experiment: {total_time / total_experiments:.2f} seconds\n\n")
 
-        # Best results summary
-        if best_results:
-            overall_best = max(best_results.items(), key=lambda x: x[1]['ndcg@10'])
-            f.write(f"🏆 OVERALL BEST: {overall_best[0]} (NDCG@10: {overall_best[1]['ndcg@10']:.4f})\n\n")
-
-        f.write("BEST RESULTS BY MODEL:\n")
-        f.write("-" * 25 + "\n")
-        for model_name, best_params in best_results.items():
-            f.write(f"{model_name}: NDCG@10 = {best_params['ndcg@10']:.4f}\n")
-            f.write(f"  Parameters: ")
-            params = {k: v for k, v in best_params.items()
-                      if k not in ['model', 'ndcg@10', 'training_time', 'run_id']}
-            f.write(f"{params}\n")
-            f.write(f"  Training Time: {best_params['training_time']:.2f}s\n\n")
-
-        # Model comparison table
-        f.write("MODEL COMPARISON TABLE:\n")
-        f.write("-" * 25 + "\n")
-        f.write(f"{'Model':<12} {'NDCG@10':<10} {'Time(s)':<10} {'Experiments':<12}\n")
-        f.write("-" * 50 + "\n")
-        for model_name in args.models:
-            if model_name in best_results:
-                best_ndcg = best_results[model_name]['ndcg@10']
-                best_time = best_results[model_name]['training_time']
-                num_exp = len(all_results[model_name])
-                f.write(f"{model_name:<12} {best_ndcg:<10.4f} {best_time:<10.2f} {num_exp:<12}\n")
-        f.write("\n")
-
-        # Individual result files created
-        f.write("INDIVIDUAL RESULT FILES:\n")
-        f.write("-" * 25 + "\n")
-        for model_name in args.models:
-            if model_name in all_results and all_results[model_name]:
-                f.write(f"results_{model_name}_{run_id}.txt\n")
-
-    print(f"✓ Combined summary saved to '{filename}'")
+    print(f"✓ Finished search")
 
 
 if __name__ == "__main__":
