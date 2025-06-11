@@ -235,7 +235,7 @@ def print_metric_results(metrics, title="Results"):
         row = f"{metric_name:<28}"
         for k in k_values:
             value = metrics[k][metric_name]
-            row += f"{value:>12f}"
+            row += f"{str(value):>12f}"
         print(row)
 
 
