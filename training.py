@@ -1,6 +1,9 @@
 import time
 from collections import defaultdict
 import wandb
+from wandb_logging import (_log_multivae_training_metrics, _log_training_metrics, _log_itemknn_training_start,
+                           _log_final_training_results, log_fold_metrics_to_wandb, log_test_metrics_to_wandb,
+                           log_cv_summary_to_wandb, _log_multivae_final_results)
 from evaluation import evaluate_current_model_ndcg
 from dataset import RecommendationDataset, sample_negative_items, prepare_adj_tensor, prepare_training_data
 from models import calculate_bpr_loss
@@ -8,10 +11,6 @@ from utils_functions import community_edge_suppression
 from scipy.sparse import csr_matrix
 import torch
 import torch.optim as optim
-from models import ItemKNN
-from models import LightGCN
-from models import get_model
-from config import Config
 import numpy as np
 
 
@@ -28,7 +27,7 @@ def train_itemknn(model, dataset, config, stage='cv', fold_num=None, verbose=Tru
         verbose: Whether to print training progress
 
     Returns:
-        tuple: (trained_model, training_time, validation_ndcg)
+        trained_model
     """
     print(f"Starting ItemKNN training...")
 
@@ -59,34 +58,7 @@ def train_itemknn(model, dataset, config, stage='cv', fold_num=None, verbose=Tru
         model, training_time, validation_ndcg, fold_num, verbose
     )
 
-    return model, training_time, validation_ndcg
-
-
-def _log_itemknn_training_start(model, num_interactions, fold_num, verbose):
-    """Log ItemKNN training start information."""
-    log_dict = {
-        'training_start': True,
-        'num_neighbors': model.k,
-        'shrinkage': model.shrink,
-        'bm25_k1': model.bm25_k1,
-        'bm25_b': model.bm25_b,
-        'num_training_interactions': num_interactions,
-        'num_users': model.num_users,
-        'num_items': model.num_items
-    }
-
-    # Add fold-specific prefix if in cross-validation
-    if fold_num is not None:
-        log_dict = {f'fold_{fold_num}/itemknn_{k}': v for k, v in log_dict.items()}
-    else:
-        log_dict = {f'final_training/itemknn_{k}': v for k, v in log_dict.items()}
-
-    wandb.log(log_dict)
-
-    if verbose:
-        print(f"  Building item similarity matrix...")
-        print(f"  Parameters: k={model.k}, shrink={model.shrink}, "
-              f"BM25(k1={model.bm25_k1}, b={model.bm25_b})")
+    return model
 
 
 def _log_itemknn_training_results(model, training_time, validation_ndcg, fold_num, verbose):
@@ -185,11 +157,8 @@ def _train_multivae_epoch_sparse(model, train_sparse_matrix, optimizer, batch_si
     num_users = train_sparse_matrix.shape[0]
 
     # KL annealing schedule
-    if hasattr(config, 'total_anneal_steps') and config.total_anneal_steps > 0:
-        anneal_cap = getattr(config, 'anneal_cap', 0.2)
-        kl_weight = min(anneal_cap, 1.0 * epoch / config.total_anneal_steps)
-    else:
-        kl_weight = getattr(config, 'kl_weight', 1.0)
+    anneal_cap = getattr(config, 'anneal_cap', 0.4)
+    kl_weight = min(anneal_cap, 1.0 * epoch / config.total_anneal_steps)
 
     # Create user indices for batching
     user_indices = np.random.permutation(num_users)
@@ -204,7 +173,6 @@ def _train_multivae_epoch_sparse(model, train_sparse_matrix, optimizer, batch_si
         # Forward pass
         recon_batch, mu, logvar = model(batch_data)
 
-        # Calculate loss
         loss = multivae_loss(recon_batch, batch_data, mu, logvar, kl_weight)
 
         # Backward pass
@@ -217,25 +185,6 @@ def _train_multivae_epoch_sparse(model, train_sparse_matrix, optimizer, batch_si
 
     avg_loss = total_loss / max(num_batches, 1)
     return avg_loss, kl_weight
-
-
-def _log_multivae_training_metrics(epoch, epoch_loss, val_ndcg, current_lr, kl_weight,
-                                   patience_counter, fold_num):
-    log_dict = {
-        'epoch': epoch,
-        'train_loss': epoch_loss,
-        'val_ndcg@10': val_ndcg,
-        'learning_rate': current_lr,
-        'kl_annealing_weight': kl_weight,
-        'patience_counter': patience_counter
-    }
-
-    if fold_num is not None:
-        log_dict = {f'fold_{fold_num}/{k}': v for k, v in log_dict.items()}
-    else:
-        log_dict = {f'final_training/{k}': v for k, v in log_dict.items()}
-
-    wandb.log(log_dict)
 
 
 def _check_multivae_early_stopping(val_ndcg, best_val_ndcg, patience_counter, patience,
@@ -277,23 +226,6 @@ def _check_multivae_early_stopping(val_ndcg, best_val_ndcg, patience_counter, pa
     return False, best_val_ndcg, patience_counter, best_model_state, best_epoch
 
 
-def _log_multivae_final_results(best_epoch, best_val_ndcg, total_epochs, early_stopped, fold_num):
-    """Log final MultiVAE training results to WandB."""
-    final_log_dict = {
-        'best_epoch': best_epoch,
-        'best_val_ndcg@10': best_val_ndcg,
-        'total_epochs': total_epochs,
-        'early_stopped': early_stopped
-    }
-
-    if fold_num is not None:
-        final_log_dict = {f'fold_{fold_num}/final_{k}': v for k, v in final_log_dict.items()}
-    else:
-        final_log_dict = {f'final_training/final_{k}': v for k, v in final_log_dict.items()}
-
-    wandb.log(final_log_dict)
-
-
 def train_multivae(model, dataset, config, optimizer, scheduler, device,
                    stage='cv', fold_num=None, verbose=True):
     """
@@ -311,7 +243,7 @@ def train_multivae(model, dataset, config, optimizer, scheduler, device,
         verbose: Whether to print training progress
 
     Returns:
-        tuple: (trained_model, best_epoch, best_val_ndcg)
+        tuple: trained_model
     """
     print(f"Starting MultiVAE...")
 
@@ -332,21 +264,24 @@ def train_multivae(model, dataset, config, optimizer, scheduler, device,
     # Main training loop
     for epoch in range(config.epochs):
         if config.use_dropout:
-            train_sparse_matrix = community_edge_suppression(
-                train_sparse_matrix, config)
+            current_edge_weight = community_edge_suppression(torch.tensor(dataset.train_df.values, device=device), config).cpu().numpy()
 
+            train_sparse_matrix = csr_matrix(
+                (current_edge_weight, (dataset.train_df['user_encoded'].values, dataset.train_df['item_encoded'].values)),
+                shape=(num_users, dataset.num_items),
+                dtype=np.float32)
         epoch_loss, kl_weight = _train_multivae_epoch_sparse(
             model, train_sparse_matrix, optimizer, batch_size,
-            epoch, config, device
-        )
+            epoch, config, device)
 
         # Evaluation and logging
-        if epoch % 10 == 0 or epoch == config.epochs - 1:
+        if epoch == 0 or (epoch+1) % 10 == 0 or epoch == config.epochs - 1:
             val_ndcg = evaluate_current_model_ndcg(model, dataset, model_type='MultiVAE', k=10)
+            # scheduler.step()
+
             val_history.append(val_ndcg)
             current_lr = optimizer.param_groups[0]['lr']
 
-            # Log metrics to WandB
             _log_multivae_training_metrics(
                 epoch, epoch_loss, val_ndcg, current_lr, kl_weight,
                 patience_counter, fold_num
@@ -359,21 +294,17 @@ def train_multivae(model, dataset, config, optimizer, scheduler, device,
             # Early stopping logic
             should_stop, best_val_ndcg, patience_counter, best_model_state, best_epoch = _check_multivae_early_stopping(
                 val_ndcg, best_val_ndcg, patience_counter, patience, val_history,
-                model, epoch, verbose
-            )
+                model, epoch, verbose)
 
             if should_stop:
                 break
 
-    # Load best model if available
     if best_model_state is not None:
         model.load_state_dict(best_model_state)
 
-    # Log final training results
     _log_multivae_final_results(best_epoch, best_val_ndcg, epoch + 1,
                                 patience_counter >= patience, fold_num)
-
-    return model, best_epoch, best_val_ndcg
+    return model
 
 
 def train_lightgcn(model, dataset, config, optimizer, scheduler, user_positive_items,
@@ -394,7 +325,7 @@ def train_lightgcn(model, dataset, config, optimizer, scheduler, user_positive_i
         verbose: Whether to print training progress
 
     Returns:
-        tuple: (trained_model, best_epoch, best_val_ndcg)
+        trained_model
     """
     print(f"Starting LightGCN training...")
     print(f"Complete graph: {len(dataset.complete_df)} interactions")
@@ -443,12 +374,11 @@ def train_lightgcn(model, dataset, config, optimizer, scheduler, user_positive_i
         )
 
         # Evaluation and logging
-        if epoch == 0 or epoch + 1 % 10 == 0 or epoch + 1 == config.epochs:
+        if epoch == 0 or (epoch + 1) % 10 == 0 or epoch + 1 == config.epochs:
             val_ndcg = evaluate_current_model_ndcg(model, dataset, k=10)
             val_history.append(val_ndcg)
             current_lr = optimizer.param_groups[0]['lr']
 
-            # Log metrics to WandB
             _log_training_metrics(epoch, epoch_loss, val_ndcg, current_lr,
                                   patience_counter, config, fold_num)
 
@@ -473,8 +403,7 @@ def train_lightgcn(model, dataset, config, optimizer, scheduler, user_positive_i
     # Log final training results
     _log_final_training_results(best_epoch, best_val_ndcg, epoch + 1,
                                 patience_counter >= patience, fold_num)
-
-    return model, best_epoch, best_val_ndcg
+    return model
 
 
 def _train_lightgcn_epoch(model, dataset, config, optimizer, all_train_users, all_train_items,
@@ -539,27 +468,6 @@ def _train_lightgcn_epoch(model, dataset, config, optimizer, all_train_users, al
     return total_loss / max(num_batches, 1)
 
 
-def _log_training_metrics(epoch, epoch_loss, val_ndcg, current_lr, patience_counter,
-                          config, fold_num):
-    """Log training metrics to WandB."""
-    log_dict = {
-        'epoch': epoch,
-        'train_loss': epoch_loss,
-        'val_ndcg@10': val_ndcg,
-        'learning_rate': current_lr,
-        'patience_counter': patience_counter,
-        'suppression_enabled': config.use_dropout
-    }
-
-    # Add fold-specific prefix if in cross-validation
-    if fold_num is not None:
-        log_dict = {f'fold_{fold_num}/{k}': v for k, v in log_dict.items()}
-    else:
-        log_dict = {f'final_training/{k}': v for k, v in log_dict.items()}
-
-    wandb.log(log_dict)
-
-
 def _check_early_stopping(val_ndcg, best_val_ndcg, patience_counter, patience,
                           val_history, model, epoch, verbose):
     """Check early stopping conditions and update best model."""
@@ -599,23 +507,6 @@ def _check_early_stopping(val_ndcg, best_val_ndcg, patience_counter, patience,
     return False, best_val_ndcg, patience_counter, best_model_state, best_epoch
 
 
-def _log_final_training_results(best_epoch, best_val_ndcg, total_epochs, early_stopped, fold_num):
-    """Log final training results to WandB."""
-    final_log_dict = {
-        'best_epoch': best_epoch,
-        'best_val_ndcg@10': best_val_ndcg,
-        'total_epochs': total_epochs,
-        'early_stopped': early_stopped
-    }
-
-    if fold_num is not None:
-        final_log_dict = {f'fold_{fold_num}/final_{k}': v for k, v in final_log_dict.items()}
-    else:
-        final_log_dict = {f'final_training/final_{k}': v for k, v in final_log_dict.items()}
-
-    wandb.log(final_log_dict)
-
-
 def _calculate_avg_neighbors(similarity_matrix):
     """Calculate average number of neighbors per item."""
     neighbors_per_item = np.array((similarity_matrix > 0).sum(axis=1)).flatten()
@@ -635,7 +526,7 @@ def train_model_itemknn(dataset, model, config, stage='cv', fold_num=None, verbo
         verbose: Whether to print training progress
 
     Returns:
-        tuple: (trained_model, training_time, validation_ndcg)
+        trained_model
     """
     print(f"Training ItemKNN model...")
 
@@ -645,7 +536,7 @@ def train_model_itemknn(dataset, model, config, stage='cv', fold_num=None, verbo
         dataset.val_df = dataset.test_df  # Use test set as validation
 
     # Train the model using the general training function
-    trained_model, training_time, validation_ndcg = train_itemknn(
+    trained_model = train_itemknn(
         model=model,
         dataset=dataset,
         config=config,
@@ -654,7 +545,7 @@ def train_model_itemknn(dataset, model, config, stage='cv', fold_num=None, verbo
         verbose=verbose
     )
 
-    return trained_model, training_time, validation_ndcg
+    return trained_model
 
 
 def train_model(dataset, model, config, stage='cv', fold_num=None, verbose=True):
@@ -670,7 +561,7 @@ def train_model(dataset, model, config, stage='cv', fold_num=None, verbose=True)
         verbose: Whether to print training progress
 
     Returns:
-        tuple: (trained_model, complete_edge_index, complete_edge_weight)
+        trained_model
     """
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Training on device: {device}")
@@ -691,8 +582,8 @@ def train_model(dataset, model, config, stage='cv', fold_num=None, verbose=True)
         dataset.train_df = dataset.train_val_df  # Use all training+validation data
         dataset.val_df = dataset.test_df  # Use test set as validation
 
-    elif config.model_name == 'ItemKNN':
-        trained_model, training_time, validation_ndcg = train_itemknn(
+    if config.model_name == 'ItemKNN':
+        trained_model = train_itemknn(
             model=model,
             dataset=dataset,
             config=config,
@@ -703,7 +594,7 @@ def train_model(dataset, model, config, stage='cv', fold_num=None, verbose=True)
         return trained_model
 
     elif config.model_name == 'MultiVAE':
-        trained_model, best_epoch, best_val_ndcg = train_multivae(
+        trained_model = train_multivae(
             model=model,
             dataset=dataset,
             config=config,
@@ -716,7 +607,7 @@ def train_model(dataset, model, config, stage='cv', fold_num=None, verbose=True)
         )
         return trained_model
 
-    if config.model_name == 'LightGCN':
+    elif config.model_name == 'LightGCN':
         dataset.complete_edge_index = dataset.complete_edge_index.to(device)
         dataset.complete_edge_weight = dataset.complete_edge_weight.to(device)
 
@@ -725,7 +616,7 @@ def train_model(dataset, model, config, stage='cv', fold_num=None, verbose=True)
         for user_id, group in dataset.complete_df.groupby('user_encoded')['item_encoded']:
             user_positive_items[user_id] = set(group.values)
 
-        trained_model, best_epoch, best_val_ndcg = train_lightgcn(
+        trained_model = train_lightgcn(
             model=model,
             dataset=dataset,
             config=config,

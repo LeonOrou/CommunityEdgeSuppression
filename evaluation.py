@@ -11,7 +11,8 @@ def evaluate_model(model, dataset, config, stage='cv', k_values=[10, 20, 50, 100
     stage: 'full_train' for full training evaluation, 'cv' for cross-validation evaluation
     k_values: list of k_values values to evaluate (e.g., [10, 20, 50])
     """
-    model.eval()
+    if config.model_name != 'ItemKNN':
+        model.eval()
 
     if isinstance(k_values, int):
         k_values = [k_values]
@@ -408,10 +409,13 @@ def print_metric_results(metrics, title="Results"):
     print("-" * (20 + 12 * len(k_values)))
 
     for metric_name in metric_names:
-        row = f"{metric_name:<28}"
+        row = f"{metric_name:<25}"
         for k in k_values:
             value = metrics[k][metric_name]
-            row += f"{str(value):>12f}"
+            if not isinstance(value, float):
+                print(value)
+                continue
+            row += f"{np.round(value, 4):>12}"
         print(row)
 
 

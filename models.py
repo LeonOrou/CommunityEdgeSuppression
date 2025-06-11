@@ -447,9 +447,9 @@ def get_model(dataset, config):
         return ItemKNN(
             num_users=dataset.num_users,
             num_items=dataset.num_items,
-            topk=config.item_knn_topk,
+            k=config.item_knn_topk,
             shrink=config.shrink,
-        ).to(config.device)
+        )  # no .to(config.device) for ItemKNN as it uses numpy/scipy
     elif config.model_name == 'MultiVAE':
         return MultiVAE(
             p_dims=[config.latent_dimension, config.hidden_dimension, dataset.num_items],

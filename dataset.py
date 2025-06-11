@@ -225,7 +225,6 @@ class RecommendationDataset:
             os.makedirs(f'dataset/{self.name}/encoders')
         pd.to_pickle(user_encoder, f'dataset/{self.name}/encoders/user_encoder.pkl')
         pd.to_pickle(item_encoder, f'dataset/{self.name}/encoders/item_encoder.pkl')
-
         pd.to_pickle(filtered_df, f'dataset/{self.name}/saved/filtered_df.pkl')
 
         num_users = len(user_encoder.classes_)

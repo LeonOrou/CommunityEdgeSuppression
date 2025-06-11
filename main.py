@@ -12,7 +12,7 @@ from argparse import ArgumentParser
 from utils_functions import (
     community_edge_suppression, get_community_data, get_biased_connectivity_data, set_seed, )
 import wandb
-from wanb_logging import init_wandb, log_fold_metrics_to_wandb, log_test_metrics_to_wandb, log_cv_summary_to_wandb
+from wandb_logging import init_wandb, log_fold_metrics_to_wandb, log_test_metrics_to_wandb, log_cv_summary_to_wandb
 import time
 from scipy.sparse import csr_matrix
 from training import train_model
@@ -74,19 +74,13 @@ def main():
 
         dataset.get_fold_i(i=fold)  # sets train_df and val_df for this fold
 
-        model, complete_edge_index, complete_edge_weight = train_model(
-            dataset=dataset,
-            model=model,
-            config=config,
-            stage='cv',
-            fold_num=fold + 1,
-        )
+        model = train_model(dataset=dataset, model=model, config=config, stage='cv', fold_num=fold + 1,)
 
         if len(dataset.val_df) > 0:
             val_metrics = evaluate_model(
                 model=model, dataset=dataset, config=config,
-                k_values=config.evaluate_top_k, stage='cv'
-            )
+                k_values=config.evaluate_top_k, stage='cv')
+
 
             cv_results.append(val_metrics)
             log_fold_metrics_to_wandb(fold + 1, val_metrics, config)
@@ -116,16 +110,14 @@ def main():
     print("FINAL MODEL EVALUATION ON TEST SET")
     print("=" * 85)
 
-    print("Training final model with complete graph structure...")
+    print("Training final model on full dataset...")
 
     model = get_model(config=config, dataset=dataset)
-    # Final training: use ALL data in graph, but only train+val for loss
-    final_model, final_edge_index, final_edge_weight = train_model(
-        model=model, dataset=dataset, config=config, stage='full_train',
-        fold_num=None, )
+
+    model = train_model(dataset=dataset, model=model, config=config, stage='full_train', fold_num=None,)
 
     test_metrics = evaluate_model(
-        model=final_model, dataset=dataset, config=config,
+        model=model, dataset=dataset, config=config,
         k_values=config.evaluate_top_k, stage='full_train')
 
     log_test_metrics_to_wandb(test_metrics, config)
@@ -136,31 +128,12 @@ def main():
         description=f"Trained {config.model_name} model on {config.dataset_name} dataset")
 
     model_path = "final_model.pth"
-    torch.save(final_model.state_dict(), model_path)
+    torch.save(model.state_dict(), model_path)
     model_artifact.add_file(model_path)
-
-    model_info = {
-        'model_class': config.model_name,
-        'num_users': dataset.num_users,
-        'num_items': dataset.num_items,
-        'embedding_dim': config.embedding_dim,
-        'num_layers': config.n_layers if config.model_name == 'LightGCN' else None,
-        'total_parameters': sum(p.numel() for p in final_model.parameters()),
-        'trainable_parameters': sum(p.numel() for p in final_model.parameters() if p.requires_grad)}
-
-    wandb.log({
-        'model/total_parameters': model_info['total_parameters'],
-        'model/trainable_parameters': model_info['trainable_parameters']})
 
     wandb.log_artifact(model_artifact)
 
     print_metric_results(test_metrics, "FINAL TEST SET RESULTS")
-
-    wandb.log({
-        'experiment/total_folds': n_folds,
-        'experiment/best_cv_ndcg@10': max([cv_results[i]['val_ndcg@10'] for i in range(len(cv_results))]),
-        'experiment/final_test_ndcg@10': test_metrics[10]['ndcg'],
-        'experiment/completed': True})
 
     # Clean up temporary files
     if os.path.exists(model_path):
@@ -168,7 +141,7 @@ def main():
 
     wandb.finish()
 
-    return cv_results, cv_summary, test_metrics, final_model
+    return cv_results, cv_summary, test_metrics, model
 
 
 def parse_arguments():
@@ -189,25 +162,5 @@ def parse_arguments():
 
 if __name__ == "__main__":
     set_seed(42)  # For reproducibility
-    cv_results, cv_summary, test_metrics, final_model = main()
-
-    print("\n" + "=" * 85)
-    print("DETAILED FOLD RESULTS")
-    print("=" * 85)
-
-    for result in cv_results:
-        # Reconstruct metrics dict for this fold
-        fold_metrics = {}
-        for key, value in result.items():
-            if key != 'fold' and '@' in key:
-                # Extract k value and metric name from key like 'val_ndcg@10'
-                metric_part, k_str = key.split('@')
-                k = int(k_str)
-                metric_name = metric_part.replace('val_', '')
-
-                if k not in fold_metrics:
-                    fold_metrics[k] = {}
-                fold_metrics[k][metric_name] = value
-
-        print_metric_results(fold_metrics, f"Fold {result['fold']}")
+    cv_results, cv_summary, test_metrics, model = main()
 

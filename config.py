@@ -32,11 +32,11 @@ class Config:
         self.train_dataset_len = 0
 
         # training parameters; lr-scheduler, optimizer, etc.
-        self.patience = 2
+        self.patience = 10
         self.gamma = 0.5
         self.min_lr = 1e-5
         self.reproducibility = True
-        self.learning_rate = 1e-4
+        self.learning_rate = 5e-4
         self.nr_items = None
 
         self.setup_device()
@@ -62,13 +62,11 @@ class Config:
             self.shrink = 50
             self.feature_weighting = 'bm25'
         elif self.model_name == 'MultiVAE':
-            self.epochs = 200
-            self.batch_size = 2048  # For consistency
+            self.epochs = 20
+            self.batch_size = 2048
             self.hidden_dimension = 800
             self.latent_dimension = 200
-            self.q_dims = [self.hidden_dimension, self.latent_dimension]
-            self.p_dims = [self.latent_dimension, self.hidden_dimension, self.nr_items]
-            self.drop = 0.5
+            self.dropout_prob = 0.5
             self.anneal_cap = 0.4
             self.total_anneal_steps = 200000
 
