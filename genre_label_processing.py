@@ -63,7 +63,9 @@ def save_lfm_genre_labels(input_file="dataset/LFM1M/tags_all_music.tsv", dataset
                 genres = parts[4:]
                 genres = [genre_to_id[g] for g in genres if g in genre_to_id]
                 if genres:
-                    item_genres[parts[0]] = genres[:3]  # Limit to first 3 genres
+                    # in order to stay equivalent with the other datasets we also take all genres
+                    # item_genres[parts[0]] = genres[:3]  # Limit to first 3 genres
+                    item_genres[parts[0]] = genres
 
     with open(f'dataset/{dataset_name}/saved/item_genre_labels_{dataset_name}.json', 'w', encoding='utf-8') as f:
         json.dump(dict(item_genres), f)

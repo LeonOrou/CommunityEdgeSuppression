@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import json
 from collections import defaultdict
+from scipy.sparse import csr_matrix
 
 
 def evaluate_model(model, dataset, config, stage='cv', k_values=[10, 20, 50, 100]):
@@ -76,42 +77,27 @@ def evaluate_model(model, dataset, config, stage='cv', k_values=[10, 20, 50, 100
                 )
 
         elif config.model_name == 'MultiVAE':
-            # MultiVAE evaluation using sparse matrices
-            from scipy.sparse import csr_matrix
-
-            # Create sparse training matrix
-            train_data = dataset.train_df
-            train_users = train_data['user_encoded'].values
-            train_items = train_data['item_encoded'].values
-            train_ratings = train_data['rating'].values
-
             train_matrix = csr_matrix(
-                (train_ratings, (train_users, train_items)),
+                (dataset.train_df['rating'].values,
+                 (dataset.train_df['user_encoded'].values, dataset.train_df['item_encoded'].values)),
                 shape=(dataset.num_users, dataset.num_items),
-                dtype=np.float32
-            )
+                dtype=np.float32)
 
             device = next(model.parameters()).device
+            user_ids = list(user_test_items.keys())
+            user_input = torch.tensor(train_matrix[user_ids].toarray(), device=device, dtype=torch.float32)
 
-            for user_id, true_items in user_test_items.items():
-                if user_id >= dataset.num_users:
-                    continue
+            recon, _, _ = model(user_input)
+            scores_batch = recon.cpu().numpy()  # Shape: (num_valid_users, num_items)
 
-                # Get user's training data as dense tensor
-                user_row = train_matrix.getrow(user_id).toarray().flatten()
-                user_input = torch.tensor(user_row, device=device, dtype=torch.float32).unsqueeze(0)
-
-                # Get recommendations from MultiVAE
-                recon, _, _ = model(user_input)
-                scores = recon.squeeze().cpu().numpy()
-
-                # Exclude items that the user interacted with during training
+            # Create mask for training items to exclude
+            scores_filtered = scores_batch.copy()
+            for i, user_id in enumerate(user_test_items.keys()):
                 train_items = list(train_user_items.get(user_id, []))
-                scores_filtered = scores.copy()
-                scores_filtered[train_items] = float('-inf')
-
+                if train_items:
+                    scores_filtered[i, train_items] = float('-inf')
                 _process_user_recommendations(
-                    user_id, true_items, scores_filtered, train_items, max_k, k_values,
+                    user_id, user_test_items[user_id], scores_filtered[i], train_items, max_k, k_values,
                     metrics_by_k, item_recommendation_freq_by_k, all_global_recommendations_by_k,
                     user_item_community_distributions, config, encoded_to_genres, dataset
                 )
@@ -312,41 +298,33 @@ def evaluate_current_model_ndcg(model, dataset, model_type='LightGCN', k=10):
                 ndcg_scores.append(ndcg)
 
         elif model_type == 'MultiVAE':
-            from scipy.sparse import csr_matrix
-
-            # Create sparse training matrix
-            train_data = dataset.train_df
-            train_users = train_data['user_encoded'].values
-            train_items = train_data['item_encoded'].values
-            train_ratings = train_data['rating'].values
-
             train_matrix = csr_matrix(
-                (train_ratings, (train_users, train_items)),
+                (dataset.train_df['rating'].values, (dataset.train_df['user_encoded'].values, dataset.train_df['item_encoded'].values)),
                 shape=(dataset.num_users, dataset.num_items),
-                dtype=np.float32
-            )
+                dtype=np.float32)
 
             device = next(model.parameters()).device
+            user_ids = list(user_val_items.keys())
+            user_rows = train_matrix[user_ids].toarray()  # Shape: (num_valid_users, num_items)
+            user_input = torch.tensor(user_rows, device=device, dtype=torch.float32)
 
-            for user_id, true_items in user_val_items.items():
-                if user_id >= dataset.num_users:
-                    continue
+            # Get recommendations for all users at once
+            recon, _, _ = model(user_input)
+            scores_batch = recon.cpu().numpy()  # Shape: (num_valid_users, num_items)
 
-                # Get user's training data as dense tensor
-                user_row = train_matrix.getrow(user_id).toarray().flatten()
-                user_input = torch.tensor(user_row, device=device, dtype=torch.float32).unsqueeze(0)
-
-                # Get recommendations from MultiVAE
-                recon, _, _ = model(user_input)
-                scores = recon.squeeze().cpu().numpy()
-
-                # Exclude items that the user interacted with during training
+            # Create mask for training items to exclude
+            scores_filtered = scores_batch.copy()
+            for i, user_id in enumerate(user_ids):
                 train_items = list(train_user_items.get(user_id, []))
-                scores_filtered = scores.copy()
-                scores_filtered[train_items] = float('-inf')
+                if train_items:
+                    scores_filtered[i, train_items] = float('-inf')
 
-                ndcg = calculate_ndcg(true_items, scores_filtered, k)
-                ndcg_scores.append(ndcg)
+            # Calculate NDCG for all users (assuming calculate_ndcg can handle batched input)
+            # If calculate_ndcg can't handle batched input, use list comprehension:
+            ndcg_scores = [
+                calculate_ndcg(user_val_items[user_id], scores_filtered[i], k)
+                for i, user_id in enumerate(user_val_items.keys())
+            ]
 
         elif model_type == 'ItemKNN':
             for user_id, true_items in user_val_items.items():

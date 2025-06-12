@@ -51,7 +51,7 @@ class Config:
         if self.model_name == 'LightGCN':
             self.batch_size = 236
             self.learning_rate = 0.005
-            self.epochs = 20  # because it's different for each model
+            self.epochs = 1  # because it's different for each model
             self.n_layers = 3
             self.embedding_dim = 128
             self.num_folds = 5

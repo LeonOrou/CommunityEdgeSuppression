@@ -22,6 +22,7 @@ warnings.filterwarnings('ignore')
 
 
 def main():
+    set_seed(42)  # For reproducibility
     args = parse_arguments()
     config = Config()
     config.update_from_args(args)
@@ -153,7 +154,7 @@ def main():
 def parse_arguments():
     """Parse command line arguments."""
     parser = ArgumentParser()
-    parser.add_argument("--model_name", type=str, default='ItemKNN',)
+    parser.add_argument("--model_name", type=str, default='LightGCN')
     parser.add_argument("--dataset_name", type=str, default='lfm')
     parser.add_argument("--users_top_percent", type=float, default=0.05)
     parser.add_argument("--items_top_percent", type=float, default=0.05)
@@ -167,6 +168,5 @@ def parse_arguments():
 
 
 if __name__ == "__main__":
-    set_seed(42)  # For reproducibility
     cv_results, cv_summary, test_metrics, model = main()
 
