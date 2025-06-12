@@ -117,6 +117,25 @@ class ItemKNN:
         self.similarity_matrix = None
         self.user_item_matrix = None
 
+    def TF_IDF(self, rating_matrix):
+        """
+        Items are assumed to be on rows
+        :param dataMatrix:
+        :return:
+        """
+
+        # TFIDF each row of a sparse amtrix
+        rating_matrix = sp.coo_matrix(rating_matrix)
+        N = float(rating_matrix.shape[0])
+
+        # calculate IDF
+        idf = np.log(N / (1 + np.bincount(rating_matrix.col)))
+
+        # apply TF-IDF adjustment
+        rating_matrix.data = np.sqrt(rating_matrix.data) * idf[rating_matrix.col]
+
+        return rating_matrix.tocsr().T
+
     def okapi_BM25(self, rating_matrix, K1=1.2, B=0.75):
         assert B > 0 and B < 1, "okapi_BM_25: B must be in (0,1)"
         assert K1 > 0, "okapi_BM_25: K1 must be > 0"
@@ -139,19 +158,94 @@ class ItemKNN:
         rating_matrix.data = rating_matrix.data * (K1 + 1.0) / (
                     K1 * length_norm[rating_matrix.row] + rating_matrix.data) * idf[rating_matrix.col]
 
-        return rating_matrix.tocsr()
+        return rating_matrix.tocsr().T
 
-    def _weighted_cosine_similarity_sparse(self, bm25_matrix):
+    def cosine_sim_users(self, user_item_matrix):
+        """
+        Compute weighted cosine similarity between USERS (not items).
+        """
+        # No transpose needed - we want user-user similarities
+        # user_item_matrix is already (users × items)
+
+        # Compute norms for each user
+        norms = np.sqrt(np.array(user_item_matrix.power(2).sum(axis=1)).flatten())
+        norms[norms == 0] = 1.0
+
+        # Normalize the matrix (each user vector)
+        user_normalized = user_item_matrix.multiply(1 / norms[:, np.newaxis])
+
+        # Compute similarity matrix (user × user)
+        similarity = user_normalized @ user_normalized.T
+
+        # Apply shrinkage based on common items (not users)
+        if self.shrink > 0:
+            # Count common items between users
+            common_items = (user_item_matrix > 0).astype(float) @ (user_item_matrix > 0).T
+
+            # Apply shrinkage formula
+            common_items_coo = common_items.tocoo()
+            shrink_data = common_items_coo.data / (common_items_coo.data + self.shrink)
+            shrink_factor = csr_matrix(
+                (shrink_data, (common_items_coo.row, common_items_coo.col)),
+                shape=common_items.shape
+            )
+            similarity = similarity.multiply(shrink_factor)
+
+        # Set diagonal to 0 (user shouldn't be similar to themselves)
+        similarity.setdiag(0)
+
+        return similarity.tocsr()
+
+    def _recommend_items_user_similarities(self, user_ids, n_items):
+        """
+        Get top-n item recommendations using USER-based collaborative filtering.
+        """
+        recommendations = []
+
+        for user_id in user_ids:
+            # Get target user's profile
+            target_user = self.tf_idf_matrix.getrow(user_id)
+            user_item_indices = target_user.nonzero()[1]
+
+            # Get similarities to all other users
+            user_similarities = self.user_similarity_matrix.getrow(user_id)
+
+            # Method 1: Use all similar users (if not pruned)
+            if user_similarities.nnz > 0:
+                # Compute item scores by aggregating similar users' preferences
+                # user_similarities: (1, num_users)
+                # self.tf_idf_matrix: (num_users, num_items)
+                scores = (user_similarities @ self.tf_idf_matrix).toarray().flatten()
+            else:
+                # Fallback if no similar users found
+                scores = np.zeros(self.num_items)
+
+            # Remove items user already interacted with
+            scores[user_item_indices] = -np.inf
+
+            # Get top-n items
+            if np.any(scores > -np.inf):
+                top_items = np.argpartition(scores, -n_items)[-n_items:]
+                top_items = top_items[np.argsort(scores[top_items])[::-1]]
+
+                # Create recommendation list
+                user_recs = [(item_id, scores[item_id]) for item_id in top_items
+                             if scores[item_id] > -np.inf]
+            else:
+                user_recs = []
+
+            recommendations.append(user_recs)
+
+        return recommendations
+
+    def cosine_sim(self, user_item_matrix):
         """
         Compute weighted cosine similarity between items using sparse operations.
         """
-        # Transpose to get item-user matrix
-        item_user_matrix = bm25_matrix.T.tocsr()
+        item_user_matrix = user_item_matrix.T.tocsr()
 
-        # Compute norms for each item
         norms = np.sqrt(np.array(item_user_matrix.power(2).sum(axis=1)).flatten())
 
-        # Avoid division by zero
         norms[norms == 0] = 1.0
 
         # Normalize the matrix
@@ -160,13 +254,9 @@ class ItemKNN:
         # Compute similarity matrix (item x item)
         similarity = item_user_normalized @ item_user_normalized.T
 
-        # Apply shrinkage
         if self.shrink > 0:
-            # Get the number of common users between items
             common_users = (item_user_matrix > 0).astype(float) @ (item_user_matrix > 0).T
 
-            # Apply shrinkage formula
-            # Convert to COO format for efficient element-wise operations
             common_users_coo = common_users.tocoo()
             shrink_data = common_users_coo.data / (common_users_coo.data + self.shrink)
             shrink_factor = csr_matrix(
@@ -201,10 +291,11 @@ class ItemKNN:
         )
 
         # Apply BM25 weighting
-        self.bm25_matrix = self.okapi_BM25(self.user_item_matrix)
+        self.bm25_matrix = self.okapi_BM25(self.user_item_matrix.T)
+        self.tf_idf_matrix = self.TF_IDF(self.user_item_matrix.T)
 
         # Compute weighted cosine similarity
-        self.similarity_matrix = self._weighted_cosine_similarity_sparse(self.user_item_matrix)
+        self.similarity_matrix = self.cosine_sim(self.tf_idf_matrix)
 
         # For each item, keep only top-k similar items
         self._prune_similarity_matrix()
@@ -261,7 +352,7 @@ class ItemKNN:
             return self._predict_ratings(user_ids, item_ids)
         else:
             # Get top-n recommendations
-            return self._recommend_items(user_ids, n_items)
+            return self._recommend_items_similarities(user_ids, n_items)
 
     def _predict_ratings(self, user_ids, item_ids):
         """
@@ -304,42 +395,35 @@ class ItemKNN:
 
         return np.array(predictions)
 
-    def _recommend_items(self, user_ids, n_items):
+    def _recommend_items_similarities(self, user_ids, n_items):
         """
-        Get top-n item recommendations for users.
+        Get top-n item recommendations for users using item-based collaborative filtering.
         """
         recommendations = []
 
         for user_id in user_ids:
-            # Get user's item ratings
-            user_items = self.bm25_matrix.getrow(user_id)
+            # Get user's BM25-weighted ratings
+            user_items = self.tf_idf_matrix.getrow(user_id)
             user_item_indices = user_items.nonzero()[1]
 
-            # Compute scores for all items
-            # scores = (user_items @ self.similarity_matrix).toarray().flatten()
-            # scores = scores.toarray().flatten()
-            #
-            # # Normalize by sum of similarities
-            # sim_sums = np.array(self.similarity_matrix.sum(axis=0)).flatten()
-            # sim_sums[sim_sums == 0] = 1.0
-            # scores = scores / sim_sums
-            item_similarities = self.similarity_matrix[:, user_item_indices]
-            # scores = np.array(item_similarities.sum(axis=1)).flatten()
-            user_similarities = (user_items @ self.bm25_matrix.T).toarray().flatten()
+            # Compute scores using item-item similarities
+            # user_items: (1, num_items), similarity_matrix: (num_items, num_items)
+            scores = (user_items @ self.similarity_matrix).toarray().flatten()
 
-            scores = (user_similarities @ self.bm25_matrix).flatten()
             # Remove items user already interacted with
             scores[user_item_indices] = -np.inf
 
-            # Get top-n items
+            # Get top-n items - this part works correctly
             top_items = np.argpartition(scores, -n_items)[-n_items:]
             top_items = top_items[np.argsort(scores[top_items])[::-1]]
 
             # Create recommendation list
-            user_recs = [(item_id, scores[item_id]) for item_id in top_items if scores[item_id] > 0]
+            user_recs = [(item_id, scores[item_id]) for item_id in top_items
+                         if scores[item_id] > -np.inf]  # Changed condition
             recommendations.append(user_recs)
 
-        return np.array(recommendations)
+        return recommendations  # Remove np.array() wrapper
+
 
 class MultiVAE(nn.Module):
     def __init__(self, p_dims, q_dims=None, dropout=0.5):

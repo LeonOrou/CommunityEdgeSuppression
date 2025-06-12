@@ -154,14 +154,14 @@ def parse_arguments():
     """Parse command line arguments."""
     parser = ArgumentParser()
     parser.add_argument("--model_name", type=str, default='ItemKNN',)
-    parser.add_argument("--dataset_name", type=str, default='ml-100k')
+    parser.add_argument("--dataset_name", type=str, default='lfm')
     parser.add_argument("--users_top_percent", type=float, default=0.05)
     parser.add_argument("--items_top_percent", type=float, default=0.05)
     parser.add_argument("--users_dec_perc_drop", type=float, default=0.05)
     parser.add_argument("--items_dec_perc_drop", type=float, default=0.05)
-    parser.add_argument("--community_suppression", type=float, default=0.1)
+    parser.add_argument("--community_suppression", type=float, default=0.6)
     parser.add_argument("--drop_only_power_nodes", type=bool, default=True)
-    parser.add_argument("--use_dropout", type=bool, default=True)
+    parser.add_argument("--use_dropout", type=bool, default=False)
 
     return parser.parse_args()
 

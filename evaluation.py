@@ -353,7 +353,7 @@ def evaluate_current_model_ndcg(model, dataset, model_type='LightGCN', k=10):
                 # if user_id >= dataset.num_users:
                 #     continue
 
-                recommendations = model.predict(user_id, n_items=dataset.num_items)
+                recommendations = model.predict(user_id, n_items=k)
 
                 # ItemKNN returns [(item_id, score), ...] for each user
                 if len(recommendations) > 0 and len(recommendations[0]) > 0:

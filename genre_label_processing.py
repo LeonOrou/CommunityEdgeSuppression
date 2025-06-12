@@ -3,6 +3,7 @@
 # load genre labels of ml-100k dataset and save them in a dictionary and locally
 import os
 import json
+from collections import Counter, defaultdict
 
 
 def save_ml100k_genre_labels(file_path, dataset_name='ml-100k'):
@@ -38,6 +39,34 @@ def save_ml100k_genre_labels(file_path, dataset_name='ml-100k'):
         json.dump(genre_labels, json_file, indent=4)
     return genre_labels
 
+
+def save_lfm_genre_labels(input_file="dataset/LFM1M/tags_all_music.tsv", dataset_name='lfm'):
+    genre_counter = Counter()
+
+    with open(input_file, 'r', encoding='utf-8') as f:
+        for line in f:
+            parts = line.strip().split('\t')
+            if parts[0] == 'track_id':
+                continue
+            if len(parts) >= 4 and parts[4:]:
+                genre_counter.update(parts[4:])
+
+    top_genres = [g for g, _ in genre_counter.most_common(100)]
+    genre_to_id = {g: i + 1 for i, g in enumerate(top_genres)}
+
+    item_genres = defaultdict(list)
+
+    with open(input_file, 'r', encoding='utf-8') as f:
+        for line in f:
+            parts = line.strip().split('\t')
+            if len(parts) >= 4 and parts[4]:
+                genres = parts[4:]
+                genres = [genre_to_id[g] for g in genres if g in genre_to_id]
+                if genres:
+                    item_genres[parts[0]] = genres[:3]  # Limit to first 3 genres
+
+    with open(f'dataset/{dataset_name}/saved/item_genre_labels_{dataset_name}.json', 'w', encoding='utf-8') as f:
+        json.dump(dict(item_genres), f)
 
 def save_ml20m_genre_labels(file_path, dataset_name='ml-20m'):
     """
@@ -96,7 +125,7 @@ def save_ml20m_genre_labels(file_path, dataset_name='ml-20m'):
     return genre_labels
 
 
-save_ml100k_genre_labels('dataset/ml-100k/u.item')  # Adjust the path as necessary
-
-save_ml20m_genre_labels('dataset/ml-20m/movies.csv')  # Adjust the path as necessary
+# save_ml100k_genre_labels('dataset/ml-100k/u.item')
+save_lfm_genre_labels('dataset/LFM1M/tags_all_music.tsv')
+# save_ml20m_genre_labels('dataset/ml-20m/movies.csv')
 
