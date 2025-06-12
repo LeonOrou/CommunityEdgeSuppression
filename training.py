@@ -329,10 +329,6 @@ def train_lightgcn(model, dataset, config, optimizer, scheduler, user_positive_i
         trained_model
     """
     print(f"Starting LightGCN training...")
-    print(f"Complete graph: {len(dataset.complete_df)} interactions")
-    print(f"Training interactions: {len(dataset.train_df)} (used for loss)")
-    print(f"Val interactions: {len(dataset.val_df)} (used for evaluation)")
-    print(f"Test interactions: {len(dataset.test_df)} (used for evaluation)")
 
     # Training parameters
     batch_size = config.batch_size
@@ -346,7 +342,7 @@ def train_lightgcn(model, dataset, config, optimizer, scheduler, user_positive_i
     # Pre-convert training data to GPU or CPU based on size
     if len(dataset.train_df) < 200000:
         all_train_users, all_train_items, train_indices = prepare_training_data(
-            dataset.train_val_df, device=device)
+            dataset.train_df, device=device)
     else:
         all_train_users, all_train_items, train_indices = prepare_training_data(
             dataset.train_df, device='cpu')
@@ -355,9 +351,7 @@ def train_lightgcn(model, dataset, config, optimizer, scheduler, user_positive_i
     adj_tens = prepare_adj_tensor(dataset)
     model.train()
 
-    # Main training loop
     for epoch in range(config.epochs):
-        # Handle edge weight modification for dropout
         if config.use_dropout:
             edge_weights_modified = community_edge_suppression(adj_tens, config)
             # bidirectional edges for LightGCN
@@ -377,6 +371,7 @@ def train_lightgcn(model, dataset, config, optimizer, scheduler, user_positive_i
         # Evaluation and logging
         if epoch == 0 or (epoch + 1) % 10 == 0 or epoch + 1 == config.epochs:
             val_ndcg = evaluate_current_model_ndcg(model, dataset, k=10)
+            scheduler.step()
             val_history.append(val_ndcg)
             current_lr = optimizer.param_groups[0]['lr']
 
@@ -434,11 +429,7 @@ def _train_lightgcn_epoch(model, dataset, config, optimizer, all_train_users, al
             batch_users = biggi_train_users[i:i + batch_size]
             batch_pos_items = biggi_train_items[i:i + batch_size]
 
-            # Sample negative items
-            batch_neg_items = sample_negative_items(
-                batch_users, batch_pos_items, dataset.num_items,
-                user_positive_items, device
-            )
+            batch_neg_items = dataset.sample_negative_items(user_ids=batch_users)
 
             # Forward pass
             user_emb, item_emb = model(dataset.complete_edge_index, dataset.current_edge_weight)

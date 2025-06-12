@@ -382,21 +382,18 @@ class RecommendationDataset:
         elif split == 'all':
             return self.user_positive_items.get(user_id, set())
 
-    def sample_negative_items(self, user_ids, num_negatives=1):
+    def sample_negative_items(self, user_ids):
         """Sample negative items for given users"""
-        neg_items = []
-        for user_id in user_ids:
+        neg_items = torch.zeros(len(user_ids), dtype=torch.int64, device=self.device)
+        for i, user_id in enumerate(user_ids):
             user_pos_items = self.get_user_positive_items(user_id, split='all')
-            user_neg_items = []
 
-            for _ in range(num_negatives):
+            neg_item = np.random.randint(0, self.num_items)
+            attempts = 0
+            while neg_item in user_pos_items and attempts < 100:
                 neg_item = np.random.randint(0, self.num_items)
-                attempts = 0
-                while neg_item in user_pos_items and attempts < 100:
-                    neg_item = np.random.randint(0, self.num_items)
-                    attempts += 1
-                user_neg_items.append(neg_item)
-            neg_items.extend(user_neg_items)
+                attempts += 1
+            neg_items[i] = neg_item
 
         return neg_items
 
@@ -534,6 +531,25 @@ def sample_negative_items(user_ids, pos_item_ids, num_items, user_positive_items
 
     # Single transfer to GPU with int32
     return torch.tensor(neg_items, dtype=torch.int32, device=device)
+
+
+def sample_negatives(positive_item_ids, num_items, num_negatives=1):
+    # Create array of all possible item indices
+    all_items = np.arange(num_items)
+
+    # Get items not in positive set
+    negative_candidates = np.setdiff1d(all_items, positive_item_ids)
+
+    # Randomly sample from negative candidates
+    if len(negative_candidates) >= num_negatives:
+        negatives = np.random.choice(negative_candidates,
+                                     size=num_negatives,
+                                     replace=False)
+    else:
+        # Handle edge case where user has interacted with almost all items
+        negatives = negative_candidates
+
+    return negatives
 
 
 def prepare_adj_tensor(dataset):

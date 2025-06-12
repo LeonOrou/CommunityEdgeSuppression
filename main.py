@@ -4,17 +4,13 @@ import os
 from collections import defaultdict
 import warnings
 from config import Config
-from evaluation import evaluate_model, evaluate_current_model_ndcg, print_metric_results
-from models import calculate_bpr_loss, get_model
-import torch.optim as optim
-from dataset import RecommendationDataset, sample_negative_items, prepare_adj_tensor, prepare_training_data
+from evaluation import evaluate_model, print_metric_results
+from models import get_model
+from dataset import RecommendationDataset, prepare_adj_tensor
 from argparse import ArgumentParser
-from utils_functions import (
-    community_edge_suppression, get_community_data, get_biased_connectivity_data, set_seed, )
+from utils_functions import get_community_data, get_biased_connectivity_data, set_seed
 import wandb
 from wandb_logging import init_wandb, log_fold_metrics_to_wandb, log_test_metrics_to_wandb, log_cv_summary_to_wandb
-import time
-from scipy.sparse import csr_matrix
 from training import train_model
 from scipy import sparse as sp
 
@@ -27,7 +23,7 @@ def main():
     config = Config()
     config.update_from_args(args)
     config.setup_model_config()
-    init_wandb(config)
+    init_wandb(config, offline=True)
 
     dataset = RecommendationDataset(name=config.dataset_name, data_path=f'dataset/{config.dataset_name}')
     dataset.prepare_data()
@@ -40,7 +36,6 @@ def main():
     print(f"Train set: {len(dataset.train_val_df)} interactions")
     print(f"Test set: {len(dataset.test_df)} interactions")
 
-    # Log dataset statistics
     wandb.log({
         'dataset/dataset_name': dataset.name,
         'dataset/num_users': dataset.num_users,
@@ -155,14 +150,14 @@ def parse_arguments():
     """Parse command line arguments."""
     parser = ArgumentParser()
     parser.add_argument("--model_name", type=str, default='LightGCN')
-    parser.add_argument("--dataset_name", type=str, default='lfm')
+    parser.add_argument("--dataset_name", type=str, default='ml-100k')
     parser.add_argument("--users_top_percent", type=float, default=0.05)
     parser.add_argument("--items_top_percent", type=float, default=0.05)
     parser.add_argument("--users_dec_perc_drop", type=float, default=0.05)
     parser.add_argument("--items_dec_perc_drop", type=float, default=0.05)
     parser.add_argument("--community_suppression", type=float, default=0.6)
-    parser.add_argument("--drop_only_power_nodes", type=bool, default=True)
-    parser.add_argument("--use_dropout", type=bool, default=False)
+    parser.add_argument("--drop_only_power_nodes", type=bool, default=False)
+    parser.add_argument("--use_dropout", type=bool, default=True)
 
     return parser.parse_args()
 

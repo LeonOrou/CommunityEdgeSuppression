@@ -1,7 +1,8 @@
 import wandb
+import os
 
 
-def init_wandb(config):
+def init_wandb(config, offline=False):
     # Initialize wandb with comprehensive config logging
         wandb_config = {
             # Model configuration
@@ -37,7 +38,10 @@ def init_wandb(config):
         }
 
         # Initialize wandb run
-        wandb.login(key="d234bc98a4761bff39de0e5170df00094ac42269")
+        if offline:
+            os.environ["WANDB_MODE"] = "offline"
+        else:
+            wandb.login(key="d234bc98a4761bff39de0e5170df00094ac42269")
         wandb.init(
             project="CommunitySuppression",
             config=wandb_config,
