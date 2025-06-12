@@ -38,7 +38,7 @@ def evaluate_model(model, dataset, config, stage='cv', k_values=[10, 20, 50, 100
         'simpson_scores': [],
         'intra_list_diversity_scores': [],
         'popularity_lift_scores': [],
-        'avg_recommended_popularity_scores': [],
+        'avg_rec_popularity_scores': [],
         'normalized_genre_entropy_scores': [],
         'unique_genres_count_scores': []
     } for k_val in k_values}
@@ -119,8 +119,8 @@ def evaluate_model(model, dataset, config, stage='cv', k_values=[10, 20, 50, 100
         elif config.model_name == 'ItemKNN':
             # ItemKNN evaluation
             for user_id, true_items in user_test_items.items():
-                if user_id >= dataset.num_users:
-                    continue
+                # if user_id >= dataset.num_users:
+                #     continue
 
                 # Get recommendations from ItemKNN
                 recommendations = model.predict(user_id, n_items=dataset.num_items)
@@ -131,13 +131,9 @@ def evaluate_model(model, dataset, config, stage='cv', k_values=[10, 20, 50, 100
                     scores_filtered = np.full(dataset.num_items, float('-inf'))
                     for item_id, score in recommendations[0]:
                         if 0 <= item_id < dataset.num_items:
-                            scores_filtered[item_id] = score
+                            scores_filtered[int(item_id)] = score
 
                     # Training items are already excluded by ItemKNN internally
-                    train_items = list(train_user_items.get(user_id, []))
-                else:
-                    # No recommendations available
-                    scores_filtered = np.full(dataset.num_items, float('-inf'))
                     train_items = list(train_user_items.get(user_id, []))
 
                 _process_user_recommendations(
@@ -206,8 +202,8 @@ def _process_user_recommendations(user_id, true_items, scores_filtered, train_it
         metrics_by_k[k_val]['simpson_scores'].append(additional_metrics['simpson_index'])
         metrics_by_k[k_val]['intra_list_diversity_scores'].append(additional_metrics['intra_list_diversity'])
         metrics_by_k[k_val]['popularity_lift_scores'].append(additional_metrics['popularity_lift'])
-        metrics_by_k[k_val]['avg_recommended_popularity_scores'].append(
-            additional_metrics['avg_recommended_popularity'])
+        metrics_by_k[k_val]['avg_rec_popularity_scores'].append(
+            additional_metrics['avg_rec_popularity'])
         metrics_by_k[k_val]['normalized_genre_entropy_scores'].append(
             additional_metrics['normalized_genre_entropy'])
         metrics_by_k[k_val]['unique_genres_count_scores'].append(additional_metrics['unique_genres_count'])
@@ -231,7 +227,7 @@ def _calculate_final_results(k_values, metrics_by_k, item_recommendation_freq_by
         simpson_scores = metrics_by_k[k_val]['simpson_scores']
         intra_list_diversity_scores = metrics_by_k[k_val]['intra_list_diversity_scores']
         popularity_lift_scores = metrics_by_k[k_val]['popularity_lift_scores']
-        avg_recommended_popularity_scores = metrics_by_k[k_val]['avg_recommended_popularity_scores']
+        avg_rec_popularity_scores = metrics_by_k[k_val]['avg_rec_popularity_scores']
         normalized_genre_entropy_scores = metrics_by_k[k_val]['normalized_genre_entropy_scores']
         unique_genres_count_scores = metrics_by_k[k_val]['unique_genres_count_scores']
 
@@ -271,8 +267,8 @@ def _calculate_final_results(k_values, metrics_by_k, item_recommendation_freq_by
             'simpson_index_genre': np.mean(simpson_scores) if simpson_scores else 0.0,
             'intra_list_diversity': np.mean(intra_list_diversity_scores) if intra_list_diversity_scores else 0.0,
             'popularity_lift': np.mean(popularity_lift_scores) if popularity_lift_scores else 0.0,
-            'avg_recommended_popularity': np.mean(
-                avg_recommended_popularity_scores) if avg_recommended_popularity_scores else 0.0,
+            'avg_rec_popularity': np.mean(
+                avg_rec_popularity_scores) if avg_rec_popularity_scores else 0.0,
             'normalized_genre_entropy': np.mean(
                 normalized_genre_entropy_scores) if normalized_genre_entropy_scores else 0.0,
             'unique_genres_count': np.mean(unique_genres_count_scores) if unique_genres_count_scores else 0.0,
@@ -298,7 +294,6 @@ def evaluate_current_model_ndcg(model, dataset, model_type='LightGCN', k=10):
 
     with torch.no_grad():
         if model_type == 'LightGCN':
-            # LightGCN evaluation
             user_emb, item_emb = model(dataset.complete_edge_index, dataset.complete_edge_weight)
 
             for user_id, true_items in user_val_items.items():
@@ -317,7 +312,6 @@ def evaluate_current_model_ndcg(model, dataset, model_type='LightGCN', k=10):
                 ndcg_scores.append(ndcg)
 
         elif model_type == 'MultiVAE':
-            # MultiVAE evaluation using sparse matrices
             from scipy.sparse import csr_matrix
 
             # Create sparse training matrix
@@ -355,31 +349,22 @@ def evaluate_current_model_ndcg(model, dataset, model_type='LightGCN', k=10):
                 ndcg_scores.append(ndcg)
 
         elif model_type == 'ItemKNN':
-            # ItemKNN evaluation
             for user_id, true_items in user_val_items.items():
                 # if user_id >= dataset.num_users:
                 #     continue
 
-                # Get recommendations from ItemKNN
                 recommendations = model.predict(user_id, n_items=dataset.num_items)
 
                 # ItemKNN returns [(item_id, score), ...] for each user
                 if len(recommendations) > 0 and len(recommendations[0]) > 0:
                     # Extract scores and create score array
                     scores = np.full(dataset.num_items, float('-inf'))
-                    for item_id, score in recommendations[0]:
+                    for item_id, score in recommendations[0]:  # [0] as its only one user
                         if 0 <= item_id < dataset.num_items:
-                            scores[item_id] = score
+                            scores[int(item_id)] = score
 
-                    # Training items are already excluded by ItemKNN internally
-                    scores_filtered = scores
-                else:
-                    # No recommendations available
-                    scores_filtered = np.full(dataset.num_items, float('-inf'))
-
-                ndcg = calculate_ndcg(true_items, scores_filtered, k)
+                ndcg = calculate_ndcg(true_items, scores, k)
                 ndcg_scores.append(ndcg)
-
         else:
             raise ValueError(f"Unsupported model type: {model_type}")
 
@@ -623,12 +608,12 @@ def calculate_popularity_lift(recommended_items, dataset, baseline_method='catal
         baseline_method: 'catalog_average' or 'user_profile'
 
     Returns:
-        dict: containing popularity_lift, avg_recommended_popularity, baseline_popularity
+        dict: containing popularity_lift, avg_rec_popularity, baseline_popularity
     """
     if len(recommended_items) == 0:
         return {
             'popularity_lift': 0.0,
-            'avg_recommended_popularity': 0.0,
+            'avg_rec_popularity': 0.0,
             'baseline_popularity': 0.0
         }
 
@@ -641,11 +626,11 @@ def calculate_popularity_lift(recommended_items, dataset, baseline_method='catal
     if len(recommended_popularities) == 0:
         return {
             'popularity_lift': 0.0,
-            'avg_recommended_popularity': 0.0,
+            'avg_rec_popularity': 0.0,
             'baseline_popularity': 0.0
         }
 
-    avg_recommended_popularity = np.mean(recommended_popularities)
+    avg_rec_popularity = np.mean(recommended_popularities)
 
     # Calculate baseline popularity (catalog average)
     if baseline_method == 'catalog_average':
@@ -656,13 +641,13 @@ def calculate_popularity_lift(recommended_items, dataset, baseline_method='catal
 
     # Calculate lift
     if baseline_popularity > 0:
-        popularity_lift = avg_recommended_popularity / baseline_popularity
+        popularity_lift = avg_rec_popularity / baseline_popularity
     else:
         popularity_lift = 1.0
 
     return {
         'popularity_lift': popularity_lift,
-        'avg_recommended_popularity': avg_recommended_popularity,
+        'avg_rec_popularity': avg_rec_popularity,
         'baseline_popularity': baseline_popularity
     }
 

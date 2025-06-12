@@ -113,45 +113,33 @@ class ItemKNN:
         self.shrink = shrink
         self.bm25_k1 = bm25_k1
         self.bm25_b = bm25_b
+        self.bm25_matrix = None
         self.similarity_matrix = None
         self.user_item_matrix = None
 
-    def _compute_bm25_weights(self, user_item_matrix):
-        """
-        Compute BM25 weights for the user-item matrix.
-        """
-        # Convert to CSR for efficient operations
-        if not isinstance(user_item_matrix, csr_matrix):
-            user_item_matrix = user_item_matrix.tocsr()
+    def okapi_BM25(self, rating_matrix, K1=1.2, B=0.75):
+        assert B > 0 and B < 1, "okapi_BM_25: B must be in (0,1)"
+        assert K1 > 0, "okapi_BM_25: K1 must be > 0"
 
-        # Number of items each user has interacted with (document lengths)
-        item_lengths = np.array(user_item_matrix.sum(axis=0)).flatten()
-        avg_length = item_lengths.mean()
+        # Weighs each row of a sparse matrix by OkapiBM25 weighting
+        # calculate idf per term (user)
 
-        # Number of users who interacted with each item (document frequencies)
-        df = np.array((user_item_matrix > 0).sum(axis=0)).flatten()
+        rating_matrix = sp.coo_matrix(rating_matrix)
 
-        # Compute IDF
-        idf = np.log((self.num_users - df + 0.5) / (df + 0.5) + 1.0)
+        N = float(rating_matrix.shape[0])
+        idf = np.log(N / (1 + np.bincount(rating_matrix.col)))
 
-        # Create BM25 weighted matrix
-        rows, cols = user_item_matrix.nonzero()
-        data = user_item_matrix.data
+        # calculate length_norm per document
+        row_sums = np.ravel(rating_matrix.sum(axis=1))
 
-        # Compute BM25 scores
-        bm25_scores = []
-        for idx, (user, item, weight) in enumerate(zip(rows, cols, data)):
-            tf = weight
-            doc_len = item_lengths[item]
+        average_length = row_sums.mean()
+        length_norm = (1.0 - B) + B * row_sums / average_length
 
-            # BM25 formula
-            numerator = idf[item] * tf * (self.bm25_k1 + 1)
-            denominator = tf + self.bm25_k1 * (1 - self.bm25_b + self.bm25_b * doc_len / avg_length)
-            bm25_score = numerator / denominator
-            bm25_scores.append(bm25_score)
+        # weight matrix rows by bm25
+        rating_matrix.data = rating_matrix.data * (K1 + 1.0) / (
+                    K1 * length_norm[rating_matrix.row] + rating_matrix.data) * idf[rating_matrix.col]
 
-        bm25_matrix = csr_matrix((bm25_scores, (rows, cols)), shape=user_item_matrix.shape)
-        return bm25_matrix
+        return rating_matrix.tocsr()
 
     def _weighted_cosine_similarity_sparse(self, bm25_matrix):
         """
@@ -206,21 +194,17 @@ class ItemKNN:
         else:
             interactions_np = interactions
 
-        users = interactions_np[:, 0].astype(int)
-        items = interactions_np[:, 1].astype(int)
-        weights = interactions_np[:, 2].astype(float)
-
         # Create sparse user-item matrix
         self.user_item_matrix = csr_matrix(
-            (weights, (users, items)),
+            (interactions_np[:, 2].astype(float), (interactions_np[:, 0].astype(int), interactions_np[:, 1].astype(int))),
             shape=(self.num_users, self.num_items)
         )
 
         # Apply BM25 weighting
-        bm25_matrix = self._compute_bm25_weights(self.user_item_matrix)
+        self.bm25_matrix = self.okapi_BM25(self.user_item_matrix)
 
         # Compute weighted cosine similarity
-        self.similarity_matrix = self._weighted_cosine_similarity_sparse(bm25_matrix)
+        self.similarity_matrix = self._weighted_cosine_similarity_sparse(self.user_item_matrix)
 
         # For each item, keep only top-k similar items
         self._prune_similarity_matrix()
@@ -328,7 +312,7 @@ class ItemKNN:
 
         for user_id in user_ids:
             # Get user's item ratings
-            user_items = self.user_item_matrix.getrow(user_id)
+            user_items = self.bm25_matrix.getrow(user_id)
             user_item_indices = user_items.nonzero()[1]
 
             # Compute scores for all items
@@ -340,8 +324,10 @@ class ItemKNN:
             # sim_sums[sim_sums == 0] = 1.0
             # scores = scores / sim_sums
             item_similarities = self.similarity_matrix[:, user_item_indices]
-            scores = np.array(item_similarities.sum(axis=1)).flatten()
+            # scores = np.array(item_similarities.sum(axis=1)).flatten()
+            user_similarities = (user_items @ self.bm25_matrix.T).toarray().flatten()
 
+            scores = (user_similarities @ self.bm25_matrix).flatten()
             # Remove items user already interacted with
             scores[user_item_indices] = -np.inf
 

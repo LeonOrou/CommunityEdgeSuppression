@@ -37,8 +37,9 @@ def train_itemknn(model, dataset, config, stage='cv', fold_num=None, verbose=Tru
 
     # TODO: make multiple training iterations to proof community edge suppression as one-shot learning
     if config.use_dropout:
-        training_interactions = community_edge_suppression(
-            training_interactions, config)
+        current_edge_weights = community_edge_suppression(
+            torch.tensor(training_interactions, device=config.device), config).cpu().numpy()
+        training_interactions[:, 2] = current_edge_weights
 
     _log_itemknn_training_start(model, len(training_interactions), fold_num, verbose)
 
@@ -51,7 +52,7 @@ def train_itemknn(model, dataset, config, stage='cv', fold_num=None, verbose=Tru
     validation_ndcg = None
     if len(dataset.val_df) > 0:
         from evaluation import evaluate_current_model_ndcg
-        validation_ndcg = evaluate_current_model_ndcg(model, dataset, k=10)
+        validation_ndcg = evaluate_current_model_ndcg(model, dataset, model_type='ItemKNN', k=10)
 
     # Log training results
     _log_itemknn_training_results(
@@ -566,18 +567,6 @@ def train_model(dataset, model, config, stage='cv', fold_num=None, verbose=True)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Training on device: {device}")
 
-    # Setup optimizer and scheduler
-    optimizer = torch.optim.Adam(model.parameters(),
-                                 lr=config.learning_rate,
-                                 weight_decay=getattr(config, 'weight_decay', 0.0))
-
-    scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
-        optimizer,
-        T_0=config.epochs // 5 if config.epochs >= 5 else 1,
-        T_mult=1,
-        eta_min=config.min_lr,
-        last_epoch=-1)
-
     if stage == 'full_train':
         dataset.train_df = dataset.train_val_df  # Use all training+validation data
         dataset.val_df = dataset.test_df  # Use test set as validation
@@ -593,7 +582,19 @@ def train_model(dataset, model, config, stage='cv', fold_num=None, verbose=True)
         )
         return trained_model
 
-    elif config.model_name == 'MultiVAE':
+    # Setup optimizer and scheduler
+    optimizer = torch.optim.Adam(model.parameters(),
+                                 lr=config.learning_rate,
+                                 weight_decay=getattr(config, 'weight_decay', 0.0))
+
+    scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
+        optimizer,
+        T_0=config.epochs // 5 if config.epochs >= 5 else 1,
+        T_mult=1,
+        eta_min=config.min_lr,
+        last_epoch=-1)
+
+    if config.model_name == 'MultiVAE':
         trained_model = train_multivae(
             model=model,
             dataset=dataset,

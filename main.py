@@ -16,6 +16,7 @@ from wandb_logging import init_wandb, log_fold_metrics_to_wandb, log_test_metric
 import time
 from scipy.sparse import csr_matrix
 from training import train_model
+from scipy import sparse as sp
 
 warnings.filterwarnings('ignore')
 
@@ -128,7 +129,12 @@ def main():
         description=f"Trained {config.model_name} model on {config.dataset_name} dataset")
 
     model_path = "final_model.pth"
-    torch.save(model.state_dict(), model_path)
+    if config.model_name != 'ItemKNN':
+        torch.save(model.state_dict(), model_path)
+    else:
+        # For ItemKNN, we save the model as a sparse matrix
+        sp.save_npz(model_path, model.similarity_matrix)
+        model_path += '.npz'
     model_artifact.add_file(model_path)
 
     wandb.log_artifact(model_artifact)
@@ -147,13 +153,13 @@ def main():
 def parse_arguments():
     """Parse command line arguments."""
     parser = ArgumentParser()
-    parser.add_argument("--model_name", type=str, default='MultiVAE',)
+    parser.add_argument("--model_name", type=str, default='ItemKNN',)
     parser.add_argument("--dataset_name", type=str, default='ml-100k')
     parser.add_argument("--users_top_percent", type=float, default=0.05)
     parser.add_argument("--items_top_percent", type=float, default=0.05)
     parser.add_argument("--users_dec_perc_drop", type=float, default=0.05)
     parser.add_argument("--items_dec_perc_drop", type=float, default=0.05)
-    parser.add_argument("--community_suppression", type=float, default=0.4)
+    parser.add_argument("--community_suppression", type=float, default=0.1)
     parser.add_argument("--drop_only_power_nodes", type=bool, default=True)
     parser.add_argument("--use_dropout", type=bool, default=True)
 
