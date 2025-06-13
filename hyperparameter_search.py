@@ -10,6 +10,7 @@ import time
 from collections import defaultdict
 import random
 from scipy.sparse import csr_matrix, coo_matrix
+from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 from models import LightGCN, ItemKNN, MultiVAE, calculate_bpr_loss, multivae_loss
 from dataset import RecommendationDataset
 import scipy as sp
@@ -241,10 +242,16 @@ def create_edge_index(df, num_users):
     return edge_index
 
 
-def train_lightgcn_efficient(model, dataset, device, epochs=30, lr=0.001, batch_size=1024):
+def train_lightgcn_efficient(model, dataset, device, epochs=30, lr=0.005, batch_size=1024):
     """Fixed LightGCN training - compute embeddings inside each batch"""
     model.train()
     optimizer = optim.Adam(model.parameters(), lr=lr)
+    scheduler = CosineAnnealingWarmRestarts(
+        optimizer,
+        T_0=15,  # First restart after 15 epochs
+        T_mult=2,  # Double cycle length after each restart
+        eta_min=1e-4  # Minimum learning rate
+    )
 
     # Create edge index once
     edge_index = create_edge_index(dataset.train_df, dataset.num_users).to(device)
@@ -287,14 +294,24 @@ def train_lightgcn_efficient(model, dataset, device, epochs=30, lr=0.001, batch_
             total_loss += loss.item()
             num_batches += 1
 
+        val_ndcg = evaluate_current_model_ndcg(model, dataset, k=10)
+        scheduler.step()
         if epoch % 10 == 0:
-            print(f"Epoch {epoch}, Loss: {total_loss / num_batches:.4f}")
+            print(f"Epoch {epoch}, Loss: {total_loss / num_batches:.4f}, ndcg@10: {val_ndcg:.4f}")
 
 
-def train_multivae_efficient(model, train_matrix, device, epochs=80, lr=0.001, batch_size=500, anneal_cap=0.2):
+def train_multivae_efficient(model, train_matrix, test_matrix, device, epochs=80, lr=0.0005, batch_size=500, anneal_cap=0.2):
     """Efficient MultiVAE training with sparse matrix input"""
     model.train()
     optimizer = optim.Adam(model.parameters(), lr=lr)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        mode='max',  # 'max' if monitoring recall/ndcg
+        factor=0.8,  # Reduce LR by half
+        patience=15,  # Wait 10 epochs before reducing
+        min_lr=1e-5,  # Don't go below this
+        threshold=0.001  # Minimum improvement to count
+    )
 
     # Convert sparse matrix to dense tensor (only once)
     train_tensor = torch.FloatTensor(train_matrix.toarray())
@@ -325,8 +342,10 @@ def train_multivae_efficient(model, train_matrix, device, epochs=80, lr=0.001, b
             total_loss += loss.item()
             num_batches += 1
 
+        val_ndcg = evaluate_model_vectorized(model, train_matrix, test_matrix, 'MultiVAE', device)
+        # scheduler.step(val_ndcg)
         if epoch % 20 == 0:
-            print(f"Epoch {epoch}, Loss: {total_loss / num_batches:.4f}")
+            print(f"Epoch {epoch}, Loss: {total_loss / num_batches:.4f}, ndcg@10: {val_ndcg:.4f}")
 
 
 def hyperparameter_search():
@@ -344,7 +363,7 @@ def hyperparameter_search():
     parser.add_argument("--shrink", type=int, default=10)
     # MultiVAE
     parser.add_argument("--hidden_dimension", type=int, default=800)
-    parser.add_argument("--anneal_cap", type=float, default=0.2)
+    parser.add_argument("--anneal_cap", type=float, default=0.4)
 
     args = parser.parse_args()
 
@@ -394,15 +413,15 @@ def hyperparameter_search():
         'LightGCN': {
             'embedding_dim': [128],
             'n_layers': [3],
-            'batch_size': [128, 256, 512, 1024]  # Larger batches for efficiency
+            'batch_size': [512]
         },
         'ItemKNN': {
-            'topk': [50, 80, 100, 150],
-            'shrink': [125, 150, 200, 300, 400]  # Wider range for shrink
+            'topk': [125],
+            'shrink': [50]
         },
         'MultiVAE': {
             'hidden_dimension': [800],
-            'latent_dimension': [200, 300, 400],
+            'latent_dimension': [200],
             'anneal_cap': [0.4],
             'batch_size': [2048]  # Larger batches for efficiency
         }
@@ -429,7 +448,7 @@ def hyperparameter_search():
             ).to(device)
 
             start_time = time.time()
-            train_lightgcn_efficient(model, dataset, device, epochs=170, batch_size=batch_size)
+            train_lightgcn_efficient(model, dataset, device, epochs=80, batch_size=batch_size)
             training_time = time.time() - start_time
 
             ndcg = evaluate_model_vectorized(model, train_matrix, test_matrix, 'LightGCN', device, dataset)
@@ -528,7 +547,7 @@ def hyperparameter_search():
             ).to(device)
 
             start_time = time.time()
-            train_multivae_efficient(model, train_matrix, device, epochs=200, batch_size=batch_size,
+            train_multivae_efficient(model, train_matrix, test_matrix, device, epochs=200, batch_size=batch_size,
                                      anneal_cap=anneal_cap)
             training_time = time.time() - start_time
 

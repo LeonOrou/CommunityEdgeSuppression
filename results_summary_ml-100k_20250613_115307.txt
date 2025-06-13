@@ -1,0 +1,16 @@
+HYPERPARAMETER SEARCH SUMMARY - ALL MODELS
+============================================================
+
+Run ID: ml-100k_20250613_115307
+Dataset: ml-100k
+Models Searched: LightGCN
+Users: 942, Items: 1303
+Train interactions: 44493
+Validation interactions: 10672
+
+SEARCH STATISTICS:
+--------------------
+Total Experiments: 1
+Total Search Time: 292.38 seconds (4.9 minutes)
+Average Time per Experiment: 292.38 seconds
+

@@ -1,10 +1,12 @@
+import time
+
 import torch
 import numpy as np
 import os
 from collections import defaultdict
 import warnings
 from config import Config
-from evaluation import evaluate_model, print_metric_results
+from evaluation import evaluate_model, print_metric_results, evaluate_model_vectorized
 from models import get_model
 from dataset import RecommendationDataset, prepare_adj_tensor
 from argparse import ArgumentParser
@@ -73,9 +75,22 @@ def main():
 
         model = train_model(dataset=dataset, model=model, config=config, stage='cv', fold_num=fold + 1,)
 
+        time_start_vec = time.time()
+        val_metrics = evaluate_model_vectorized(
+            model=model, dataset=dataset, config=config,
+            k_values=config.evaluate_top_k, stage='cv')
+        end_time_vec = time.time()
+        print(val_metrics)
+        time_start_normal = time.time()
         val_metrics = evaluate_model(
             model=model, dataset=dataset, config=config,
             k_values=config.evaluate_top_k, stage='cv')
+        end_time_normal = time.time()
+        print(val_metrics)
+        print(f"Vectorized evaluation time: {end_time_vec - time_start_vec:.4f}s, ")
+        print(f"Normal evaluation time: {end_time_normal - time_start_normal:.4f}s")
+
+
 
         cv_results.append(val_metrics)
         log_metrics_to_wandb(val_metrics, config, stage=f'fold_{fold+1}')
@@ -111,7 +126,7 @@ def main():
 
     model = train_model(dataset=dataset, model=model, config=config, stage='full_train', fold_num=None,)
 
-    test_metrics = evaluate_model(
+    test_metrics = evaluate_model_vectorized(
         model=model, dataset=dataset, config=config,
         k_values=config.evaluate_top_k, stage='full_train')
 
@@ -147,8 +162,8 @@ def main():
 def parse_arguments():
     """Parse command line arguments."""
     parser = ArgumentParser()
-    parser.add_argument("--model_name", type=str, default='LightGCN')
-    parser.add_argument("--dataset_name", type=str, default='ml-100k')
+    parser.add_argument("--model_name", type=str, default='MultiVAE')
+    parser.add_argument("--dataset_name", type=str, default='lfm')
     parser.add_argument("--users_top_percent", type=float, default=0.05)
     parser.add_argument("--items_top_percent", type=float, default=0.05)
     parser.add_argument("--users_dec_perc_drop", type=float, default=0.05)

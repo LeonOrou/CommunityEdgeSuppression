@@ -1,8 +1,11 @@
 import time
 from collections import defaultdict
+
+from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
+
 import wandb
 from wandb_logging import log_metrics_to_wandb
-from evaluation import evaluate_current_model_ndcg
+from evaluation import evaluate_current_model_ndcg, evaluate_current_model_ndcg_vectorized
 from dataset import RecommendationDataset, sample_negative_items, prepare_adj_tensor, prepare_training_data
 from models import calculate_bpr_loss
 from utils_functions import community_edge_suppression
@@ -47,7 +50,7 @@ def train_itemknn(model, dataset, config, stage='cv', fold_num=None, verbose=Tru
     validation_ndcg = None
     if len(dataset.val_df) > 0:
         from evaluation import evaluate_current_model_ndcg
-        validation_ndcg = evaluate_current_model_ndcg(model, dataset, model_type='ItemKNN', k=10)
+        validation_ndcg = evaluate_current_model_ndcg_vectorized(model, dataset, model_type='ItemKNN', k=10)
 
     # Log training results
     _log_itemknn_training_results(
@@ -222,7 +225,7 @@ def _check_multivae_early_stopping(val_ndcg, best_val_ndcg, patience_counter, pa
     return False, best_val_ndcg, patience_counter, best_model_state, best_epoch
 
 
-def train_multivae(model, dataset, config, optimizer, scheduler, device,
+def train_multivae(model, dataset, config, optimizer, device,
                    stage='cv', fold_num=None, verbose=True):
     """
     General MultiVAE training function that handles the complete training loop with sparse matrices.
@@ -243,9 +246,16 @@ def train_multivae(model, dataset, config, optimizer, scheduler, device,
     """
     print(f"Starting MultiVAE...")
 
+    scheduler = CosineAnnealingWarmRestarts(
+        optimizer,
+        T_0=10,  # First restart after 15 epochs
+        T_mult=2,  # Double cycle length after each restart
+        eta_min=1e-5  # Minimum learning rate
+    )
+
     batch_size = config.batch_size
     best_val_ndcg = 0
-    patience = config.patience if hasattr(config, 'patience') else 50
+    patience = config.patience if hasattr(config, 'patience') else 15
     patience_counter = 0
     val_history = []
     best_epoch = 0
@@ -269,18 +279,18 @@ def train_multivae(model, dataset, config, optimizer, scheduler, device,
         epoch_loss, kl_weight = _train_multivae_epoch_sparse(
             model, train_sparse_matrix, optimizer, batch_size,
             epoch, config, device)
+        scheduler.step()
 
         # Evaluation and logging
         if epoch == 0 or (epoch+1) % 10 == 0 or epoch == config.epochs - 1:
             val_ndcg = evaluate_current_model_ndcg(model, dataset, model_type='MultiVAE', k=10)
-            # scheduler.step()
 
             val_history.append(val_ndcg)
             current_lr = optimizer.param_groups[0]['lr']
 
             if verbose:
                 print(f'  Epoch {epoch + 1:3d}/{config.epochs}, Loss: {epoch_loss:.4f}, '
-                      f'Val NDCG@10: {val_ndcg:.4f}, KL Weight: {kl_weight:.4f}')
+                      f'Val NDCG@10: {val_ndcg:.4f}')
 
             # Early stopping logic
             should_stop, best_val_ndcg, patience_counter, best_model_state, best_epoch = _check_multivae_early_stopping(
@@ -296,7 +306,7 @@ def train_multivae(model, dataset, config, optimizer, scheduler, device,
     return model
 
 
-def train_lightgcn(model, dataset, config, optimizer, scheduler, user_positive_items,
+def train_lightgcn(model, dataset, config, optimizer, user_positive_items,
                    device, stage='cv', fold_num=None, verbose=True):
     """
     General LightGCN training function that handles the complete training loop.
@@ -317,6 +327,13 @@ def train_lightgcn(model, dataset, config, optimizer, scheduler, user_positive_i
         trained_model
     """
     print(f"Starting LightGCN training...")
+
+    scheduler = CosineAnnealingWarmRestarts(
+        optimizer,
+        T_0=15,  # First restart after 15 epochs
+        T_mult=2,  # Double cycle length after each restart
+        eta_min=1e-5  # Minimum learning rate
+    )
 
     # Training parameters
     batch_size = config.batch_size
@@ -355,11 +372,14 @@ def train_lightgcn(model, dataset, config, optimizer, scheduler, user_positive_i
             model, dataset, config, optimizer, all_train_users, all_train_items,
             train_indices, user_positive_items, batch_size, device
         )
+        scheduler.step()
 
         # Evaluation and logging
         if epoch == 0 or (epoch + 1) % 10 == 0 or epoch + 1 == config.epochs:
+
+            # val_ndcg = evaluate_current_model_ndcg_vectorized(model, dataset, k=10)
             val_ndcg = evaluate_current_model_ndcg(model, dataset, k=10)
-            scheduler.step()
+
             val_history.append(val_ndcg)
             current_lr = optimizer.param_groups[0]['lr']
 
@@ -560,20 +580,12 @@ def train_model(dataset, model, config, stage='cv', fold_num=None, verbose=True)
                                  lr=config.learning_rate,
                                  weight_decay=getattr(config, 'weight_decay', 0.0))
 
-    scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
-        optimizer,
-        T_0=config.epochs // 5 if config.epochs >= 5 else 1,
-        T_mult=1,
-        eta_min=config.min_lr,
-        last_epoch=-1)
-
     if config.model_name == 'MultiVAE':
         trained_model = train_multivae(
             model=model,
             dataset=dataset,
             config=config,
             optimizer=optimizer,
-            scheduler=scheduler,
             device=device,
             stage=stage,
             fold_num=fold_num,
@@ -595,7 +607,6 @@ def train_model(dataset, model, config, stage='cv', fold_num=None, verbose=True)
             dataset=dataset,
             config=config,
             optimizer=optimizer,
-            scheduler=scheduler,
             user_positive_items=user_positive_items,
             device=device,
             stage=stage,

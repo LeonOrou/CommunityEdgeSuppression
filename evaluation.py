@@ -530,29 +530,36 @@ def calculate_simpson_index_recommendations(recommended_items, encoded_to_genres
     return simpson_index
 
 
-def calculate_intra_list_diversity_jaccard(recommended_items, encoded_to_genres):
+def calculate_intra_list_diversity_jaccard(top_k_items, encoded_to_genres):
     """
-    Calculate intra-list diversity using average pairwise Jaccard similarity
-    Lower similarity = higher diversity
+    Calculate intra-list diversity using average pairwise Jaccard distance.
+
+    For each pair of items in the recommendation list, calculate Jaccard similarity
+    of their genre sets, then average across all pairs. Higher similarity means
+    lower diversity, so we can report 1 - avg_similarity as diversity.
+
+    Higher values indicate more diverse recommendations.
 
     Args:
-        recommended_items: list of recommended item IDs (encoded)
-        encoded_to_genres: dict mapping encoded item ID to list of genre IDs
+        top_k_items: list of recommended item IDs
+        encoded_to_genres: dict mapping item_id -> list of genre_ids
 
     Returns:
-        float: Average pairwise Jaccard similarity (lower = more diverse)
+        float: Average pairwise Jaccard distance (0 to 1)
     """
-    if len(recommended_items) < 2:
-        return 0.0
+    if len(top_k_items) < 2:
+        return 0.0  # Need at least 2 items to calculate diversity
 
-    # Filter items that have genre information
+    # Filter items that have genre information and convert to sets
     items_with_genres = []
-    for item_id in recommended_items:
+    for item_id in top_k_items:
         if item_id in encoded_to_genres:
-            items_with_genres.append((item_id, set(encoded_to_genres[item_id])))
+            genres = encoded_to_genres[item_id]
+            if len(genres) > 0:
+                items_with_genres.append((item_id, set(genres)))
 
     if len(items_with_genres) < 2:
-        return 0.0
+        return 0.0  # Need at least 2 items with genres
 
     # Calculate pairwise Jaccard similarities
     similarities = []
@@ -563,17 +570,25 @@ def calculate_intra_list_diversity_jaccard(recommended_items, encoded_to_genres)
             genres_i = items_with_genres[i][1]
             genres_j = items_with_genres[j][1]
 
+            # Jaccard similarity = |intersection| / |union|
             intersection = len(genres_i.intersection(genres_j))
             union = len(genres_i.union(genres_j))
 
             if union > 0:
-                jaccard_sim = intersection / union
-                similarities.append(jaccard_sim)
+                jaccard_similarity = intersection / union
+                similarities.append(jaccard_similarity)
 
     if len(similarities) == 0:
         return 0.0
 
-    return np.mean(similarities)
+    # Average Jaccard similarity
+    avg_similarity = np.mean(similarities)
+
+    # Convert to diversity: higher diversity = lower similarity
+    # Jaccard distance = 1 - Jaccard similarity
+    diversity = 1.0 - avg_similarity
+
+    return diversity
 
 
 def calculate_popularity_lift(recommended_items, dataset, baseline_method='catalog_average'):
@@ -687,29 +702,35 @@ def calculate_popularity_calibration(all_recommended_items, dataset, num_bins=10
     return kl_divergence
 
 
-def calculate_normalized_genre_entropy(recommended_items, encoded_to_genres):
+def calculate_normalized_genre_entropy(top_k_items, encoded_to_genres):
     """
-    Calculate normalized entropy of recommended genre labels
-    For each item, divide by number of labels, then calculate Shannon entropy
+    Calculate normalized entropy of genre distribution in recommendations.
+
+    For each item with multiple genres, each genre gets weight 1/num_genres_for_that_item.
+    Then calculate Shannon entropy of the resulting genre distribution and normalize
+    by maximum possible entropy.
+
+    Higher values indicate more diverse genre distribution.
 
     Args:
-        recommended_items: list of recommended item IDs (encoded)
-        encoded_to_genres: dict mapping encoded item ID to list of genre IDs
+        top_k_items: list of recommended item IDs
+        encoded_to_genres: dict mapping item_id -> list of genre_ids
 
     Returns:
-        float: Normalized entropy of genre distribution
+        float: Normalized genre entropy (0 to 1)
     """
-    if len(recommended_items) == 0:
+    if len(top_k_items) == 0:
         return 0.0
 
-    # Collect genre weights (1/num_labels per item for each genre)
+    # Calculate weighted genre distribution
     genre_weights = defaultdict(float)
 
-    for item_id in recommended_items:
+    for item_id in top_k_items:
         if item_id in encoded_to_genres:
             genres = encoded_to_genres[item_id]
             if len(genres) > 0:
-                weight_per_genre = 1.0 / len(genres)  # Normalize by number of labels per item
+                # Each genre gets weight 1/num_genres for this item
+                weight_per_genre = 1.0 / len(genres)
                 for genre in genres:
                     genre_weights[genre] += weight_per_genre
 
@@ -723,16 +744,19 @@ def calculate_normalized_genre_entropy(recommended_items, encoded_to_genres):
 
     genre_probs = np.array([weight / total_weight for weight in genre_weights.values()])
 
-    # Calculate Shannon entropy
-    # Entropy = -sum(p * log2(p))
+    # Calculate Shannon entropy: H = -sum(p * log2(p))
     entropy = 0.0
     for prob in genre_probs:
         if prob > 0:
             entropy -= prob * np.log2(prob)
 
     # Normalize by maximum possible entropy (log2 of number of unique genres)
-    max_entropy = np.log2(len(genre_probs)) if len(genre_probs) > 1 else 1.0
-    normalized_entropy = entropy / max_entropy if max_entropy > 0 else 0.0
+    num_unique_genres = len(genre_weights)
+    if num_unique_genres <= 1:
+        return 0.0  # No diversity possible with 0 or 1 genre
+
+    max_entropy = np.log2(num_unique_genres)
+    normalized_entropy = entropy / max_entropy
 
     return normalized_entropy
 
@@ -933,4 +957,686 @@ def calculate_gini_coefficient(probabilities):
 
     return gini
 
+###############################################
+# vectorized
+###############
+import numpy as np
+import torch
+import json
+from collections import defaultdict
+from scipy.sparse import csr_matrix, coo_matrix
+import pandas as pd
+
+
+def evaluate_model_vectorized(model, dataset, config, stage='cv', k_values=[10, 20, 50, 100]):
+    """
+    Memory-efficient vectorized evaluation using sparse representations.
+    """
+    if config.model_name != 'ItemKNN':
+        model.eval()
+
+    if isinstance(k_values, int):
+        k_values = [k_values]
+
+    k_values = sorted(k_values)
+    max_k = max(k_values)
+
+    encoded_to_genres = load_genre_mapping(dataset)
+
+    if stage == 'full_train':
+        dataset.val_df = dataset.test_df
+
+    # Prepare sparse data structures
+    train_user_items = dataset.train_df.groupby('user_encoded')['item_encoded'].apply(list).to_dict()
+    user_test_items = dataset.val_df.groupby('user_encoded')['item_encoded'].apply(list).to_dict()
+
+    # Get valid user IDs
+    valid_user_ids = [uid for uid in user_test_items.keys() if uid < dataset.num_users]
+    valid_user_ids = np.array(valid_user_ids)
+
+    # Create sparse relevance matrix
+    relevance_sparse = create_sparse_relevance_matrix(valid_user_ids, user_test_items, dataset.num_items)
+
+    # Process evaluation in batches to manage memory
+    batch_size = min(1000, len(valid_user_ids))  # Adaptive batch size
+    results = {}
+
+    for k_val in k_values:
+        results[k_val] = {
+            'ndcg_scores': [],
+            'recall_scores': [],
+            'precision_scores': [],
+            'mrr_scores': [],
+            'hit_rate_scores': [],
+            'all_recommended_items': set(),
+            'simpson_scores': [],
+            'intra_list_diversity_scores': [],
+            'popularity_lift_scores': [],
+            'avg_rec_popularity_scores': [],
+            'normalized_genre_entropy_scores': [],
+            'unique_genres_count_scores': [],
+            'item_recommendation_freq': defaultdict(int),
+            'all_global_recommendations': [],
+            'user_community_distributions': []
+        }
+
+    # Process in batches
+    for batch_start in range(0, len(valid_user_ids), batch_size):
+        batch_end = min(batch_start + batch_size, len(valid_user_ids))
+        batch_user_ids = valid_user_ids[batch_start:batch_end]
+
+        # Get scores for this batch
+        batch_scores = get_batch_user_scores(model, dataset, config, batch_user_ids, train_user_items)
+
+        # Get batch relevance data
+        batch_relevance = relevance_sparse[batch_start:batch_end]
+
+        # Process this batch
+        process_batch_metrics(
+            batch_scores, batch_relevance, batch_user_ids, user_test_items,
+            k_values, max_k, results, encoded_to_genres, dataset, config
+        )
+
+    # Calculate final aggregated results
+    final_results = aggregate_batch_results(results, k_values, dataset)
+
+    return final_results
+
+
+def create_sparse_relevance_matrix(valid_user_ids, user_test_items, num_items):
+    """
+    Create sparse relevance matrix using COO format for memory efficiency.
+    """
+    row_indices = []
+    col_indices = []
+
+    user_id_to_row = {uid: i for i, uid in enumerate(valid_user_ids)}
+
+    for user_id, test_items in user_test_items.items():
+        if user_id in user_id_to_row:
+            row_idx = user_id_to_row[user_id]
+            for item_id in test_items:
+                row_indices.append(row_idx)
+                col_indices.append(item_id)
+
+    # Create sparse matrix
+    data = np.ones(len(row_indices), dtype=bool)
+    relevance_sparse = coo_matrix(
+        (data, (row_indices, col_indices)),
+        shape=(len(valid_user_ids), num_items),
+        dtype=bool
+    ).tocsr()  # Convert to CSR for efficient row slicing
+
+    return relevance_sparse
+
+
+def get_batch_user_scores(model, dataset, config, batch_user_ids, train_user_items):
+    """
+    Get prediction scores for a batch of users, excluding training items.
+    """
+    batch_size = len(batch_user_ids)
+
+    with torch.no_grad():
+        if config.model_name == 'LightGCN':
+            user_emb, item_emb = model(dataset.complete_edge_index, dataset.current_edge_weight)
+
+            # Get embeddings for batch users only
+            batch_user_indices = torch.tensor(batch_user_ids, device=user_emb.device)
+            batch_user_emb = user_emb[batch_user_indices]
+
+            # Compute scores: (batch_size, num_items)
+            batch_scores = torch.matmul(batch_user_emb, item_emb.T).cpu().numpy()
+
+        elif config.model_name == 'MultiVAE':
+            train_matrix = csr_matrix(
+                (dataset.train_df['rating'].values,
+                 (dataset.train_df['user_encoded'].values, dataset.train_df['item_encoded'].values)),
+                shape=(dataset.num_users, dataset.num_items),
+                dtype=np.float32)
+
+            device = next(model.parameters()).device
+            user_input = torch.tensor(train_matrix[batch_user_ids].toarray(),
+                                      device=device, dtype=torch.float32)
+
+            recon, _, _ = model(user_input)
+            batch_scores = recon.cpu().numpy()
+
+        elif config.model_name == 'ItemKNN':
+            batch_scores = np.full((batch_size, dataset.num_items), float('-inf'))
+            for i, user_id in enumerate(batch_user_ids):
+                recommendations = model.predict(user_id, n_items=dataset.num_items)
+                if len(recommendations) > 0 and len(recommendations[0]) > 0:
+                    for item_id, score in recommendations[0]:
+                        if 0 <= item_id < dataset.num_items:
+                            batch_scores[i, int(item_id)] = score
+
+        else:
+            raise ValueError(f"Unsupported model type: {config.model_name}")
+
+    # Mask training items efficiently
+    batch_scores = mask_training_items_sparse(batch_scores, batch_user_ids, train_user_items)
+
+    return batch_scores
+
+
+def mask_training_items_sparse(scores, batch_user_ids, train_user_items):
+    """
+    Mask training items using sparse operations to avoid dense mask creation.
+    """
+    for i, user_id in enumerate(batch_user_ids):
+        train_items = train_user_items.get(user_id, [])
+        if train_items:
+            # Only modify the specific indices, no dense matrix creation
+            scores[i, train_items] = float('-inf')
+
+    return scores
+
+
+def process_batch_metrics(batch_scores, batch_relevance, batch_user_ids, user_test_items,
+                          k_values, max_k, results, encoded_to_genres, dataset, config):
+    """
+    Process metrics for a batch of users using sparse operations.
+    """
+    batch_size = len(batch_user_ids)
+
+    # Get top-k items for this batch
+    sorted_indices = np.argsort(-batch_scores, axis=1)
+    top_max_k_items = sorted_indices[:, :max_k]
+
+    for k_val in k_values:
+        top_k_items = top_max_k_items[:, :k_val]
+
+        # Calculate standard metrics using sparse relevance
+        batch_metrics = calculate_batch_standard_metrics_sparse(
+            top_k_items, sorted_indices, batch_relevance, batch_scores, k_val
+        )
+
+        # Aggregate metrics
+        results[k_val]['ndcg_scores'].extend(batch_metrics['ndcg'])
+        results[k_val]['recall_scores'].extend(batch_metrics['recall'])
+        results[k_val]['precision_scores'].extend(batch_metrics['precision'])
+        results[k_val]['mrr_scores'].extend(batch_metrics['mrr'])
+        results[k_val]['hit_rate_scores'].extend(batch_metrics['hit_rate'])
+
+        # Process additional metrics efficiently
+        for i, user_id in enumerate(batch_user_ids):
+            user_top_k = top_k_items[i]
+
+            # Update global tracking
+            results[k_val]['all_recommended_items'].update(user_top_k)
+            results[k_val]['all_global_recommendations'].extend(user_top_k)
+
+            for item in user_top_k:
+                results[k_val]['item_recommendation_freq'][item] += 1
+
+            # Calculate additional metrics per user
+            additional_metrics = calculate_user_additional_metrics_efficient(
+                user_top_k, encoded_to_genres, dataset
+            )
+
+            results[k_val]['simpson_scores'].append(additional_metrics['simpson_index'])
+            results[k_val]['intra_list_diversity_scores'].append(additional_metrics['intra_list_diversity'])
+            results[k_val]['popularity_lift_scores'].append(additional_metrics['popularity_lift'])
+            results[k_val]['avg_rec_popularity_scores'].append(additional_metrics['avg_rec_popularity'])
+            results[k_val]['normalized_genre_entropy_scores'].append(additional_metrics['normalized_genre_entropy'])
+            results[k_val]['unique_genres_count_scores'].append(additional_metrics['unique_genres_count'])
+
+            # Community bias calculation
+            if hasattr(config, 'item_labels_matrix_mask'):
+                user_community_dist = calculate_user_community_distribution_efficient(
+                    user_top_k, config.item_labels_matrix_mask, config.device
+                )
+                results[k_val]['user_community_distributions'].append(user_community_dist)
+
+
+def calculate_batch_standard_metrics_sparse(top_k_items, sorted_indices, batch_relevance, batch_scores, k):
+    """
+    Calculate standard metrics for a batch using sparse relevance matrix.
+    """
+    batch_size = top_k_items.shape[0]
+
+    # Convert sparse relevance to dense only for this batch (manageable size)
+    batch_relevance_dense = batch_relevance.toarray().astype(bool)
+
+    # Create binary matrix for top-k recommendations
+    top_k_binary = np.zeros_like(batch_relevance_dense)
+    user_indices = np.arange(batch_size)[:, np.newaxis]
+    top_k_binary[user_indices, top_k_items] = 1
+
+    # Calculate metrics vectorized for this batch
+    intersection = np.sum(top_k_binary & batch_relevance_dense, axis=1)
+    num_relevant_per_user = np.sum(batch_relevance_dense, axis=1)
+
+    # Precision@k
+    precision_scores = intersection / k
+
+    # Recall@k
+    recall_scores = np.where(num_relevant_per_user > 0, intersection / num_relevant_per_user, 0.0)
+
+    # Hit Rate@k
+    hit_rate_scores = (intersection > 0).astype(float)
+
+    # NDCG@k
+    ndcg_scores = calculate_ndcg_batch_sparse(top_k_items, batch_relevance_dense, k)
+
+    # MRR
+    mrr_scores = calculate_mrr_batch_sparse(sorted_indices, batch_relevance_dense)
+
+    return {
+        'ndcg': ndcg_scores,
+        'recall': recall_scores,
+        'precision': precision_scores,
+        'mrr': mrr_scores,
+        'hit_rate': hit_rate_scores
+    }
+
+
+def calculate_ndcg_batch_sparse(top_k_items, batch_relevance_dense, k):
+    """
+    Calculate NDCG@k for a batch using efficient operations.
+    """
+    batch_size = top_k_items.shape[0]
+    user_indices = np.arange(batch_size)[:, np.newaxis]
+
+    # Get relevance for top-k items
+    top_k_relevance = batch_relevance_dense[user_indices, top_k_items]
+
+    # Calculate DCG
+    positions = np.arange(1, k + 1)
+    discounts = 1.0 / np.log2(positions + 1)
+    gains = 2 ** top_k_relevance.astype(float) - 1
+    dcg = np.sum(gains * discounts, axis=1)
+
+    # Calculate IDCG
+    num_relevant_per_user = np.sum(batch_relevance_dense, axis=1)
+    ideal_relevance = np.zeros((batch_size, k))
+
+    for i in range(batch_size):
+        num_rel = min(int(num_relevant_per_user[i]), k)
+        if num_rel > 0:
+            ideal_relevance[i, :num_rel] = 1
+
+    ideal_gains = 2 ** ideal_relevance - 1
+    idcg = np.sum(ideal_gains * discounts, axis=1)
+
+    # NDCG = DCG / IDCG
+    ndcg_scores = np.where(idcg > 0, dcg / idcg, 0.0)
+    return ndcg_scores
+
+
+def calculate_mrr_batch_sparse(sorted_indices, batch_relevance_dense):
+    """
+    Calculate MRR for a batch efficiently.
+    """
+    batch_size, num_items = batch_relevance_dense.shape
+    mrr_scores = np.zeros(batch_size)
+
+    for i in range(batch_size):
+        user_relevance = batch_relevance_dense[i]
+        if np.any(user_relevance):
+            # Find positions of relevant items in the ranking
+            relevant_positions = []
+            for pos, item_idx in enumerate(sorted_indices[i]):
+                if user_relevance[item_idx]:
+                    relevant_positions.append(pos + 1)  # 1-based position
+
+            if relevant_positions:
+                mrr_scores[i] = np.mean([1.0 / pos for pos in relevant_positions])
+
+    return mrr_scores
+
+
+def calculate_user_additional_metrics_efficient(top_k_items, encoded_to_genres, dataset):
+    """
+    Calculate additional metrics for a single user efficiently.
+    """
+    metrics = {}
+
+    # Genre-based metrics
+    if encoded_to_genres:
+        # Get genres for recommended items
+        item_genres = []
+        for item_id in top_k_items:
+            if item_id in encoded_to_genres:
+                item_genres.extend(encoded_to_genres[item_id])
+
+        if item_genres:
+            # Simpson index
+            genre_counts = {}
+            for genre in item_genres:
+                genre_counts[genre] = genre_counts.get(genre, 0) + 1
+
+            total = sum(genre_counts.values())
+            simpson_index = 1.0 - sum((count / total) ** 2 for count in genre_counts.values())
+            metrics['simpson_index'] = simpson_index
+
+            # Intra-list diversity (simplified for efficiency)
+            unique_genres = len(set(item_genres))
+            total_genre_assignments = len(item_genres)
+            metrics['intra_list_diversity'] = 1.0 - (unique_genres / max(total_genre_assignments, 1))
+
+            # Genre entropy
+            if len(genre_counts) > 1:
+                entropy = 0.0
+                for count in genre_counts.values():
+                    p = count / total
+                    entropy -= p * np.log2(p)
+                max_entropy = np.log2(len(genre_counts))
+                metrics['normalized_genre_entropy'] = entropy / max_entropy
+            else:
+                metrics['normalized_genre_entropy'] = 0.0
+
+            metrics['unique_genres_count'] = unique_genres
+        else:
+            metrics.update({
+                'simpson_index': 0.0,
+                'intra_list_diversity': 0.0,
+                'normalized_genre_entropy': 0.0,
+                'unique_genres_count': 0
+            })
+    else:
+        metrics.update({
+            'simpson_index': 0.0,
+            'intra_list_diversity': 0.0,
+            'normalized_genre_entropy': 0.0,
+            'unique_genres_count': 0
+        })
+
+    # Popularity metrics
+    if len(top_k_items) > 0 and hasattr(dataset, 'item_popularities'):
+        item_popularities = [dataset.item_popularities[item_id] for item_id in top_k_items
+                             if item_id < len(dataset.item_popularities)]
+
+        if item_popularities:
+            avg_pop = np.mean(item_popularities)
+            baseline_pop = np.mean(dataset.item_popularities)
+            pop_lift = avg_pop / baseline_pop if baseline_pop > 0 else 1.0
+
+            metrics['avg_rec_popularity'] = avg_pop
+            metrics['popularity_lift'] = pop_lift
+        else:
+            metrics['avg_rec_popularity'] = 0.0
+            metrics['popularity_lift'] = 1.0
+    else:
+        metrics['avg_rec_popularity'] = 0.0
+        metrics['popularity_lift'] = 1.0
+
+    return metrics
+
+
+def calculate_user_community_distribution_efficient(recommended_items, item_labels_matrix_mask, device):
+    """
+    Calculate community distribution for a user efficiently using sparse operations.
+    """
+    if len(recommended_items) == 0:
+        n_communities = item_labels_matrix_mask.shape[1]
+        return torch.ones(n_communities, device=device) / n_communities
+
+    # Convert to tensor and filter valid items
+    recommended_items = torch.tensor(recommended_items, device=device)
+    valid_items = recommended_items[recommended_items < item_labels_matrix_mask.shape[0]]
+
+    if len(valid_items) == 0:
+        n_communities = item_labels_matrix_mask.shape[1]
+        return torch.ones(n_communities, device=device) / n_communities
+
+    # Get community memberships efficiently
+    item_community_memberships = item_labels_matrix_mask[valid_items]
+    community_counts = torch.sum(item_community_memberships, dim=0).float()
+
+    # Normalize
+    total_count = torch.sum(community_counts)
+    if total_count > 0:
+        community_distribution = community_counts / total_count
+    else:
+        n_communities = item_labels_matrix_mask.shape[1]
+        community_distribution = torch.ones(n_communities, device=device) / n_communities
+
+    return community_distribution
+
+
+def aggregate_batch_results(results, k_values, dataset):
+    """
+    Aggregate results from all batches into final metrics.
+    """
+    final_results = {}
+
+    for k_val in k_values:
+        metrics = results[k_val]
+
+        # Calculate aggregated metrics
+        item_coverage = len(metrics['all_recommended_items']) / dataset.num_items
+
+        # Gini coefficient
+        if metrics['item_recommendation_freq']:
+            recommendation_counts = np.array(list(metrics['item_recommendation_freq'].values()))
+            recommendation_probs = recommendation_counts / recommendation_counts.sum()
+            gini_index = calculate_gini_coefficient(recommendation_probs)
+        else:
+            gini_index = 0.0
+
+        # Popularity calibration
+        popularity_calibration = calculate_popularity_calibration_sparse(
+            metrics['all_global_recommendations'], dataset
+        )
+
+        # Community bias
+        user_community_bias = 0.0
+        if metrics['user_community_distributions']:
+            all_user_community_dists = torch.stack(metrics['user_community_distributions'])
+            user_bias, _ = get_community_bias(item_communities_each_user_dist=all_user_community_dists)
+            user_community_bias = float(torch.mean(user_bias)) if user_bias is not None else 0.0
+
+        final_results[k_val] = {
+            'ndcg': np.mean(metrics['ndcg_scores']) if metrics['ndcg_scores'] else 0.0,
+            'recall': np.mean(metrics['recall_scores']) if metrics['recall_scores'] else 0.0,
+            'precision': np.mean(metrics['precision_scores']) if metrics['precision_scores'] else 0.0,
+            'mrr': np.mean(metrics['mrr_scores']) if metrics['mrr_scores'] else 0.0,
+            'hit_rate': np.mean(metrics['hit_rate_scores']) if metrics['hit_rate_scores'] else 0.0,
+            'item_coverage': item_coverage,
+            'gini_index': gini_index,
+            'simpson_index_genre': np.mean(metrics['simpson_scores']) if metrics['simpson_scores'] else 0.0,
+            'intra_list_diversity': np.mean(metrics['intra_list_diversity_scores']) if metrics[
+                'intra_list_diversity_scores'] else 0.0,
+            'popularity_lift': np.mean(metrics['popularity_lift_scores']) if metrics['popularity_lift_scores'] else 0.0,
+            'avg_rec_popularity': np.mean(metrics['avg_rec_popularity_scores']) if metrics[
+                'avg_rec_popularity_scores'] else 0.0,
+            'normalized_genre_entropy': np.mean(metrics['normalized_genre_entropy_scores']) if metrics[
+                'normalized_genre_entropy_scores'] else 0.0,
+            'unique_genres_count': np.mean(metrics['unique_genres_count_scores']) if metrics[
+                'unique_genres_count_scores'] else 0.0,
+            'popularity_calibration': popularity_calibration,
+            'user_community_bias': user_community_bias
+        }
+
+    return final_results
+
+
+def calculate_popularity_calibration_sparse(all_recommended_items, dataset, num_bins=10):
+    """
+    Calculate popularity calibration - measures how well the recommendation popularity
+    distribution matches the catalog popularity distribution using KL divergence.
+
+    Lower values indicate better calibration (closer to catalog distribution).
+
+    Args:
+        all_recommended_items: list of all recommended items across all users
+        dataset: dataset object with item_popularities
+        num_bins: number of bins for histogram comparison
+
+    Returns:
+        float: KL divergence between recommendation and catalog distributions
+    """
+    if not all_recommended_items:
+        return float('inf')
+
+    catalog_popularities = np.array(dataset.item_popularities)
+
+    # Get popularities for recommended items
+    recommended_popularities = []
+    for item_id in all_recommended_items:
+        if 0 <= item_id < len(catalog_popularities):
+            recommended_popularities.append(catalog_popularities[item_id])
+
+    if not recommended_popularities:
+        return float('inf')
+
+    recommended_popularities = np.array(recommended_popularities)
+
+    # Create bins based on catalog popularity range
+    min_pop, max_pop = np.min(catalog_popularities), np.max(catalog_popularities)
+    if min_pop == max_pop:
+        return 0.0  # Perfect calibration if all items have same popularity
+
+    # Use equal-width bins across the popularity range
+    bins = np.linspace(min_pop, max_pop, num_bins + 1)
+
+    # Calculate normalized histograms (probability distributions)
+    catalog_hist, _ = np.histogram(catalog_popularities, bins=bins)
+    recommended_hist, _ = np.histogram(recommended_popularities, bins=bins)
+
+    # Convert to probability distributions
+    catalog_dist = catalog_hist / np.sum(catalog_hist) if np.sum(catalog_hist) > 0 else np.ones(num_bins) / num_bins
+    recommended_dist = recommended_hist / np.sum(recommended_hist) if np.sum(recommended_hist) > 0 else np.ones(
+        num_bins) / num_bins
+
+    # Add small epsilon to avoid log(0) in KL divergence
+    epsilon = 1e-10
+    catalog_dist = np.maximum(catalog_dist, epsilon)
+    recommended_dist = np.maximum(recommended_dist, epsilon)
+
+    # Calculate KL divergence: KL(P||Q) = sum(P(x) * log(P(x)/Q(x)))
+    # where P is recommendation distribution, Q is catalog distribution
+    kl_divergence = np.sum(recommended_dist * np.log(recommended_dist / catalog_dist))
+
+    return kl_divergence
+
+
+def calculate_gini_coefficient(probabilities):
+    """Calculate Gini coefficient efficiently."""
+    if len(probabilities) == 0:
+        return 0.0
+
+    sorted_probs = np.sort(probabilities)
+    n = len(sorted_probs)
+    index = np.arange(1, n + 1)
+
+    gini = (2 * np.sum(index * sorted_probs)) / (n * np.sum(sorted_probs)) - (n + 1) / n
+    return gini
+
+
+def get_community_bias(item_communities_each_user_dist=None, user_communities_each_item_dist=None):
+    """Get community bias efficiently."""
+    user_bias, item_bias = None, None
+
+    if item_communities_each_user_dist is not None:
+        uniform_distribution_users = torch.full_like(item_communities_each_user_dist,
+                                                     1.0 / item_communities_each_user_dist.size(1))
+        user_bias = torch.linalg.norm(uniform_distribution_users - item_communities_each_user_dist, dim=1)
+
+        worst_distribution_users = torch.zeros_like(item_communities_each_user_dist)
+        worst_distribution_users[:, 0] = 1.0
+        bias_worst_users = torch.linalg.norm(uniform_distribution_users - worst_distribution_users, dim=1)
+        user_bias /= bias_worst_users
+
+    if user_communities_each_item_dist is not None:
+        uniform_distribution_items = torch.full_like(user_communities_each_item_dist,
+                                                     1.0 / user_communities_each_item_dist.size(1))
+        item_bias = torch.linalg.norm(uniform_distribution_items - user_communities_each_item_dist, dim=1)
+        worst_distribution_items = torch.zeros_like(user_communities_each_item_dist)
+        worst_distribution_items[:, 0] = 1.0
+        bias_worst_items = torch.linalg.norm(uniform_distribution_items - worst_distribution_items, dim=1)
+        item_bias /= bias_worst_items
+
+    return user_bias, item_bias
+
+
+def evaluate_current_model_ndcg_vectorized(model, dataset, model_type='LightGCN', k=10):
+    """
+    Memory-efficient NDCG evaluation for early stopping using batching.
+    """
+    if model_type != 'ItemKNN':
+        model.eval()
+
+    train_user_items = dataset.train_df.groupby('user_encoded')['item_encoded'].apply(list).to_dict()
+    user_val_items = dataset.val_df.groupby('user_encoded')['item_encoded'].apply(list).to_dict()
+
+    valid_user_ids = np.array([uid for uid in user_val_items.keys() if uid < dataset.num_users])
+
+    # Create sparse relevance matrix
+    relevance_sparse = create_sparse_relevance_matrix(valid_user_ids, user_val_items, dataset.num_items)
+
+    # Process in batches
+    batch_size = min(1000, len(valid_user_ids))
+    all_ndcg_scores = []
+
+    config_mock = type('Config', (), {'model_name': model_type})()
+
+    for batch_start in range(0, len(valid_user_ids), batch_size):
+        batch_end = min(batch_start + batch_size, len(valid_user_ids))
+        batch_user_ids = valid_user_ids[batch_start:batch_end]
+
+        # Get scores for this batch
+        batch_scores = get_batch_user_scores(model, dataset, config_mock, batch_user_ids, train_user_items)
+
+        # Get top-k items
+        top_k_items = np.argsort(-batch_scores, axis=1)[:, :k]
+
+        # Get relevance for this batch
+        batch_relevance = relevance_sparse[batch_start:batch_end].toarray().astype(bool)
+
+        # Calculate NDCG for this batch
+        batch_ndcg = calculate_ndcg_batch_sparse(top_k_items, batch_relevance, k)
+        all_ndcg_scores.extend(batch_ndcg)
+
+    return np.mean(all_ndcg_scores)
+
+
+def load_genre_mapping(dataset):
+    """Load genre labels and create mapping from encoded item IDs to genres"""
+    try:
+        with open(f'dataset/{dataset.name}/saved/item_genre_labels_{dataset.name}.json', 'r') as f:
+            item_genre_labels = json.load(f)
+
+        item_id_to_encoded = dataset.complete_df.set_index('item_id')['item_encoded'].to_dict()
+        item_id_to_encoded = {str(k): v for k, v in item_id_to_encoded.items()}
+
+        encoded_to_genres = {}
+        for original_item_id, genres in item_genre_labels.items():
+            if original_item_id in item_id_to_encoded:
+                encoded_id = item_id_to_encoded[original_item_id]
+                encoded_to_genres[encoded_id] = genres
+
+        return encoded_to_genres
+    except FileNotFoundError:
+        return {}
+
+
+def print_metric_results(metrics, title="Results"):
+    """Print metrics in a formatted table with k values as columns and metrics as rows."""
+    if not metrics:
+        print(f"No {title.lower()} available")
+        return
+
+    k_values = sorted(metrics.keys())
+    metric_names = list(metrics[k_values[0]].keys())
+
+    print(f"\n{title}")
+    print("=" * 85)
+
+    header = f"{'Metric':<25}"
+    for k in k_values:
+        header += f"{'k=' + str(k):>12}"
+    print(header)
+    print("-" * (25 + 12 * len(k_values)))
+
+    for metric_name in metric_names:
+        row = f"{metric_name:<25}"
+        for k in k_values:
+            value = metrics[k][metric_name]
+            if isinstance(value, (int, float)):
+                row += f"{np.round(value, 4):>12}"
+            else:
+                row += f"{str(value):>12}"
+        print(row)
 
