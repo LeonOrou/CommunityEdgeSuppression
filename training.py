@@ -1,9 +1,7 @@
 import time
 from collections import defaultdict
 import wandb
-from wandb_logging import (_log_multivae_training_metrics, _log_training_metrics, _log_itemknn_training_start,
-                           _log_final_training_results, log_fold_metrics_to_wandb, log_test_metrics_to_wandb,
-                           log_cv_summary_to_wandb, _log_multivae_final_results)
+from wandb_logging import log_metrics_to_wandb
 from evaluation import evaluate_current_model_ndcg
 from dataset import RecommendationDataset, sample_negative_items, prepare_adj_tensor, prepare_training_data
 from models import calculate_bpr_loss
@@ -41,9 +39,6 @@ def train_itemknn(model, dataset, config, stage='cv', fold_num=None, verbose=Tru
             torch.tensor(training_interactions, device=config.device), config).cpu().numpy()
         training_interactions[:, 2] = current_edge_weights
 
-    _log_itemknn_training_start(model, len(training_interactions), fold_num, verbose)
-
-    # Train the model (compute similarities)
     model.fit(training_interactions)
 
     training_time = time.time() - start_time
@@ -283,11 +278,6 @@ def train_multivae(model, dataset, config, optimizer, scheduler, device,
             val_history.append(val_ndcg)
             current_lr = optimizer.param_groups[0]['lr']
 
-            _log_multivae_training_metrics(
-                epoch, epoch_loss, val_ndcg, current_lr, kl_weight,
-                patience_counter, fold_num
-            )
-
             if verbose:
                 print(f'  Epoch {epoch + 1:3d}/{config.epochs}, Loss: {epoch_loss:.4f}, '
                       f'Val NDCG@10: {val_ndcg:.4f}, KL Weight: {kl_weight:.4f}')
@@ -303,8 +293,6 @@ def train_multivae(model, dataset, config, optimizer, scheduler, device,
     if best_model_state is not None:
         model.load_state_dict(best_model_state)
 
-    _log_multivae_final_results(best_epoch, best_val_ndcg, epoch + 1,
-                                patience_counter >= patience, fold_num)
     return model
 
 
@@ -375,9 +363,6 @@ def train_lightgcn(model, dataset, config, optimizer, scheduler, user_positive_i
             val_history.append(val_ndcg)
             current_lr = optimizer.param_groups[0]['lr']
 
-            _log_training_metrics(epoch, epoch_loss, val_ndcg, current_lr,
-                                  patience_counter, config, fold_num)
-
             if verbose:
                 suppression_status = "ON" if config.use_dropout else "OFF"
                 print(f'  Epoch {epoch+1:3d}/{config.epochs}, Loss: {epoch_loss:.4f}, '
@@ -396,9 +381,6 @@ def train_lightgcn(model, dataset, config, optimizer, scheduler, user_positive_i
     if best_model_state is not None:
         model.load_state_dict(best_model_state)
 
-    # Log final training results
-    _log_final_training_results(best_epoch, best_val_ndcg, epoch + 1,
-                                patience_counter >= patience, fold_num)
     return model
 
 

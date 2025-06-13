@@ -10,7 +10,7 @@ from dataset import RecommendationDataset, prepare_adj_tensor
 from argparse import ArgumentParser
 from utils_functions import get_community_data, get_biased_connectivity_data, set_seed
 import wandb
-from wandb_logging import init_wandb, log_fold_metrics_to_wandb, log_test_metrics_to_wandb, log_cv_summary_to_wandb
+from wandb_logging import init_wandb, log_metrics_to_wandb
 from training import train_model
 from scipy import sparse as sp
 
@@ -73,15 +73,13 @@ def main():
 
         model = train_model(dataset=dataset, model=model, config=config, stage='cv', fold_num=fold + 1,)
 
-        if len(dataset.val_df) > 0:
-            val_metrics = evaluate_model(
-                model=model, dataset=dataset, config=config,
-                k_values=config.evaluate_top_k, stage='cv')
+        val_metrics = evaluate_model(
+            model=model, dataset=dataset, config=config,
+            k_values=config.evaluate_top_k, stage='cv')
 
-
-            cv_results.append(val_metrics)
-            log_fold_metrics_to_wandb(fold + 1, val_metrics, config)
-            print_metric_results(val_metrics, f"Fold {fold + 1} Results")
+        cv_results.append(val_metrics)
+        log_metrics_to_wandb(val_metrics, config, stage=f'fold_{fold+1}')
+        print_metric_results(val_metrics, f"Fold {fold + 1} Results")
 
     if cv_results:
         # get average metrics across folds
@@ -97,7 +95,7 @@ def main():
             for metric_name, values in metrics.items():
                 cv_summary[k_][metric_name] = np.mean(values)
 
-        log_cv_summary_to_wandb(cv_summary, config)
+        log_metrics_to_wandb(cv_summary, config, stage='cv_avg')
         print_metric_results(cv_summary, "CROSS-VALIDATION SUMMARY (5-fold average)")
     else:
         cv_summary = {}
@@ -117,7 +115,7 @@ def main():
         model=model, dataset=dataset, config=config,
         k_values=config.evaluate_top_k, stage='full_train')
 
-    log_test_metrics_to_wandb(test_metrics, config)
+    log_metrics_to_wandb(test_metrics, config, stage='test')
 
     model_artifact = wandb.Artifact(
         name=f"model_{config.model_name}_{config.dataset_name}",
