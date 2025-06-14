@@ -24,6 +24,7 @@ def evaluate_model(model, dataset, config, stage='cv', k_values=[10, 20, 50, 100
     encoded_to_genres = load_genre_mapping(dataset)
 
     if stage == 'full_train':
+        dataset.train_df = dataset.train_val_df
         dataset.val_df = dataset.test_df
 
     train_user_items = dataset.train_df.groupby('user_encoded')['item_encoded'].apply(list).to_dict()
@@ -986,6 +987,7 @@ def evaluate_model_vectorized(model, dataset, config, stage='cv', k_values=[10, 
     encoded_to_genres = load_genre_mapping(dataset)
 
     if stage == 'full_train':
+        dataset.train_df = dataset.train_val_df
         dataset.val_df = dataset.test_df
 
     # Prepare sparse data structures
@@ -1270,13 +1272,10 @@ def calculate_mrr_batch_sparse(sorted_indices, batch_relevance_dense):
         user_relevance = batch_relevance_dense[i]
         if np.any(user_relevance):
             # Find positions of relevant items in the ranking
-            relevant_positions = []
             for pos, item_idx in enumerate(sorted_indices[i]):
                 if user_relevance[item_idx]:
-                    relevant_positions.append(pos + 1)  # 1-based position
-
-            if relevant_positions:
-                mrr_scores[i] = np.mean([1.0 / pos for pos in relevant_positions])
+                    mrr_scores[i] = 1 / (pos + 1)  # 1-based position
+                    break
 
     return mrr_scores
 

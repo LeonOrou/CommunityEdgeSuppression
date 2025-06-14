@@ -75,22 +75,20 @@ def main():
 
         model = train_model(dataset=dataset, model=model, config=config, stage='cv', fold_num=fold + 1,)
 
-        time_start_vec = time.time()
+        # time_start_vec = time.time()
         val_metrics = evaluate_model_vectorized(
             model=model, dataset=dataset, config=config,
             k_values=config.evaluate_top_k, stage='cv')
-        end_time_vec = time.time()
-        print(val_metrics)
-        time_start_normal = time.time()
-        val_metrics = evaluate_model(
-            model=model, dataset=dataset, config=config,
-            k_values=config.evaluate_top_k, stage='cv')
-        end_time_normal = time.time()
-        print(val_metrics)
-        print(f"Vectorized evaluation time: {end_time_vec - time_start_vec:.4f}s, ")
-        print(f"Normal evaluation time: {end_time_normal - time_start_normal:.4f}s")
-
-
+        # end_time_vec = time.time()
+        # print(val_metrics)
+        # time_start_normal = time.time()
+        # val_metrics = evaluate_model(
+        #     model=model, dataset=dataset, config=config,
+        #     k_values=config.evaluate_top_k, stage='cv')
+        # end_time_normal = time.time()
+        # print(val_metrics)
+        # print(f"Vectorized evaluation time: {end_time_vec - time_start_vec:.4f}s, ")
+        # print(f"Normal evaluation time: {end_time_normal - time_start_normal:.4f}s")
 
         cv_results.append(val_metrics)
         log_metrics_to_wandb(val_metrics, config, stage=f'fold_{fold+1}')
@@ -162,7 +160,7 @@ def main():
 def parse_arguments():
     """Parse command line arguments."""
     parser = ArgumentParser()
-    parser.add_argument("--model_name", type=str, default='MultiVAE')
+    parser.add_argument("--model_name", type=str, default='ItemKNN')
     parser.add_argument("--dataset_name", type=str, default='ml-100k')
     parser.add_argument("--users_top_percent", type=float, default=0.05)
     parser.add_argument("--items_top_percent", type=float, default=0.05)

@@ -170,7 +170,7 @@ class RecommendationDataset:
                                       names=['user_id', 'item_id', 'rating'],
                                       usecols=[0, 1, 2], header=0)
         # we shuffle later with indices
-        # self.raw_df = self.raw_df.sample(frac=1, random_state=42).reset_index(drop=True)
+        self.raw_df = self.raw_df.sample(frac=1, random_state=42).reset_index(drop=True)
 
     def _load_lfm(self):
         if self.name == 'lfm':
@@ -178,6 +178,7 @@ class RecommendationDataset:
             self.raw_df = pd.read_csv(ratings_file, sep=',',
                                       names=['user_id', 'item_id', 'rating'],
                                       usecols=[0, 1, 2], header=None)
+        self.raw_df = self.raw_df.sample(frac=1, random_state=42).reset_index(drop=True)
 
     def calculate_item_popularities(self):
         """Calculate item popularities based on interaction counts"""
@@ -234,7 +235,7 @@ class RecommendationDataset:
         self.num_users = num_users
         self.num_items = num_items
 
-    def split_interactions_by_user(self, test_ratio=0.2, n_folds=5):
+    def split_interactions_by_user(self, test_ratio=0.15, n_folds=5):
         """
         Split interactions for each user into train_val/test.
         Optimized version using advanced NumPy techniques.
