@@ -513,9 +513,11 @@ def calculate_simpson_index_recommendations(recommended_items, encoded_to_genres
     for item_id in recommended_items:
         if item_id in encoded_to_genres:
             genres = encoded_to_genres[item_id]
+            # Normalize by number of genres to avoid bias towards items with more genres
+            weight = 1.0 / len(genres)
             for genre in genres:
-                genre_counts[genre] += 1
-                total_genre_assignments += 1
+                genre_counts[genre] += 1 * weight
+                total_genre_assignments += 1 * weight
 
     if total_genre_assignments == 0:
         return 0.0
@@ -530,7 +532,7 @@ def calculate_simpson_index_recommendations(recommended_items, encoded_to_genres
     return simpson_index
 
 
-def calculate_intra_list_diversity_jaccard(top_k_items, encoded_to_genres):
+def calculate_intra_list_diversity(top_k_items, encoded_to_genres):
     """
     Calculate intra-list diversity using average pairwise Jaccard distance.
 
@@ -627,10 +629,10 @@ def calculate_popularity_lift(recommended_items, dataset, baseline_method='catal
 
     # Calculate baseline popularity (catalog average)
     if baseline_method == 'catalog_average':
-        baseline_popularity = np.mean(dataset.item_popularities)
+        baseline_popularity = np.mean(dataset.item_popularities.array)
     else:
         # Could implement user-specific baseline here if needed
-        baseline_popularity = np.mean(dataset.item_popularities)
+        baseline_popularity = np.mean(dataset.item_popularities.array)
 
     # Calculate lift
     if baseline_popularity > 0:
@@ -663,7 +665,7 @@ def calculate_popularity_calibration(all_recommended_items, dataset, num_bins=10
         return float('inf')
 
     # Get popularities
-    catalog_popularities = dataset.item_popularities
+    catalog_popularities = dataset.item_popularities.array
     recommended_popularities = []
 
     for item_id in all_recommended_items:
@@ -805,7 +807,7 @@ def calculate_additional_metrics(top_k_items, encoded_to_genres, dataset, all_re
     metrics['simpson_index'] = calculate_simpson_index_recommendations(top_k_items, encoded_to_genres)
 
     # Intra-list Diversity (average pairwise Jaccard similarity)
-    metrics['intra_list_diversity'] = calculate_intra_list_diversity_jaccard(top_k_items, encoded_to_genres)
+    metrics['intra_list_diversity'] = calculate_intra_list_diversity(top_k_items, encoded_to_genres)
 
     # Popularity Lift
     popularity_metrics = calculate_popularity_lift(top_k_items, dataset)
@@ -1195,10 +1197,8 @@ def calculate_batch_standard_metrics_sparse(top_k_items, sorted_indices, batch_r
     """
     batch_size = top_k_items.shape[0]
 
-    # Convert sparse relevance to dense only for this batch (manageable size)
     batch_relevance_dense = batch_relevance.toarray().astype(bool)
 
-    # Create binary matrix for top-k recommendations
     top_k_binary = np.zeros_like(batch_relevance_dense)
     user_indices = np.arange(batch_size)[:, np.newaxis]
     top_k_binary[user_indices, top_k_items] = 1
@@ -1207,19 +1207,14 @@ def calculate_batch_standard_metrics_sparse(top_k_items, sorted_indices, batch_r
     intersection = np.sum(top_k_binary & batch_relevance_dense, axis=1)
     num_relevant_per_user = np.sum(batch_relevance_dense, axis=1)
 
-    # Precision@k
     precision_scores = intersection / k
 
-    # Recall@k
     recall_scores = np.where(num_relevant_per_user > 0, intersection / num_relevant_per_user, 0.0)
 
-    # Hit Rate@k
     hit_rate_scores = (intersection > 0).astype(float)
 
-    # NDCG@k
     ndcg_scores = calculate_ndcg_batch_sparse(top_k_items, batch_relevance_dense, k)
 
-    # MRR
     mrr_scores = calculate_mrr_batch_sparse(sorted_indices, batch_relevance_dense)
 
     return {
@@ -1349,7 +1344,7 @@ def calculate_user_additional_metrics_efficient(top_k_items, encoded_to_genres, 
 
         if item_popularities:
             avg_pop = np.mean(item_popularities)
-            baseline_pop = np.mean(dataset.item_popularities)
+            baseline_pop = np.mean(dataset.item_popularities.array)
             pop_lift = avg_pop / baseline_pop if baseline_pop > 0 else 1.0
 
             metrics['avg_rec_popularity'] = avg_pop
@@ -1470,7 +1465,7 @@ def calculate_popularity_calibration_sparse(all_recommended_items, dataset, num_
     if not all_recommended_items:
         return float('inf')
 
-    catalog_popularities = np.array(dataset.item_popularities)
+    catalog_popularities = np.array(dataset.item_popularities.array)
 
     # Get popularities for recommended items
     recommended_popularities = []
@@ -1510,45 +1505,6 @@ def calculate_popularity_calibration_sparse(all_recommended_items, dataset, num_
     kl_divergence = np.sum(recommended_dist * np.log(recommended_dist / catalog_dist))
 
     return kl_divergence
-
-
-def calculate_gini_coefficient(probabilities):
-    """Calculate Gini coefficient efficiently."""
-    if len(probabilities) == 0:
-        return 0.0
-
-    sorted_probs = np.sort(probabilities)
-    n = len(sorted_probs)
-    index = np.arange(1, n + 1)
-
-    gini = (2 * np.sum(index * sorted_probs)) / (n * np.sum(sorted_probs)) - (n + 1) / n
-    return gini
-
-
-def get_community_bias(item_communities_each_user_dist=None, user_communities_each_item_dist=None):
-    """Get community bias efficiently."""
-    user_bias, item_bias = None, None
-
-    if item_communities_each_user_dist is not None:
-        uniform_distribution_users = torch.full_like(item_communities_each_user_dist,
-                                                     1.0 / item_communities_each_user_dist.size(1))
-        user_bias = torch.linalg.norm(uniform_distribution_users - item_communities_each_user_dist, dim=1)
-
-        worst_distribution_users = torch.zeros_like(item_communities_each_user_dist)
-        worst_distribution_users[:, 0] = 1.0
-        bias_worst_users = torch.linalg.norm(uniform_distribution_users - worst_distribution_users, dim=1)
-        user_bias /= bias_worst_users
-
-    if user_communities_each_item_dist is not None:
-        uniform_distribution_items = torch.full_like(user_communities_each_item_dist,
-                                                     1.0 / user_communities_each_item_dist.size(1))
-        item_bias = torch.linalg.norm(uniform_distribution_items - user_communities_each_item_dist, dim=1)
-        worst_distribution_items = torch.zeros_like(user_communities_each_item_dist)
-        worst_distribution_items[:, 0] = 1.0
-        bias_worst_items = torch.linalg.norm(uniform_distribution_items - worst_distribution_items, dim=1)
-        item_bias /= bias_worst_items
-
-    return user_bias, item_bias
 
 
 def evaluate_current_model_ndcg_vectorized(model, dataset, model_type='LightGCN', k=10):
@@ -1591,52 +1547,4 @@ def evaluate_current_model_ndcg_vectorized(model, dataset, model_type='LightGCN'
 
     return np.mean(all_ndcg_scores)
 
-
-def load_genre_mapping(dataset):
-    """Load genre labels and create mapping from encoded item IDs to genres"""
-    try:
-        with open(f'dataset/{dataset.name}/saved/item_genre_labels_{dataset.name}.json', 'r') as f:
-            item_genre_labels = json.load(f)
-
-        item_id_to_encoded = dataset.complete_df.set_index('item_id')['item_encoded'].to_dict()
-        item_id_to_encoded = {str(k): v for k, v in item_id_to_encoded.items()}
-
-        encoded_to_genres = {}
-        for original_item_id, genres in item_genre_labels.items():
-            if original_item_id in item_id_to_encoded:
-                encoded_id = item_id_to_encoded[original_item_id]
-                encoded_to_genres[encoded_id] = genres
-
-        return encoded_to_genres
-    except FileNotFoundError:
-        return {}
-
-
-def print_metric_results(metrics, title="Results"):
-    """Print metrics in a formatted table with k values as columns and metrics as rows."""
-    if not metrics:
-        print(f"No {title.lower()} available")
-        return
-
-    k_values = sorted(metrics.keys())
-    metric_names = list(metrics[k_values[0]].keys())
-
-    print(f"\n{title}")
-    print("=" * 85)
-
-    header = f"{'Metric':<25}"
-    for k in k_values:
-        header += f"{'k=' + str(k):>12}"
-    print(header)
-    print("-" * (25 + 12 * len(k_values)))
-
-    for metric_name in metric_names:
-        row = f"{metric_name:<25}"
-        for k in k_values:
-            value = metrics[k][metric_name]
-            if isinstance(value, (int, float)):
-                row += f"{np.round(value, 4):>12}"
-            else:
-                row += f"{str(value):>12}"
-        print(row)
 

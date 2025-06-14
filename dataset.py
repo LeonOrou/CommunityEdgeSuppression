@@ -183,7 +183,7 @@ class RecommendationDataset:
         """Calculate item popularities based on interaction counts"""
         if self.complete_df is not None:
             item_counts = self.complete_df['item_encoded'].value_counts()
-            self.item_popularities = item_counts / len(self.complete_df)
+            self.item_popularities = item_counts
         else:
             raise ValueError("complete_df is not set. Please prepare the data first.")
 

@@ -343,7 +343,7 @@ def train_multivae_efficient(model, train_matrix, test_matrix, device, epochs=80
             num_batches += 1
 
         val_ndcg = evaluate_model_vectorized(model, train_matrix, test_matrix, 'MultiVAE', device)
-        # scheduler.step(val_ndcg)
+        scheduler.step(val_ndcg)
         if epoch % 20 == 0:
             print(f"Epoch {epoch}, Loss: {total_loss / num_batches:.4f}, ndcg@10: {val_ndcg:.4f}")
 

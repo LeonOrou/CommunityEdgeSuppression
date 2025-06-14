@@ -1,7 +1,7 @@
 HYPERPARAMETER SEARCH SUMMARY - ALL MODELS
 ============================================================
 
-Run ID: ml-100k_20250613_122914
+Run ID: ml-100k_20250614_123217
 Dataset: ml-100k
 Models Searched: MultiVAE
 Users: 942, Items: 1303
@@ -11,6 +11,6 @@ Validation interactions: 10672
 SEARCH STATISTICS:
 --------------------
 Total Experiments: 1
-Total Search Time: 36.95 seconds (0.6 minutes)
-Average Time per Experiment: 36.95 seconds
+Total Search Time: 36.26 seconds (0.6 minutes)
+Average Time per Experiment: 36.26 seconds
 

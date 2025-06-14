@@ -50,7 +50,7 @@ def train_itemknn(model, dataset, config, stage='cv', fold_num=None, verbose=Tru
     validation_ndcg = None
     if len(dataset.val_df) > 0:
         from evaluation import evaluate_current_model_ndcg
-        validation_ndcg = evaluate_current_model_ndcg_vectorized(model, dataset, model_type='ItemKNN', k=10)
+        validation_ndcg = evaluate_current_model_ndcg(model, dataset, model_type='ItemKNN', k=10)
 
     # Log training results
     _log_itemknn_training_results(
@@ -109,16 +109,10 @@ def _prepare_multivae_sparse_matrices(dataset):
     return train_matrix, val_matrix
 
 def _create_sparse_user_item_matrix(data_df, num_users, num_items):
-    users = data_df['user_encoded'].values
-    items = data_df['item_encoded'].values
-    ratings = data_df['rating'].values
-
-    # Create sparse matrix
     matrix = csr_matrix(
-        (ratings, (users, items)),
+        (data_df['rating'].values, (data_df['user_encoded'].values, data_df['item_encoded'].values)),
         shape=(num_users, num_items),
         dtype=np.float32)
-
     return matrix
 
 
@@ -246,11 +240,13 @@ def train_multivae(model, dataset, config, optimizer, device,
     """
     print(f"Starting MultiVAE...")
 
-    scheduler = CosineAnnealingWarmRestarts(
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
-        T_0=10,  # First restart after 15 epochs
-        T_mult=2,  # Double cycle length after each restart
-        eta_min=1e-5  # Minimum learning rate
+        mode='max',  # 'max' if monitoring recall/ndcg
+        factor=0.8,  # Reduce learning rate by this factor
+        patience=10,  # Wait epochs before reducing
+        min_lr=1e-5,  # Don't go below this
+        threshold=0.005  # Minimum improvement to count
     )
 
     batch_size = config.batch_size
@@ -267,7 +263,6 @@ def train_multivae(model, dataset, config, optimizer, device,
     num_users = train_sparse_matrix.shape[0]
     model.train()
 
-    # Main training loop
     for epoch in range(config.epochs):
         if config.use_dropout:
             current_edge_weight = community_edge_suppression(torch.tensor(dataset.train_df.values, device=device), config).cpu().numpy()
@@ -279,18 +274,19 @@ def train_multivae(model, dataset, config, optimizer, device,
         epoch_loss, kl_weight = _train_multivae_epoch_sparse(
             model, train_sparse_matrix, optimizer, batch_size,
             epoch, config, device)
-        scheduler.step()
+
+        val_ndcg = evaluate_current_model_ndcg(model, dataset, model_type='MultiVAE', k=10)
+        scheduler.step(val_ndcg)
 
         # Evaluation and logging
         if epoch == 0 or (epoch+1) % 10 == 0 or epoch == config.epochs - 1:
-            val_ndcg = evaluate_current_model_ndcg(model, dataset, model_type='MultiVAE', k=10)
 
             val_history.append(val_ndcg)
             current_lr = optimizer.param_groups[0]['lr']
 
             if verbose:
                 print(f'  Epoch {epoch + 1:3d}/{config.epochs}, Loss: {epoch_loss:.4f}, '
-                      f'Val NDCG@10: {val_ndcg:.4f}')
+                      f'current LR: {current_lr:.6f}, Val NDCG@10: {val_ndcg:.4f}')
 
             # Early stopping logic
             should_stop, best_val_ndcg, patience_counter, best_model_state, best_epoch = _check_multivae_early_stopping(
@@ -385,7 +381,7 @@ def train_lightgcn(model, dataset, config, optimizer, user_positive_items,
 
             if verbose:
                 suppression_status = "ON" if config.use_dropout else "OFF"
-                print(f'  Epoch {epoch+1:3d}/{config.epochs}, Loss: {epoch_loss:.4f}, '
+                print(f'  Epoch {epoch+1:3d}/{config.epochs}, Loss: {epoch_loss:.4f}, current LR: {current_lr:.6f}, '
                       f'Val NDCG@10: {val_ndcg:.4f} (Suppression: {suppression_status})')
 
             # Early stopping logic
