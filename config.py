@@ -57,16 +57,16 @@ class Config:
             self.num_folds = 5
             self.reg = 1e-4
             # self.weight_decay = 1
-            self.patience = 15
+            self.patience = 10
         elif self.model_name == 'ItemKNN':
             self.item_knn_topk = 125
             self.shrink = 50
             self.feature_weighting = 'tf-idf'
         elif self.model_name == 'MultiVAE':
-            self.learning_rate = 5e-4
+            self.learning_rate = 1e-2
             self.epochs = 200
             self.batch_size = 2048
-            self.patience = 20
+            self.patience = 10
             self.hidden_dimension = 800
             self.latent_dimension = 200
             self.dropout_prob = 0.5

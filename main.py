@@ -32,8 +32,7 @@ def main():
 
     config.user_degrees, config.item_degrees = dataset.get_node_degrees()
     print("Preparing data with consistent encoding...")
-    print(
-        f"Processed data: {dataset.num_users} users, {dataset.num_items} items, {len(dataset.complete_df)} interactions")
+    print(f"Processed data: {dataset.num_users} users, {dataset.num_items} items, {len(dataset.complete_df)} interactions")
 
     print(f"Train set: {len(dataset.train_val_df)} interactions")
     print(f"Test set: {len(dataset.test_df)} interactions")
@@ -160,15 +159,15 @@ def main():
 def parse_arguments():
     """Parse command line arguments."""
     parser = ArgumentParser()
-    parser.add_argument("--model_name", type=str, default='ItemKNN')
+    parser.add_argument("--model_name", type=str, default='MultiVAE',)
     parser.add_argument("--dataset_name", type=str, default='ml-100k')
     parser.add_argument("--users_top_percent", type=float, default=0.05)
     parser.add_argument("--items_top_percent", type=float, default=0.05)
     parser.add_argument("--users_dec_perc_drop", type=float, default=0.05)
     parser.add_argument("--items_dec_perc_drop", type=float, default=0.05)
-    parser.add_argument("--community_suppression", type=float, default=0.6)
-    parser.add_argument("--drop_only_power_nodes", type=bool, default=False)
-    parser.add_argument("--use_dropout", type=bool, default=False)
+    parser.add_argument("--community_suppression", type=float, default=0.5)
+    parser.add_argument("--drop_only_power_nodes", type=bool, default=True)
+    parser.add_argument("--use_dropout", type=bool, default=True)
 
     return parser.parse_args()
 

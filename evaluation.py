@@ -1,8 +1,10 @@
 import numpy as np
+import pandas as pd
 import torch
 import json
 from collections import defaultdict
 from scipy.sparse import csr_matrix
+from itertools import combinations
 
 
 def evaluate_model(model, dataset, config, stage='cv', k_values=[10, 20, 50, 100]):
@@ -71,7 +73,7 @@ def evaluate_model(model, dataset, config, stage='cv', k_values=[10, 20, 50, 100
                 scores_filtered = scores.copy()
                 scores_filtered[train_items] = float('-inf')
 
-                _process_user_recommendations(
+                process_user_recommendations(
                     user_id, true_items, scores_filtered, train_items, max_k, k_values,
                     metrics_by_k, item_recommendation_freq_by_k, all_global_recommendations_by_k,
                     user_item_community_distributions, config, encoded_to_genres, dataset
@@ -97,7 +99,7 @@ def evaluate_model(model, dataset, config, stage='cv', k_values=[10, 20, 50, 100
                 train_items = list(train_user_items.get(user_id, []))
                 if train_items:
                     scores_filtered[i, train_items] = float('-inf')
-                _process_user_recommendations(
+                process_user_recommendations(
                     user_id, user_test_items[user_id], scores_filtered[i], train_items, max_k, k_values,
                     metrics_by_k, item_recommendation_freq_by_k, all_global_recommendations_by_k,
                     user_item_community_distributions, config, encoded_to_genres, dataset
@@ -123,7 +125,7 @@ def evaluate_model(model, dataset, config, stage='cv', k_values=[10, 20, 50, 100
                     # Training items are already excluded by ItemKNN internally
                     train_items = list(train_user_items.get(user_id, []))
 
-                _process_user_recommendations(
+                process_user_recommendations(
                     user_id, true_items, scores_filtered, train_items, max_k, k_values,
                     metrics_by_k, item_recommendation_freq_by_k, all_global_recommendations_by_k,
                     user_item_community_distributions, config, encoded_to_genres, dataset
@@ -142,9 +144,9 @@ def evaluate_model(model, dataset, config, stage='cv', k_values=[10, 20, 50, 100
     return results
 
 
-def _process_user_recommendations(user_id, true_items, scores_filtered, train_items, max_k, k_values,
-                                  metrics_by_k, item_recommendation_freq_by_k, all_global_recommendations_by_k,
-                                  user_item_community_distributions, config, encoded_to_genres, dataset):
+def process_user_recommendations(user_id, true_items, scores_filtered, train_items, max_k, k_values,
+                                 metrics_by_k, item_recommendation_freq_by_k, all_global_recommendations_by_k,
+                                 user_item_community_distributions, config, encoded_to_genres, dataset):
     """
     Process recommendations for a single user across all k values.
     """
@@ -533,63 +535,52 @@ def calculate_simpson_index_recommendations(recommended_items, encoded_to_genres
     return simpson_index
 
 
-def calculate_intra_list_diversity(top_k_items, encoded_to_genres):
-    """
-    Calculate intra-list diversity using average pairwise Jaccard distance.
+def calculate_intra_list_diversity(top_k_items, dataset):
+    '''
+    Calculate intra-list diversity using average pairwise Jaccard distance between items
 
-    For each pair of items in the recommendation list, calculate Jaccard similarity
-    of their genre sets, then average across all pairs. Higher similarity means
-    lower diversity, so we can report 1 - avg_similarity as diversity.
+    :param top_k_items: list of top-k recommended item IDs
+    :param dataset: dataset object with complete_df containing ['users_encoded', 'item_encoded', 'rating']
+    :return: diversity: float (average pairwise Jaccard distance)
+    '''
 
-    Higher values indicate more diverse recommendations.
-
-    Args:
-        top_k_items: list of recommended item IDs
-        encoded_to_genres: dict mapping item_id -> list of genre_ids
-
-    Returns:
-        float: Average pairwise Jaccard distance (0 to 1)
-    """
     if len(top_k_items) < 2:
-        return 0.0  # Need at least 2 items to calculate diversity
+        return 0.0  # No diversity possible with less than 2 items
 
-    # Filter items that have genre information and convert to sets
-    items_with_genres = []
+    # Get the complete dataframe with user-item interactions
+    complete_df = dataset.complete_df
+
+    # Create item profiles (sets of users who interacted with each item)
+    item_profiles = {}
+
     for item_id in top_k_items:
-        if item_id in encoded_to_genres:
-            genres = encoded_to_genres[item_id]
-            if len(genres) > 0:
-                items_with_genres.append((item_id, set(genres)))
+        # Get all users who interacted with this item
+        users_for_item = complete_df[complete_df['item_encoded'] == item_id]['user_encoded'].unique()
+        item_profiles[item_id] = set(users_for_item)
 
-    if len(items_with_genres) < 2:
-        return 0.0  # Need at least 2 items with genres
+    # Calculate pairwise Jaccard distances
+    jaccard_distances = []
 
-    # Calculate pairwise Jaccard similarities
-    similarities = []
-    n_items = len(items_with_genres)
+    # Generate all pairs of items in the recommendation list
+    for item1, item2 in combinations(top_k_items, 2):
+        profile1 = item_profiles[item1]
+        profile2 = item_profiles[item2]
 
-    for i in range(n_items):
-        for j in range(i + 1, n_items):
-            genres_i = items_with_genres[i][1]
-            genres_j = items_with_genres[j][1]
+        # Calculate Jaccard similarity
+        intersection = len(profile1.intersection(profile2))
+        union = len(profile1.union(profile2))
 
-            # Jaccard similarity = |intersection| / |union|
-            intersection = len(genres_i.intersection(genres_j))
-            union = len(genres_i.union(genres_j))
+        if union == 0:
+            jaccard_similarity = 0.0
+        else:
+            jaccard_similarity = intersection / union
 
-            if union > 0:
-                jaccard_similarity = intersection / union
-                similarities.append(jaccard_similarity)
+        # Jaccard distance = 1 - Jaccard similarity
+        jaccard_distance = 1.0 - jaccard_similarity
+        jaccard_distances.append(jaccard_distance)
 
-    if len(similarities) == 0:
-        return 0.0
-
-    # Average Jaccard similarity
-    avg_similarity = np.mean(similarities)
-
-    # Convert to diversity: higher diversity = lower similarity
-    # Jaccard distance = 1 - Jaccard similarity
-    diversity = 1.0 - avg_similarity
+    # Return average pairwise Jaccard distance
+    diversity = np.mean(jaccard_distances)
 
     return diversity
 
@@ -807,8 +798,8 @@ def calculate_additional_metrics(top_k_items, encoded_to_genres, dataset, all_re
     # Simpson Index
     metrics['simpson_index'] = calculate_simpson_index_recommendations(top_k_items, encoded_to_genres)
 
-    # Intra-list Diversity (average pairwise Jaccard similarity)
-    metrics['intra_list_diversity'] = calculate_intra_list_diversity(top_k_items, encoded_to_genres)
+    # Intra-list Diversity (average pairwise Jaccard similarity of items)
+    metrics['intra_list_diversity'] = calculate_intra_list_diversity(top_k_items, dataset)
 
     # Popularity Lift
     popularity_metrics = calculate_popularity_lift(top_k_items, dataset)
@@ -1306,8 +1297,7 @@ def calculate_user_additional_metrics_efficient(top_k_items, encoded_to_genres, 
 
             # Intra-list diversity (simplified for efficiency)
             unique_genres = len(set(item_genres))
-            total_genre_assignments = len(item_genres)
-            metrics['intra_list_diversity'] = 1.0 - (unique_genres / max(total_genre_assignments, 1))
+            metrics['intra_list_diversity'] = calculate_intra_list_diversity(top_k_items, dataset)
 
             # Genre entropy
             if len(genre_counts) > 1:

@@ -78,6 +78,7 @@ class LightGCN(nn.Module):
         item_emb = self.item_embedding(item_indices)
         return (user_emb * item_emb).sum(dim=1)
 
+
 def calculate_bpr_loss(user_emb, pos_item_emb, neg_item_emb):
     """Bayesian Personalized Ranking (BPR) loss"""
     pos_scores = (user_emb * pos_item_emb).sum(dim=1)
@@ -291,7 +292,7 @@ class ItemKNN:
         )
 
         # Apply BM25 weighting
-        self.bm25_matrix = self.okapi_BM25(self.user_item_matrix.T)
+        # self.bm25_matrix = self.okapi_BM25(self.user_item_matrix.T)
         self.tf_idf_matrix = self.TF_IDF(self.user_item_matrix.T)
 
         # Compute weighted cosine similarity

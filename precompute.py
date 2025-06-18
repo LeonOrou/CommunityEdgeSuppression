@@ -31,8 +31,8 @@ def get_community_labels(config, adj_np, save_path='dataset/ml-100k/saved', get_
     elif config.dataset_name == 'ml-20m':
         resolution = 1.5
     else:  # config.dataset_name == 'lfm':
-        resolution = 1.5
-    detect_obj = Leiden(resolution=resolution, return_aggregate=False, sort_clusters=True)
+        resolution = 1.4
+    detect_obj = Leiden(resolution=resolution, modularity='newman', return_aggregate=False, sort_clusters=True)
 
     detect_obj.fit(adj_csr, force_bipartite=force_bipartite)
 
