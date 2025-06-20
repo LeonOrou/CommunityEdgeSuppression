@@ -6,10 +6,12 @@ import os
 from collections import defaultdict
 import warnings
 from config import Config
-from evaluation import evaluate_model, print_metric_results, evaluate_model_vectorized
+from evaluation import evaluate_model, print_metric_results, evaluate_model_vectorized, get_community_bias
 from models import get_model
 from dataset import RecommendationDataset, prepare_adj_tensor
 from argparse import ArgumentParser
+
+from plotting import plot_community_bias
 from utils_functions import get_community_data, get_biased_connectivity_data, set_seed
 import wandb
 from wandb_logging import init_wandb, log_metrics_to_wandb
@@ -20,7 +22,7 @@ warnings.filterwarnings('ignore')
 
 
 def main():
-    set_seed(42)  # For reproducibility
+    set_seed(21)  # For reproducibility
     args = parse_arguments()
     config = Config()
     config.update_from_args(args)
@@ -34,16 +36,10 @@ def main():
     print("Preparing data with consistent encoding...")
     print(f"Processed data: {dataset.num_users} users, {dataset.num_items} items, {len(dataset.complete_df)} interactions")
 
-    print(f"Train set: {len(dataset.train_val_df)} interactions")
-    print(f"Test set: {len(dataset.test_df)} interactions")
-
     wandb.log({
         'dataset/dataset_name': dataset.name,
         'dataset/num_users': dataset.num_users,
         'dataset/num_items': dataset.num_items,
-        'dataset/total_interactions': len(dataset.complete_df),
-        'dataset/train_interactions': len(dataset.train_val_df),
-        'dataset/test_interactions': len(dataset.test_df),
         'dataset/sparsity': 1 - (len(dataset.complete_df) / (dataset.num_users * dataset.num_items))
     })
 
@@ -62,6 +58,10 @@ def main():
     get_community_data(config, adj_np)
 
     get_biased_connectivity_data(config, adj_tens)
+
+    user_biases, item_biases = get_community_bias(item_communities_each_user_dist=config.item_community_connectivity_matrix_distribution,
+                       user_communities_each_item_dist=config.user_community_connectivity_matrix_distribution)
+    plot_community_bias(user_biases, item_biases, save_path=f'dataset/{config.dataset_name}/images/', dataset_name=config.dataset_name)
 
     cv_results = []
 
@@ -113,21 +113,21 @@ def main():
         cv_summary = {}
 
     # Train final model on all data and evaluate on test set
-    print("\n" + "=" * 85)
-    print("FINAL MODEL EVALUATION ON TEST SET")
-    print("=" * 85)
-
-    print("Training final model on full dataset...")
-
-    model = get_model(config=config, dataset=dataset)
-
-    model = train_model(dataset=dataset, model=model, config=config, stage='full_train', fold_num=None,)
-
-    test_metrics = evaluate_model_vectorized(
-        model=model, dataset=dataset, config=config,
-        k_values=config.evaluate_top_k, stage='full_train')
-
-    log_metrics_to_wandb(test_metrics, config, stage='test')
+    # print("\n" + "=" * 85)
+    # print("FINAL MODEL EVALUATION ON TEST SET")
+    # print("=" * 85)
+    #
+    # print("Training final model on full dataset...")
+    #
+    # model = get_model(config=config, dataset=dataset)
+    #
+    # model = train_model(dataset=dataset, model=model, config=config, stage='full_train', fold_num=None,)
+    #
+    # test_metrics = evaluate_model_vectorized(
+    #     model=model, dataset=dataset, config=config,
+    #     k_values=config.evaluate_top_k, stage='full_train')
+    #
+    # log_metrics_to_wandb(test_metrics, config, stage='test')
 
     model_artifact = wandb.Artifact(
         name=f"model_{config.model_name}_{config.dataset_name}",
@@ -145,7 +145,7 @@ def main():
 
     wandb.log_artifact(model_artifact)
 
-    print_metric_results(test_metrics, "FINAL TEST SET RESULTS")
+    # print_metric_results(test_metrics, "FINAL TEST SET RESULTS")
 
     # Clean up temporary files
     if os.path.exists(model_path):
@@ -153,19 +153,19 @@ def main():
 
     wandb.finish()
 
-    return cv_results, cv_summary, test_metrics, model
+    return cv_results, cv_summary, model
 
 
 def parse_arguments():
     """Parse command line arguments."""
     parser = ArgumentParser()
-    parser.add_argument("--model_name", type=str, default='MultiVAE',)
-    parser.add_argument("--dataset_name", type=str, default='ml-100k')
+    parser.add_argument("--model_name", type=str, default='ItemKNN')
+    parser.add_argument("--dataset_name", type=str, default='lastfm')
     parser.add_argument("--users_top_percent", type=float, default=0.05)
     parser.add_argument("--items_top_percent", type=float, default=0.05)
-    parser.add_argument("--users_dec_perc_drop", type=float, default=0.05)
-    parser.add_argument("--items_dec_perc_drop", type=float, default=0.05)
-    parser.add_argument("--community_suppression", type=float, default=0.5)
+    parser.add_argument("--users_dec_perc_drop", type=float, default=0.4)
+    parser.add_argument("--items_dec_perc_drop", type=float, default=0.0)
+    parser.add_argument("--community_suppression", type=float, default=0.6)
     parser.add_argument("--drop_only_power_nodes", type=bool, default=True)
     parser.add_argument("--use_dropout", type=bool, default=True)
 
@@ -173,5 +173,5 @@ def parse_arguments():
 
 
 if __name__ == "__main__":
-    cv_results, cv_summary, test_metrics, model = main()
+    cv_results, cv_summary, model = main()
 
