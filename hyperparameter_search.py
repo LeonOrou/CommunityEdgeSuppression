@@ -174,6 +174,7 @@ def evaluate_model_vectorized(model, train_matrix, test_matrix, model_type, devi
                 for user_idx in range(start_idx, end_idx):
                     if train_matrix[user_idx].nnz > 0:  # User has training interactions
                         preds = model.predict(user_idx)[0]  # 0 as we only take one user always
+                        preds = np.array(preds)
                         item_ids = np.array(preds[:, 0], dtype=np.int64)  # Get item IDs
                         scores = preds[:, 1]  # Get predicted scores
                         predictions[user_idx, item_ids] = scores
@@ -353,7 +354,7 @@ def hyperparameter_search():
     parser = argparse.ArgumentParser()
     parser.add_argument("--batch_size", type=int, default=512)
     parser.add_argument("--dataset", type=str, default="ml-100k", help="Dataset name")
-    parser.add_argument("--models", type=str, nargs='+', default=['MultiVAE'],
+    parser.add_argument("--models", type=str, nargs='+', default=['ItemKNN', 'MultiVAE'],
                         help="Models to search: LightGCN, ItemKNN, MultiVAE")
     # LightGCN
     parser.add_argument("--embedding_dim", type=int, default=128)
@@ -422,7 +423,7 @@ def hyperparameter_search():
         'MultiVAE': {
             'hidden_dimension': [800],
             'latent_dimension': [200],
-            'anneal_cap': [0.4],
+            'anneal_cap': [0.6, 0.7, 0.8, 0.9, 1],
             'batch_size': [2048]  # Larger batches for efficiency
         }
     }
@@ -658,7 +659,7 @@ def print_final_summary(best_results, run_id):
 
 def save_combined_summary(all_results, best_results, run_id, dataset, args):
     """Save combined summary of all models"""
-    filename = f'results_summary_{run_id}.txt'
+    filename = f'hyperparameter_search/results_summary_{run_id}.txt'
 
     with open(filename, 'w') as f:
         f.write("HYPERPARAMETER SEARCH SUMMARY - ALL MODELS\n")

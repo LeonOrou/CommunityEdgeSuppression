@@ -13,7 +13,7 @@ from scipy.stats import binom
 def get_community_labels(config, adj_np, save_path='dataset/ml-100k/saved', get_probs=True, force_bipartite=True):
     # read and return them if already computed locally
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    if f'user_labels_matrix_mask.csv' in os.listdir(save_path):
+    if f'item_labels_matrix.csv' in os.listdir(save_path):
         return torch.tensor(
             np.loadtxt(f'{save_path}/user_labels_matrix.csv', delimiter=','),
             dtype=torch.int64,
@@ -27,18 +27,23 @@ def get_community_labels(config, adj_np, save_path='dataset/ml-100k/saved', get_
     adj_csr = sp.csr_matrix((adj_np[:, 2].astype(float), (adj_np[:, 0].astype(int), adj_np[:, 1].astype(int))))
 
     if config.dataset_name == 'ml-100k':
-        resolution = 1.2
-    elif config.dataset_name == 'ml-20m':
-        resolution = 1.5
-    else:  # config.dataset_name == 'lfm':
-        resolution = 1.4
-    detect_obj = Leiden(resolution=resolution, modularity='newman', return_aggregate=False, sort_clusters=True)
+        resolution = 1.6  # 1.6 results in 19 communities = number of genres
+    elif config.dataset_name == 'ml-1m':
+        resolution = 1.6
+    else:  # config.dataset_name == 'lastfm':
+        resolution = 1.6
 
+    detect_obj = Leiden(resolution=resolution, return_aggregate=False, sort_clusters=True)
     detect_obj.fit(adj_csr, force_bipartite=force_bipartite)
+
+    info = f'Resolution: {resolution}, Number of user clusters: {detect_obj.probs_row_.shape[1]}, Number of item clusters: {detect_obj.probs_col_.shape[1]}, Modularity float: {detect_obj.log}'
+    print(info)
+    with open(f'{save_path}/leiden_fit_information.txt', 'w') as f:
+        f.write(info)
 
     user_probs = detect_obj.probs_row_.toarray()
     item_probs = detect_obj.probs_col_.toarray()
-    # argsort the probabilities to get the highest probability label
+    # argsort the rel_rec_freqs to get the highest probability label
     # only take columns that have not all zeros
     user_probs = user_probs[:, np.any(user_probs, axis=0)]
     item_probs = item_probs[:, np.any(item_probs, axis=0)]
@@ -291,8 +296,8 @@ def get_user_item_community_connectivity_matrices(adj_tens, user_com_labels, ite
     items = adj_tens[:, 1].long()
 
     # Get dimensions
-    nr_users = max(torch.max(users).item(), user_com_labels.size(0) - 1) + 1
-    nr_items = max(torch.max(items).item(), item_com_labels.size(0) - 1) + 1
+    nr_users = max(torch.max(users).item() + 1, user_com_labels.size(0))
+    nr_items = max(torch.max(items).item() + 1, item_com_labels.size(0))
     nr_user_communities = torch.max(user_com_labels).item() + 1
     nr_item_communities = torch.max(item_com_labels).item() + 1
 

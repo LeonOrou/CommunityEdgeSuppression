@@ -36,7 +36,6 @@ def get_dataset_tensor(config):
         interaction = interaction[np.isin(interaction[:, 0], valid_users) & np.isin(interaction[:, 1], valid_items)]
 
         # Create mappings for user IDs
-        # TODO: reindex also genre label item id's
         unique_users = np.unique(interaction[:, 0])
         user_id_map = {old_id: new_id for new_id, old_id in enumerate(unique_users, start=0)}
         # Create mappings for item IDs
@@ -104,7 +103,7 @@ class RecommendationDataset:
             random_state: Random seed for reproducibility
         """
         self.name = name
-        self.data_path = data_path if data_path else f'dataset/{name}'
+        self.data_path = data_path if data_path else f'dataset/{name}/'
         self.min_interactions = min_interactions
         self.test_ratio = test_ratio
         self.val_ratio = val_ratio
@@ -148,7 +147,7 @@ class RecommendationDataset:
             if not os.path.exists(f'dataset/{self.name}/saved'):
                 os.makedirs(f'dataset/{self.name}/saved')
             self._load_movielens()
-        elif self.name == 'lfm':
+        elif self.name == 'lastfm':
             if not os.path.exists(f'dataset/{self.name}/saved'):
                 os.makedirs(f'dataset/{self.name}/saved')
             self._load_lfm()
@@ -164,20 +163,20 @@ class RecommendationDataset:
             self.raw_df = pd.read_csv(ratings_file, sep='\t',
                                       names=['user_id', 'item_id', 'rating'],
                                       usecols=[0, 1, 2], header=None)
-        elif self.name == 'ml-20m':
+        elif self.name == 'ml-1m':
             ratings_file = os.path.join(self.data_path, 'ratings.csv')
-            self.raw_df = pd.read_csv(ratings_file, sep=',',
+            self.raw_df = pd.read_csv(ratings_file, sep='::',
                                       names=['user_id', 'item_id', 'rating'],
                                       usecols=[0, 1, 2], header=0)
         # we shuffle later with indices
         self.raw_df = self.raw_df.sample(frac=1, random_state=42).reset_index(drop=True)
 
     def _load_lfm(self):
-        if self.name == 'lfm':
-            ratings_file = os.path.join(self.data_path, 'interactions.csv')
-            self.raw_df = pd.read_csv(ratings_file, sep=',',
-                                      names=['user_id', 'item_id', 'rating'],
-                                      usecols=[0, 1, 2], header=None)
+        if self.name == 'lastfm':
+            ratings_file = os.path.join(self.data_path, 'user_artists.csv')
+            self.raw_df = pd.read_csv(ratings_file, sep='\t',
+                                      names=['user_id', 'item_id', 'rating'],  # its count not rating but for common naming
+                                      usecols=[0, 1, 2], header=0)
         self.raw_df = self.raw_df.sample(frac=1, random_state=42).reset_index(drop=True)
 
     def calculate_item_popularities(self):
@@ -194,25 +193,23 @@ class RecommendationDataset:
         across train/validation/test splits
         """
         ratings_df = self.raw_df.copy()
-        min_interactions = 5
-        min_rating = 4
+        min_interactions = 5 if self.name.startswith('ml-') else 10
+        min_rating = 4 if self.name.startswith('ml-') else 2  # for lastfm, rating is number of listening events
 
-        if ratings_df['rating'].all() != 1:
-            user_counts = ratings_df['user_id'].value_counts()
-            item_counts = ratings_df['item_id'].value_counts()
+        user_counts = ratings_df['user_id'].value_counts()
+        item_counts = ratings_df['item_id'].value_counts()
 
-            valid_users = user_counts[user_counts >= min_interactions].index
-            valid_items = item_counts[item_counts >= min_interactions].index
+        valid_users = user_counts[user_counts >= min_interactions].index
+        valid_items = item_counts[item_counts >= min_interactions].index
 
-            filtered_df = ratings_df[
-                (ratings_df['user_id'].isin(valid_users)) &
-                (ratings_df['item_id'].isin(valid_items))
-                ].copy()
+        filtered_df = ratings_df[
+            (ratings_df['user_id'].isin(valid_users)) &
+            (ratings_df['item_id'].isin(valid_items))
+            ].copy()
 
-            filtered_df = filtered_df[filtered_df['rating'] >= min_rating].reset_index(drop=True)
-            filtered_df['rating'] = 1  # Treat all valid ratings as positive interactions
-        else:
-            filtered_df = ratings_df.copy()
+        filtered_df = filtered_df[filtered_df['rating'] >= min_rating].reset_index(drop=True)
+
+        filtered_df['rating'] = 1  # Treat all valid ratings as positive interactions
 
         # This ensures consistent encoding across all splits
         user_encoder = LabelEncoder()
@@ -235,7 +232,7 @@ class RecommendationDataset:
         self.num_users = num_users
         self.num_items = num_items
 
-    def split_interactions_by_user(self, test_ratio=0.15, n_folds=5):
+    def split_interactions_by_user(self, test_ratio=0.15):
         """
         Split interactions for each user into train_val/test.
         Optimized version using advanced NumPy techniques.
@@ -298,7 +295,7 @@ class RecommendationDataset:
             raise ValueError(f"Fold index must be between 0 and {n_folds - 1}, got {i}")
 
         # Sort by user_encoded if not already sorted
-        df = self.train_val_df.sort_values('user_encoded')
+        df = self.complete_df.sort_values('user_encoded')
 
         # Get user_encoded as numpy array for faster operations
         users = df['user_encoded'].values
@@ -347,7 +344,7 @@ class RecommendationDataset:
             self.num_users = len(pd.unique(self.complete_df['user_encoded']))
             self.num_items = len(pd.unique(self.complete_df['item_encoded']))
 
-        self.split_interactions_by_user()
+        # self.split_interactions_by_user()
 
         self._create_graph_structures()
 
@@ -480,8 +477,6 @@ class RecommendationDataset:
 
     def create_bipartite_graph(self, edge_weights=None):
         """Create bipartite graph with edge weights based on ratings"""
-        # TODO: only necessary for LightGCN, dont make for ItemKNN and MultiVAE
-
         df = self.complete_df
         users = df['user_encoded'].values
         items = df['item_encoded'].values + self.num_users  # Offset items by num_users

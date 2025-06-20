@@ -490,7 +490,7 @@ def check_early_stopping(val_ndcg, best_val_ndcg, patience_counter, patience,
             return True, best_val_ndcg, patience_counter, best_model_state, best_epoch
 
     # Check patience limit
-    if patience_counter >= patience and epoch > 100:
+    if patience_counter >= patience and epoch > 40:
         if verbose:
             print(f"  Early stopping at epoch {epoch} - no improvement for {patience} checks")
             print(f"  Best epoch was {best_epoch} with NDCG@10: {best_val_ndcg:.4f}")

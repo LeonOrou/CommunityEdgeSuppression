@@ -7,6 +7,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import wandb
 import os
+import sknetwork
 from precompute import get_community_labels, get_power_users_items, get_biased_edges_mask, get_user_item_community_connectivity_matrices
 matplotlib.use('agg')
 
@@ -15,6 +16,7 @@ matplotlib.use('agg')
 def set_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
+    sknetwork.utils.check_random_state(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
@@ -105,7 +107,7 @@ def plot_community_confidence(user_probs_path=None, user_labels=None, algorithm=
     """
     Create a line plot showing community assignment confidence for each user community.
 
-    :param user_probs_path: Path to pre-saved user probabilities CSV, or None to load based on other parameters
+    :param user_probs_path: Path to pre-saved user rel_rec_freqs CSV, or None to load based on other parameters
     :param user_labels: User community labels tensor, or None to load from save_path
     :param algorithm: Community detection algorithm used ('Leiden' or 'Louvain')
     :param force_bipartite: Whether bipartite structure was enforced
@@ -114,7 +116,7 @@ def plot_community_confidence(user_probs_path=None, user_labels=None, algorithm=
     :param dataset_name: Name of the dataset for saving figures
     """
 
-    # Load user probabilities and labels if not provided
+    # Load user rel_rec_freqs and labels if not provided
     if user_probs_path is None:
         user_probs_path = f'{save_path}/user_labels_{algorithm}_probs.csv'
 
@@ -129,7 +131,7 @@ def plot_community_confidence(user_probs_path=None, user_labels=None, algorithm=
     # Extract maximum probability for each user (confidence in assigned community)
     max_probs = np.max(user_probs, axis=1)
 
-    # Group max probabilities by community
+    # Group max rel_rec_freqs by community
     unique_communities = np.unique(user_labels)
     community_confidence = {}
 
@@ -379,7 +381,6 @@ def get_community_data(config, adj_np):
     if not os.path.exists(f'dataset/{config.dataset_name}/saved'):
         os.makedirs(f'dataset/{config.dataset_name}/saved')
 
-    # TODO: all community data has to be from whole dataset and masked for the subsets
     (config.user_com_labels,
      config.item_com_labels) = get_community_labels(
         config=config,

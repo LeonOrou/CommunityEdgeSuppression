@@ -51,7 +51,7 @@ class Config:
         if self.model_name == 'LightGCN':
             self.batch_size = 512
             self.learning_rate = 5e-3
-            self.epochs = 2  # because it's different for each model
+            self.epochs = 150  # because it's different for each model
             self.n_layers = 3
             self.embedding_dim = 128
             self.num_folds = 5
@@ -64,7 +64,7 @@ class Config:
             self.feature_weighting = 'tf-idf'
         elif self.model_name == 'MultiVAE':
             self.learning_rate = 1e-2
-            self.epochs = 200
+            self.epochs = 160
             self.batch_size = 2048
             self.patience = 10
             self.hidden_dimension = 800
