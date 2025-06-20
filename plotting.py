@@ -9,31 +9,70 @@ import torch_geometric
 
 def plot_community_bias(user_biases, item_biases, save_path=None, dataset_name=''):
     """
-    Plot the community biases for users and items.
+    Plot the community biases for users and items with enhanced formatting.
 
     :param user_biases: torch.tensor, community bias for users
     :param item_biases: torch.tensor, community bias for items
     :param save_path: str or None, path to save the figure
     :param dataset_name: str, name of the dataset for saving figures
     """
-    # index zero is not a node, so we need to remove it
-    user_biases = user_biases[1:]
-    item_biases = item_biases[1:]
 
-    # Convert to numpy if tensor
     if isinstance(user_biases, torch.Tensor):
         user_biases = user_biases.cpu().numpy()
         item_biases = item_biases.cpu().numpy()
 
-    plt.figure(figsize=(12, 8))
-    plt.boxplot([user_biases, item_biases], labels=['User bias', 'Items bias'])
-    plt.title('Community Bias for each user and item')
-    plt.ylabel('Bias [0, 1]')
-    plt.ylim(0, 1)
-    plt.grid(True, linestyle='--', alpha=0.7)
+    # Remove nans from users who don't have any community (all below threshold) => results in division by zero
+    user_biases = user_biases[~np.isnan(user_biases)]
+    item_biases = item_biases[~np.isnan(item_biases)]
+
+    # Create figure with better size and DPI for clarity
+    plt.figure(figsize=(10, 8), dpi=100)
+
+    # Create boxplot with enhanced styling
+    box_plot = plt.boxplot([user_biases, item_biases],
+                           labels=['User Biases', 'Item Biases'],
+                           patch_artist=True,  # Enable filling of boxes
+                           widths=0.4,
+                           capprops=dict(linewidth=1.5))
+    # Customize box colors
+    colors = ['lightblue', 'lightcoral']
+    for patch, color in zip(box_plot['boxes'], colors):
+        patch.set_facecolor(color)
+        patch.set_alpha(0.7)
+
+    # Customize other elements
+    for element in ['whiskers', 'fliers', 'medians', 'caps']:
+        plt.setp(box_plot[element], color='black', linewidth=1.5)
+
+    # Enhanced title and labels with larger, more readable fonts
+    if dataset_name == "lastfm":
+        dataset_plt_name = "Last.FM"
+    elif dataset_name == "ml-100k":
+        dataset_plt_name = "MovieLens-100K"
+    elif dataset_name == "ml-1m":
+        dataset_plt_name = "MovieLens-1M"
+
+    plt.title(f'Community Biases in {dataset_plt_name}',
+              fontsize=18, fontweight='bold', pad=20)
+    plt.ylabel('Bias [0, 1]', fontsize=16)
+
+    # Improve tick labels
+    plt.tick_params(axis='x', which='major', labelsize=16, pad=10)
+    plt.tick_params(axis='y', which='major', labelsize=16)
+
+    # Set y-axis limits with some padding
+    plt.ylim(-0.05, 1.05)
+
+    # Enhanced grid
+    plt.grid(True, linestyle='-', alpha=0.3, linewidth=0.5)
+
+    # Add some spacing around the plot
+    plt.tight_layout(pad=2)
 
     if save_path:
-        plt.savefig(f"{save_path}/{dataset_name}_community_bias.png")
+        plt.savefig(f"{save_path}/{dataset_name}_community_bias.png",
+                    dpi=300, bbox_inches='tight', facecolor='white')
+
     plt.show()
 
 
@@ -187,7 +226,7 @@ def cut_cols_sparse_matrix(matrix, n_cols):
 
 # Load the probability distribution of community labels
 def plot_community_confidences(probs, algorithm='Leiden'):
-    # Sort the probabilities for each node in decreasing order
+    # Sort the rel_rec_freqs for each node in decreasing order
     # convert sparse matrix to numpy array
     # probs_arr = probs.toarray()
     sorted_probs = np.sort(probs, axis=1)[:, ::-1]
@@ -196,7 +235,7 @@ def plot_community_confidences(probs, algorithm='Leiden'):
     average_confidences = np.mean(sorted_probs, axis=0)
     std_confidences = np.std(sorted_probs, axis=0)
 
-    # make bins of the max probabilities and plot in hist
+    # make bins of the max rel_rec_freqs and plot in hist
     plt.figure(figsize=(10, 6))
     plt.hist(sorted_probs[:, 0], bins=50, color='blue', alpha=0.7)
     plt.title(f'Histogram of Community Label Confidences with {algorithm}')
