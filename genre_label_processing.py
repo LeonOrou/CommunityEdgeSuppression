@@ -6,7 +6,7 @@ import json
 from collections import Counter, defaultdict
 
 
-def save_ml100k_genre_labels(file_path, dataset_name='ml-100k'):
+def save_ml100k_genre_labels(file_path, dataset_name='ml-100k', keep_labels=False):
     """
     Load genre labels from a file and return them as a dictionary.
 
@@ -21,6 +21,13 @@ def save_ml100k_genre_labels(file_path, dataset_name='ml-100k'):
 
     genre_labels = {}
     with open(file_path, 'r') as f:
+        # if keep_labels:
+        #     for line in f:
+        #         parts = line.strip().split('|')
+        #         item_name = parts[1]
+        #         genres_txt = parts[-1]
+        #         genre_labels[item_name] = genres_txt.split('|')
+
         for line in f:
             parts = line.strip().split('|')
             item_id = int(parts[0])
@@ -40,7 +47,7 @@ def save_ml100k_genre_labels(file_path, dataset_name='ml-100k'):
     return genre_labels
 
 
-def save_lfm_genre_labels(input_file="dataset/LFM1M/tags_all_music.tsv", dataset_name='lfm'):
+def save_lfm_genre_labels(input_file="dataset/lastfm/user_taggedartists.dat", dataset_name='lfm'):
     genre_counter = Counter()
 
     with open(input_file, 'r', encoding='utf-8') as f:
@@ -70,7 +77,7 @@ def save_lfm_genre_labels(input_file="dataset/LFM1M/tags_all_music.tsv", dataset
     with open(f'dataset/{dataset_name}/saved/item_genre_labels_{dataset_name}.json', 'w', encoding='utf-8') as f:
         json.dump(dict(item_genres), f)
 
-def save_ml20m_genre_labels(file_path, dataset_name='ml-20m'):
+def save_ml1m_genre_labels(file_path, dataset_name='ml-1m', keep_labels=False, use_three_genres=True):
     """
     Load genre labels from a file and return them as a dictionary.
 
@@ -88,7 +95,7 @@ def save_ml20m_genre_labels(file_path, dataset_name='ml-20m'):
         "Action": 1,
         "Adventure": 2,
         "Animation": 3,
-        "Children": 4,
+        "Children's": 4,
         "Comedy": 5,
         "Crime": 6,
         "Documentary": 7,
@@ -107,27 +114,44 @@ def save_ml20m_genre_labels(file_path, dataset_name='ml-20m'):
     }
 
     genre_labels = {}
-    with open(file_path, 'r', encoding="utf8") as f:
-        for line in f:
-            parts = line.strip().split(',')
-            if parts[0] == 'movieId':
-                continue  # Skip header line
-            item_id = int(parts[0])
-            genres_txt = parts[-1]
-            genres_txt_list = genres_txt.split('|')
-            # if len(genres_txt_list) > 3:
-            #     genres_txt_list = genres_txt_list[:3]
-            genre_labels_list = [genre_mapping[genre] for genre in genres_txt_list]
-            genre_labels[item_id] = genre_labels_list
+    if keep_labels:
+        with open(file_path, 'rb') as f:
+            for line in f.read().splitlines():
+                parts = line.decode('latin-1').strip().split('::')
+                item_name = parts[1]
+                genres_txt = parts[-1]
+                genre_labels[item_name] = genres_txt.split('|')
+    else:
+        with open(file_path, 'rb') as f:
+            if use_three_genres:
+                # load json 3 genres file
+                item_genres_labels = json.load(open('dataset/ml-1m/saved/item_genre_labels_ml-1m_names.json', ))
+            for line in f.read().splitlines():
+                parts = line.decode('latin-1').strip().split('::')
+                if parts[0] == 'movieId':
+                    continue  # Skip header line
+                item_id = int(parts[0])
+                if use_three_genres:
+                    item_name = parts[1]
+                    genre_labels_list = item_genres_labels[item_name]
+                    if len(genre_labels_list) > 3:
+                        print(f"Item {item_name} has more than 3 genres: {genre_labels_list}. Truncating to first 3 genres.")
+                    genre_labels[item_id] = genre_labels_list
+                genres_txt = parts[-1]
+                genres_txt_list = genres_txt.split('|')
+                # if len(genres_txt_list) > 3:
+                #     genres_txt_list = genres_txt_list[:3]
+                genre_labels_list = [genre_mapping[genre] for genre in genres_txt_list]
+                genre_labels[item_id] = genre_labels_list
 
     # Save the genre labels to a local JSON file
-    output_file = f'dataset/{dataset_name}/saved/item_genre_labels_{dataset_name}.json'
+    output_file = f'dataset/{dataset_name}/saved/item_genre_labels_{dataset_name}_labels{keep_labels}_3genres{use_three_genres}.json'
     with open(output_file, 'w') as json_file:
         json.dump(genre_labels, json_file, indent=4)
     return genre_labels
 
 
 # save_ml100k_genre_labels('dataset/ml-100k/u.item')
-save_lfm_genre_labels('dataset/LFM1M/tags_all_music.tsv')
-# save_ml20m_genre_labels('dataset/ml-20m/movies.csv')
+# save_lfm_genre_labels('dataset/lastfm/user_taggedartists.dat')
+save_ml1m_genre_labels('dataset/ml-1m/movies.dat', keep_labels=False, use_three_genres=True)
 
