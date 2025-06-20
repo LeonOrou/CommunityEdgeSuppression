@@ -396,6 +396,7 @@ def get_community_bias(item_communities_each_user_dist=None, user_communities_ea
     :return: tuple of torch.tensors, community bias for users and items
     """
     user_bias, item_bias = None, None
+    epsilon = 1e-6  # small value to avoid division by zero
 
     if item_communities_each_user_dist is not None:
         uniform_distribution_users = torch.full_like(item_communities_each_user_dist, 1.0 / item_communities_each_user_dist.size(1))
@@ -533,6 +534,61 @@ def calculate_simpson_index_recommendations(recommended_items, encoded_to_genres
         simpson_index -= proportion ** 2
 
     return simpson_index
+
+
+def calculate_intra_list_diversity_genre(top_k_items, encoded_to_genres):
+    """
+    Calculate intra-list diversity using average pairwise Jaccard distance.
+
+    For each pair of items in the recommendation list, calculate Jaccard similarity
+    of their genre sets, then average across all pairs. Higher similarity means
+    lower diversity, so we can report 1 - avg_similarity as diversity.
+
+    Higher values indicate more diverse recommendations.
+        top_k_items: list of recommended item IDs
+        encoded_to_genres: dict mapping item_id -> list of genre_ids
+
+    Returns:
+        float: Average pairwise Jaccard distance (0 to 1)
+    """
+    if len(top_k_items) < 2:
+        return 0.0  # Need at least 2 items to calculate diversity
+
+    items_with_genres = []
+    for item_id in top_k_items:
+        if item_id in encoded_to_genres:
+            genres = encoded_to_genres[item_id]
+            if len(genres) > 0:
+                items_with_genres.append((item_id, set(genres)))
+
+    if len(items_with_genres) < 2:
+        return 0.0  # Need at least 2 items with genres
+
+    similarities = []
+    n_items = len(items_with_genres)
+
+    for i in range(n_items):
+        for j in range(i + 1, n_items):
+            genres_i = items_with_genres[i][1]
+            genres_j = items_with_genres[j][1]
+
+            # Jaccard similarity = |intersection| / |union|
+            intersection = len(genres_i.intersection(genres_j))
+            union = len(genres_i.union(genres_j))
+
+            if union > 0:
+                jaccard_similarity = intersection / union
+                similarities.append(jaccard_similarity)
+
+    if len(similarities) == 0:
+        return 0.0
+
+    avg_similarity = np.mean(similarities)
+    # Convert to diversity: higher diversity = lower similarity
+    # Jaccard distance = 1 - Jaccard similarity
+    diversity = 1.0 - avg_similarity
+
+    return diversity
 
 
 def calculate_intra_list_diversity(top_k_items, dataset):
@@ -680,7 +736,7 @@ def calculate_popularity_calibration(all_recommended_items, dataset, num_bins=10
     catalog_hist, _ = np.histogram(catalog_popularities, bins=bins, density=True)
     recommended_hist, _ = np.histogram(recommended_popularities, bins=bins, density=True)
 
-    # Normalize to get probabilities
+    # Normalize to get probability distributions
     catalog_dist = catalog_hist / np.sum(catalog_hist) if np.sum(catalog_hist) > 0 else np.ones(num_bins) / num_bins
     recommended_dist = recommended_hist / np.sum(recommended_hist) if np.sum(recommended_hist) > 0 else np.ones(
         num_bins) / num_bins
@@ -799,7 +855,7 @@ def calculate_additional_metrics(top_k_items, encoded_to_genres, dataset, all_re
     metrics['simpson_index'] = calculate_simpson_index_recommendations(top_k_items, encoded_to_genres)
 
     # Intra-list Diversity (average pairwise Jaccard similarity of items)
-    metrics['intra_list_diversity'] = calculate_intra_list_diversity(top_k_items, dataset)
+    metrics['intra_list_diversity'] = calculate_intra_list_diversity_genre(top_k_items, encoded_to_genres)
 
     # Popularity Lift
     popularity_metrics = calculate_popularity_lift(top_k_items, dataset)
@@ -932,22 +988,22 @@ def calculate_gini_index(y_true, y_pred):
     return gini
 
 
-def calculate_gini_coefficient(probabilities):
+def calculate_gini_coefficient(rel_rec_freqs):
     """
     Calculate Gini coefficient for recommendation distribution
     Higher values indicate more inequality (few items get most recommendations)
     Lower values indicate more equality (recommendations spread evenly)
     """
-    if len(probabilities) == 0:
+    if len(rel_rec_freqs) == 0:
         return 0.0
 
-    # Sort probabilities
-    sorted_probs = np.sort(probabilities)
+    # Sort rel_rec_freqs
+    sorted_probs = np.sort(rel_rec_freqs)
     n = len(sorted_probs)
 
     # Calculate Gini coefficient
     index = np.arange(1, n + 1)
-    gini = (2 * np.sum(index * sorted_probs)) / (n * np.sum(sorted_probs)) - (n + 1) / n
+    gini = np.sum((2 * index - n - 1) * sorted_probs) / (n-1)
 
     return gini
 
@@ -1295,9 +1351,9 @@ def calculate_user_additional_metrics_efficient(top_k_items, encoded_to_genres, 
             simpson_index = 1.0 - sum((count / total) ** 2 for count in genre_counts.values())
             metrics['simpson_index'] = simpson_index
 
-            # Intra-list diversity (simplified for efficiency)
+            # Intra-list diversity for genres
             unique_genres = len(set(item_genres))
-            metrics['intra_list_diversity'] = calculate_intra_list_diversity(top_k_items, dataset)
+            metrics['intra_list_diversity'] = calculate_intra_list_diversity_genre(top_k_items, encoded_to_genres)
 
             # Genre entropy
             if len(genre_counts) > 1:
