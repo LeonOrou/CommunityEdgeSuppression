@@ -132,8 +132,11 @@ class ItemKNN:
         # calculate IDF
         idf = np.log(N / (1 + np.bincount(rating_matrix.col)))
 
+        # calculate TF
+        tf = rating_matrix.data / np.bincount(rating_matrix.col)[rating_matrix.col]
+
         # apply TF-IDF adjustment
-        rating_matrix.data = np.sqrt(rating_matrix.data) * idf[rating_matrix.col]
+        rating_matrix.data = tf * idf[rating_matrix.col]
 
         return rating_matrix.tocsr().T
 
@@ -160,42 +163,6 @@ class ItemKNN:
                     K1 * length_norm[rating_matrix.row] + rating_matrix.data) * idf[rating_matrix.col]
 
         return rating_matrix.tocsr().T
-
-    def cosine_sim_users(self, user_item_matrix):
-        """
-        Compute weighted cosine similarity between USERS (not items).
-        """
-        # No transpose needed - we want user-user similarities
-        # user_item_matrix is already (users × items)
-
-        # Compute norms for each user
-        norms = np.sqrt(np.array(user_item_matrix.power(2).sum(axis=1)).flatten())
-        norms[norms == 0] = 1.0
-
-        # Normalize the matrix (each user vector)
-        user_normalized = user_item_matrix.multiply(1 / norms[:, np.newaxis])
-
-        # Compute similarity matrix (user × user)
-        similarity = user_normalized @ user_normalized.T
-
-        # Apply shrinkage based on common items (not users)
-        if self.shrink > 0:
-            # Count common items between users
-            common_items = (user_item_matrix > 0).astype(float) @ (user_item_matrix > 0).T
-
-            # Apply shrinkage formula
-            common_items_coo = common_items.tocoo()
-            shrink_data = common_items_coo.data / (common_items_coo.data + self.shrink)
-            shrink_factor = csr_matrix(
-                (shrink_data, (common_items_coo.row, common_items_coo.col)),
-                shape=common_items.shape
-            )
-            similarity = similarity.multiply(shrink_factor)
-
-        # Set diagonal to 0 (user shouldn't be similar to themselves)
-        similarity.setdiag(0)
-
-        return similarity.tocsr()
 
     def _recommend_items_user_similarities(self, user_ids, n_items):
         """
