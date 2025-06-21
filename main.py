@@ -23,11 +23,20 @@ warnings.filterwarnings('ignore')
 
 def main():
     set_seed(21)  # For reproducibility
-    args = parse_arguments()
+    parser = ArgumentParser()
+    parser.add_argument("--model_name", type=str, default='LightGCN')
+    parser.add_argument("--dataset_name", type=str, default='ml-100k')
+    parser.add_argument("--users_top_percent", type=float, default=0.05)
+    parser.add_argument("--items_top_percent", type=float, default=0.05)
+    parser.add_argument("--users_dec_perc_suppr", type=float, default=0.4)
+    parser.add_argument("--items_dec_perc_suppr", type=float, default=0.0)
+    parser.add_argument("--community_suppression", type=float, default=0.5)
+    parser.add_argument("--suppress_power_nodes_first", type=str, default='False')
+    parser.add_argument("--use_suppression", type=str, default='True')
     config = Config()
-    config.update_from_args(args)
+    config.update_from_args(parser.parse_args())
     config.setup_model_config()
-    init_wandb(config, offline=True)
+    init_wandb(config, offline=False)
 
     dataset = RecommendationDataset(name=config.dataset_name, data_path=f'dataset/{config.dataset_name}')
     dataset.prepare_data()
@@ -45,9 +54,9 @@ def main():
 
     # 5-fold cross validation using temporal splits within training set
     print("\nStarting 5-fold cross validation with complete graph...")
-    if config.use_dropout:
+    if config.use_suppression:
         print(f"Community edge suppression ENABLED - suppression strength: {config.community_suppression}")
-        print(f"User dropout: {config.users_dec_perc_drop}, Item dropout: {config.items_dec_perc_drop}")
+        print(f"User dropout: {config.users_dec_perc_suppr}, Item dropout: {config.items_dec_perc_suppr}")
     else:
         print("Community edge suppression DISABLED")
 
@@ -59,11 +68,12 @@ def main():
 
     get_biased_connectivity_data(config, adj_tens)
 
-    user_biases, item_biases = get_community_bias(item_communities_each_user_dist=config.item_community_connectivity_matrix_distribution,
-                       user_communities_each_item_dist=config.user_community_connectivity_matrix_distribution)
-    plot_community_bias(user_biases, item_biases, save_path=f'dataset/{config.dataset_name}/images/', dataset_name=config.dataset_name)
+    # user_biases, item_biases = get_community_bias(item_communities_each_user_dist=config.item_community_connectivity_matrix_distribution,
+    #                    user_communities_each_item_dist=config.user_community_connectivity_matrix_distribution)
+    # plot_community_bias(user_biases, item_biases, save_path=f'dataset/{config.dataset_name}/images/', dataset_name=config.dataset_name)
 
     cv_results = []
+    train_time_start = time.time()
 
     n_folds = 5
     for fold in range(n_folds):
@@ -72,22 +82,11 @@ def main():
 
         dataset.get_fold_i(i=fold)  # sets train_df and val_df for this fold
 
-        model = train_model(dataset=dataset, model=model, config=config, stage='cv', fold_num=fold + 1,)
+        model = train_model(dataset=dataset, model=model, config=config, fold_num=fold + 1,)
 
-        # time_start_vec = time.time()
         val_metrics = evaluate_model_vectorized(
             model=model, dataset=dataset, config=config,
-            k_values=config.evaluate_top_k, stage='cv')
-        # end_time_vec = time.time()
-        # print(val_metrics)
-        # time_start_normal = time.time()
-        # val_metrics = evaluate_model(
-        #     model=model, dataset=dataset, config=config,
-        #     k_values=config.evaluate_top_k, stage='cv')
-        # end_time_normal = time.time()
-        # print(val_metrics)
-        # print(f"Vectorized evaluation time: {end_time_vec - time_start_vec:.4f}s, ")
-        # print(f"Normal evaluation time: {end_time_normal - time_start_normal:.4f}s")
+            k_values=config.evaluate_top_k)
 
         cv_results.append(val_metrics)
         log_metrics_to_wandb(val_metrics, config, stage=f'fold_{fold+1}')
@@ -109,8 +108,6 @@ def main():
 
         log_metrics_to_wandb(cv_summary, config, stage='cv_avg')
         print_metric_results(cv_summary, "CROSS-VALIDATION SUMMARY (5-fold average)")
-    else:
-        cv_summary = {}
 
     # Train final model on all data and evaluate on test set
     # print("\n" + "=" * 85)
@@ -128,6 +125,9 @@ def main():
     #     k_values=config.evaluate_top_k, stage='full_train')
     #
     # log_metrics_to_wandb(test_metrics, config, stage='test')
+
+    train_time_end = time.time()
+    print(f"\nTraining time: {n_folds} folds, model {config.model_name}, on {config.dataset_name}: {(train_time_end - train_time_start)/60:.0f} minutes")
 
     model_artifact = wandb.Artifact(
         name=f"model_{config.model_name}_{config.dataset_name}",
@@ -153,25 +153,7 @@ def main():
 
     wandb.finish()
 
-    return cv_results, cv_summary, model
-
-
-def parse_arguments():
-    """Parse command line arguments."""
-    parser = ArgumentParser()
-    parser.add_argument("--model_name", type=str, default='ItemKNN')
-    parser.add_argument("--dataset_name", type=str, default='lastfm')
-    parser.add_argument("--users_top_percent", type=float, default=0.05)
-    parser.add_argument("--items_top_percent", type=float, default=0.05)
-    parser.add_argument("--users_dec_perc_drop", type=float, default=0.4)
-    parser.add_argument("--items_dec_perc_drop", type=float, default=0.0)
-    parser.add_argument("--community_suppression", type=float, default=0.6)
-    parser.add_argument("--drop_only_power_nodes", type=bool, default=True)
-    parser.add_argument("--use_dropout", type=bool, default=True)
-
-    return parser.parse_args()
-
 
 if __name__ == "__main__":
-    cv_results, cv_summary, model = main()
+    main()
 
