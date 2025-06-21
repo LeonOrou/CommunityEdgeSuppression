@@ -3,7 +3,6 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
-import numpy as np
 
 
 # Add this after your existing visualizations
@@ -40,13 +39,13 @@ def plot_community_dropout_strength_impact(df, output_dir):
         plt.savefig(output_dir / f"community_strength_impact_{metric}.png", dpi=300)
         plt.close()
 
-    # 2. Heatmaps showing interaction between community_dropout_strength and users_dec_perc_drop
+    # 2. Heatmaps showing interaction between community_dropout_strength and users_dec_perc_suppr
     for metric in metric_cols:
-        if len(df['community_dropout_strength'].unique()) > 1 and len(df['users_dec_perc_drop'].unique()) > 1:
+        if len(df['community_dropout_strength'].unique()) > 1 and len(df['users_dec_perc_suppr'].unique()) > 1:
             plt.figure(figsize=(10, 6))
             pivot = df.pivot_table(
                 index='community_dropout_strength',
-                columns='users_dec_perc_drop',
+                columns='users_dec_perc_suppr',
                 values=metric,
                 aggfunc='mean'
             )
@@ -58,13 +57,13 @@ def plot_community_dropout_strength_impact(df, output_dir):
             plt.savefig(output_dir / f"community_user_interaction_{metric}.png", dpi=300)
             plt.close()
 
-    # 3. Heatmaps showing interaction between community_dropout_strength and items_dec_perc_drop
+    # 3. Heatmaps showing interaction between community_dropout_strength and items_dec_perc_suppr
     for metric in metric_cols:
-        if len(df['community_dropout_strength'].unique()) > 1 and len(df['items_dec_perc_drop'].unique()) > 1:
+        if len(df['community_dropout_strength'].unique()) > 1 and len(df['items_dec_perc_suppr'].unique()) > 1:
             plt.figure(figsize=(10, 6))
             pivot = df.pivot_table(
                 index='community_dropout_strength',
-                columns='items_dec_perc_drop',
+                columns='items_dec_perc_suppr',
                 values=metric,
                 aggfunc='mean'
             )
@@ -128,8 +127,8 @@ def visualize_wandb_metrics():
             'run_name': run.name,
             'trial': run.config.get('trial'),
             'model': run.config.get('model'),
-            'users_dec_perc_drop': run.config.get('users_dec_perc_drop'),
-            'items_dec_perc_drop': run.config.get('items_dec_perc_drop'),
+            'users_dec_perc_suppr': run.config.get('users_dec_perc_suppr'),
+            'items_dec_perc_suppr': run.config.get('items_dec_perc_suppr'),
             'community_dropout_strength': run.config.get('community_dropout_strength'),
         }
 
@@ -150,14 +149,14 @@ def visualize_wandb_metrics():
     #
     # # 1. Bar plots for final metrics by run
     # metric_cols = [col for col in df.columns if col not in ['run_name', 'trial', 'model',
-    #                                                         'users_dec_perc_drop', 'items_dec_perc_drop',
+    #                                                         'users_dec_perc_suppr', 'items_dec_perc_suppr',
     #                                                         'community_dropout_strength']]
     #
     # if metric_cols:
     #     # Create combined parameter labels
     #     df['params'] = df.apply(
     #         lambda
-    #             x: f"{x['model']}\nu{x['users_dec_perc_drop']}_i{x['items_dec_perc_drop']}_c{x['community_dropout_strength']}",
+    #             x: f"{x['model']}\nu{x['users_dec_perc_suppr']}_i{x['items_dec_perc_suppr']}_c{x['community_dropout_strength']}",
     #         axis=1
     #     )
     #
@@ -173,11 +172,11 @@ def visualize_wandb_metrics():
     #
     # # 2. Hyperparameter impact heatmaps
     # for metric in metric_cols:
-    #     if len(df['users_dec_perc_drop'].unique()) > 1 and len(df['items_dec_perc_drop'].unique()) > 1:
+    #     if len(df['users_dec_perc_suppr'].unique()) > 1 and len(df['items_dec_perc_suppr'].unique()) > 1:
     #         plt.figure(figsize=(8, 6))
     #         pivot = df.pivot_table(
-    #             index='users_dec_perc_drop',
-    #             columns='items_dec_perc_drop',
+    #             index='users_dec_perc_suppr',
+    #             columns='items_dec_perc_suppr',
     #             values=metric,
     #             aggfunc='mean'
     #         )

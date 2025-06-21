@@ -52,13 +52,13 @@ def plot_community_bias(user_biases, item_biases, save_path=None, dataset_name='
     elif dataset_name == "ml-1m":
         dataset_plt_name = "MovieLens-1M"
 
-    plt.title(f'Community Biases in {dataset_plt_name}',
-              fontsize=18, fontweight='bold', pad=20)
-    plt.ylabel('Bias [0, 1]', fontsize=16)
+    # plt.title(f'Community Biases in {dataset_plt_name}',
+    #           fontsize=18, fontweight='bold', pad=20)
+    plt.ylabel('Bias [0, 1]', fontsize=22)
 
     # Improve tick labels
-    plt.tick_params(axis='x', which='major', labelsize=16, pad=10)
-    plt.tick_params(axis='y', which='major', labelsize=16)
+    plt.tick_params(axis='x', which='major', labelsize=22, pad=10)
+    plt.tick_params(axis='y', which='major', labelsize=22)
 
     # Set y-axis limits with some padding
     plt.ylim(-0.05, 1.05)
@@ -70,9 +70,8 @@ def plot_community_bias(user_biases, item_biases, save_path=None, dataset_name='
     plt.tight_layout(pad=2)
 
     if save_path:
-        plt.savefig(f"{save_path}/{dataset_name}_community_bias.png",
+        plt.savefig(f"images/{dataset_name}_community_bias.png",
                     dpi=300, bbox_inches='tight', facecolor='white')
-
     plt.show()
 
 

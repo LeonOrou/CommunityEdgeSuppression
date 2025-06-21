@@ -36,10 +36,10 @@ def community_edge_suppression(adj_tens, config):
     :param power_items_idx: torch.tensor vector, adj_tens indices of power items
     :param biased_user_edges_mask: torch.tensor bool vector, adj_tens indices of biased user edges, i.e. edges they most interact with / in-community
     :param biased_item_edges_mask: torch.tensor bool vector, adj_tens indices of biased item edges, i.e. edges they most interact with / in-community
-    :param users_dec_perc_drop: float [0, 1], dropout percentage of adj_tens for biased user edges
-    :param items_dec_perc_drop: float [0, 1], dropout percentage of adj_tens for biased item edges
+    :param users_dec_perc_suppr: float [0, 1], dropout percentage of adj_tens for biased user edges
+    :param items_dec_perc_suppr: float [0, 1], dropout percentage of adj_tens for biased item edges
     :param community_suppression: float [0, 1]: float, strength of community dropout: [0, 1]; 0 means normal dropout, 1 only biased / in-community
-    :param drop_only_power_nodes: bool, whether to drop edges from power nodes or not
+    :param suppress_power_nodes_first: bool, whether to drop edges from power nodes or not
     :return: adj_tens: torch.tensor, modified adjacency tensor without dropped edges (dropped via mask)
     """
 
@@ -47,10 +47,10 @@ def community_edge_suppression(adj_tens, config):
     power_items_idx = config.power_items_ids
     biased_user_edges_mask = config.biased_user_edges_mask
     biased_item_edges_mask = config.biased_item_edges_mask
-    drop_only_power_nodes = config.drop_only_power_nodes
+    drop_only_power_nodes = config.suppress_power_nodes_first
     community_suppression = config.community_suppression
-    users_dec_perc_drop = config.users_dec_perc_drop
-    items_dec_perc_drop = config.items_dec_perc_drop
+    users_dec_perc_drop = config.users_dec_perc_suppr
+    items_dec_perc_drop = config.items_dec_perc_suppr
 
     adj_tens = adj_tens.clone()
     device = adj_tens.device
@@ -63,10 +63,10 @@ def community_edge_suppression(adj_tens, config):
             for user_idx in power_users_idx:  # TODO: we could also precompute this and give as argument instead of power_users_idx
                 user_edge_mask |= (adj_tens[:, 0] == user_idx)
         else:  # all users, not only power users
-            user_edge_mask = torch.nonzero(~user_edge_mask).squeeze(1)  # ~ to get ALL edges, not just power users
+            user_edge_mask = torch.nonzero(user_edge_mask).squeeze(1)  # ~ to get ALL edges, not just power users
 
         user_edge_indices = torch.nonzero(user_edge_mask).squeeze(1)
-        total_user_drop_count = int(adj_tens.shape[0] * users_dec_perc_drop)  # TODO: discuss from what the users_dec_perc_drop says to drop from; all edges, biased edges, power edges
+        total_user_drop_count = int(adj_tens.shape[0] * users_dec_perc_drop)  # TODO: discuss from what the users_dec_perc_suppr says to drop from; all edges, biased edges, power edges
 
         in_com_user_indices = user_edge_indices[biased_user_edges_mask[user_edge_indices]]
 
@@ -83,11 +83,11 @@ def community_edge_suppression(adj_tens, config):
             for item_idx in power_items_idx:
                 item_edge_mask |= (adj_tens[:, 1] == item_idx)
         else:  # all items, not only power items
-            item_edge_mask = torch.nonzero(~item_edge_mask).squeeze(1)  # ~ to get ALL edges, not just power users
+            item_edge_mask = torch.nonzero(item_edge_mask).squeeze(1)  # ~ to get ALL edges, not just power users
 
         item_edge_indices = torch.nonzero(item_edge_mask).squeeze(1)
 
-        total_item_drop_count = int(adj_tens.shape[0] * items_dec_perc_drop)  # TODO: discuss from what the users_dec_perc_drop says to drop from; all edges, biased edges, power edges
+        total_item_drop_count = int(adj_tens.shape[0] * items_dec_perc_drop)  # TODO: discuss from what the users_dec_perc_suppr says to drop from; all edges, biased edges, power edges
 
         in_com_item_indices = item_edge_indices[biased_item_edges_mask[item_edge_indices]]
 
@@ -303,11 +303,11 @@ def initialize_wandb(config):
         "model": config.model_name,
         "users_top_percent": config.users_top_percent,
         "items_top_percent": config.items_top_percent,
-        "users_dec_perc_drop": config.users_dec_perc_drop,
-        "items_dec_perc_drop": config.items_dec_perc_drop,
+        "users_dec_perc_suppr": config.users_dec_perc_suppr,
+        "items_dec_perc_suppr": config.items_dec_perc_suppr,
         "community_suppression": config.community_suppression,
-        "use_dropout": config.use_dropout,
-        "drop_only_power_nodes": config.drop_only_power_nodes,
+        "use_suppression": config.use_suppression,
+        "suppress_power_nodes_first": config.suppress_power_nodes_first,
         "learning_rate": config.learning_rate,
         "epochs": config.epochs,
     }
@@ -340,7 +340,7 @@ def initialize_wandb(config):
 
     return wandb.init(
         project="RecSys_PowerNodeEdgeDropout",
-        name=f"{config.model_name}_{config.dataset_name}_users_top_{config.items_dec_perc_drop}_items_top_{config.items_dec_perc_drop}com_suppression_{config.community_suppression}",
+        name=f"{config.model_name}_{config.dataset_name}_users_top_{config.items_dec_perc_suppr}_items_top_{config.items_dec_perc_suppr}com_suppression_{config.community_suppression}",
         config=wandb_config
     )
 

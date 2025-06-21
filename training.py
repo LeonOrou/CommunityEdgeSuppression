@@ -15,7 +15,7 @@ import torch.optim as optim
 import numpy as np
 
 
-def train_itemknn(model, dataset, config, stage='cv', fold_num=None, verbose=True):
+def train_itemknn(model, dataset, config, verbose=True):
     """
     General ItemKNN training function that handles the complete training process.
 
@@ -23,8 +23,6 @@ def train_itemknn(model, dataset, config, stage='cv', fold_num=None, verbose=Tru
         model: The ItemKNN model to train
         dataset: Dataset object containing train/val/test data
         config: Configuration object with hyperparameters
-        stage: 'cv' for cross-validation, 'full_train' for final training
-        fold_num: Current fold number for logging (None for final training)
         verbose: Whether to print training progress
 
     Returns:
@@ -37,7 +35,7 @@ def train_itemknn(model, dataset, config, stage='cv', fold_num=None, verbose=Tru
     start_time = time.time()
 
     # TODO: make multiple training iterations to proof community edge suppression as one-shot learning
-    if config.use_dropout:
+    if config.use_suppression:
         current_edge_weights = community_edge_suppression(
             torch.tensor(training_interactions, device=config.device), config).cpu().numpy()
         training_interactions[:, 2] = current_edge_weights
@@ -47,49 +45,13 @@ def train_itemknn(model, dataset, config, stage='cv', fold_num=None, verbose=Tru
     training_time = time.time() - start_time
 
     # Validate the model if validation data is available
-    validation_ndcg = None
     if len(dataset.val_df) > 0:
         from evaluation import evaluate_current_model_ndcg
         validation_ndcg = evaluate_current_model_ndcg(model, dataset, model_type='ItemKNN', k=10)
-
-    # Log training results
-    log_itemknn_training_results(
-        model, training_time, validation_ndcg, fold_num, verbose
-    )
-
+        print(f"Validation NDCG@10: {validation_ndcg:.4f}"
+              f"Training time: {training_time:.2f} seconds"
+              f"Average neighbors per item: {calculate_avg_neighbors(model.similarity_matrix):.2f}")
     return model
-
-
-def log_itemknn_training_results(model, training_time, validation_ndcg, fold_num, verbose):
-    """Log ItemKNN training completion and results."""
-    # Calculate model statistics
-    sparsity = calculate_similarity_sparsity(model.similarity_matrix)
-    avg_neighbors = calculate_avg_neighbors(model.similarity_matrix)
-
-    log_dict = {
-        'training_time': training_time,
-        'similarity_sparsity': sparsity,
-        'avg_neighbors_per_item': avg_neighbors,
-        'training_completed': True
-    }
-
-    if validation_ndcg is not None:
-        log_dict['val_ndcg@10'] = validation_ndcg
-
-    # Add fold-specific prefix if in cross-validation
-    if fold_num is not None:
-        log_dict = {f'fold_{fold_num}/itemknn_{k}': v for k, v in log_dict.items()}
-    else:
-        log_dict = {f'final_training/itemknn_{k}': v for k, v in log_dict.items()}
-
-    wandb.log(log_dict)
-
-    if verbose:
-        print(f"  Training completed in {training_time:.2f} seconds")
-        print(f"  Similarity matrix sparsity: {sparsity:.4f}")
-        print(f"  Average neighbors per item: {avg_neighbors:.1f}")
-        if validation_ndcg is not None:
-            print(f"  Validation NDCG@10: {validation_ndcg:.4f}")
 
 
 def calculate_similarity_sparsity(similarity_matrix):
@@ -218,8 +180,7 @@ def check_multivae_early_stopping(val_ndcg, best_val_ndcg, patience_counter, pat
     return False, best_val_ndcg, patience_counter, best_model_state, best_epoch
 
 
-def train_multivae(model, dataset, config, optimizer, device,
-                   stage='cv', fold_num=None, verbose=True):
+def train_multivae(model, dataset, config, optimizer, device, verbose=True):
     """
     General MultiVAE training function that handles the complete training loop with sparse matrices.
 
@@ -228,10 +189,7 @@ def train_multivae(model, dataset, config, optimizer, device,
         dataset: Dataset object containing train/val/test data
         config: Configuration object with hyperparameters
         optimizer: PyTorch optimizer
-        scheduler: Learning rate scheduler
         device: Training device (cuda/cpu)
-        stage: 'cv' for cross-validation, 'full_train' for final training
-        fold_num: Current fold number for logging (None for final training)
         verbose: Whether to print training progress
 
     Returns:
@@ -269,7 +227,7 @@ def train_multivae(model, dataset, config, optimizer, device,
     model.train()
 
     for epoch in range(config.epochs):
-        if config.use_dropout:
+        if config.use_suppression:
             current_edge_weight = community_edge_suppression(torch.tensor(dataset.train_df.values, device=device), config).cpu().numpy()
 
             train_sparse_matrix = csr_matrix(
@@ -308,7 +266,7 @@ def train_multivae(model, dataset, config, optimizer, device,
 
 
 def train_lightgcn(model, dataset, config, optimizer, user_positive_items,
-                   device, stage='cv', fold_num=None, verbose=True):
+                   device, verbose=True):
     """
     General LightGCN training function that handles the complete training loop.
 
@@ -358,7 +316,7 @@ def train_lightgcn(model, dataset, config, optimizer, user_positive_items,
     model.train()
 
     for epoch in range(config.epochs):
-        if config.use_dropout:
+        if config.use_suppression:
             edge_weights_modified = community_edge_suppression(adj_tens, config)
             # bidirectional edges for LightGCN
             edge_weights_modified = torch.concatenate((edge_weights_modified, edge_weights_modified))
@@ -385,7 +343,7 @@ def train_lightgcn(model, dataset, config, optimizer, user_positive_items,
             current_lr = optimizer.param_groups[0]['lr']
 
             if verbose:
-                suppression_status = "ON" if config.use_dropout else "OFF"
+                suppression_status = "ON" if config.use_suppression else "OFF"
                 print(f'  Epoch {epoch+1:3d}/{config.epochs}, Loss: {epoch_loss:.4f}, current LR: {current_lr:.6f}, '
                       f'Val NDCG@10: {val_ndcg:.4f} (Suppression: {suppression_status})')
 
@@ -540,7 +498,7 @@ def train_model_itemknn(dataset, model, config, stage='cv', fold_num=None, verbo
     return trained_model
 
 
-def train_model(dataset, model, config, stage='cv', fold_num=None, verbose=True):
+def train_model(dataset, model, config, fold_num=None, verbose=True):
     """
     Main training function that sets up the training environment and calls train_lightgcn.
 
@@ -548,7 +506,6 @@ def train_model(dataset, model, config, stage='cv', fold_num=None, verbose=True)
         dataset: Dataset object
         model: Model to train
         config: Configuration object
-        stage: 'cv' for cross-validation, 'full_train' for final training
         fold_num: Current fold number for logging (None for final training)
         verbose: Whether to print training progress
 
@@ -558,16 +515,11 @@ def train_model(dataset, model, config, stage='cv', fold_num=None, verbose=True)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Training on device: {device}")
 
-    if stage == 'full_train':
-        dataset.train_df = dataset.train_val_df  # Use all training+validation data
-        dataset.val_df = dataset.test_df  # Use test set as validation
-
     if config.model_name == 'ItemKNN':
         trained_model = train_itemknn(
             model=model,
             dataset=dataset,
             config=config,
-            stage=stage,
             fold_num=fold_num,
             verbose=verbose
         )
@@ -585,8 +537,6 @@ def train_model(dataset, model, config, stage='cv', fold_num=None, verbose=True)
             config=config,
             optimizer=optimizer,
             device=device,
-            stage=stage,
-            fold_num=fold_num,
             verbose=verbose
         )
         return trained_model
@@ -607,8 +557,6 @@ def train_model(dataset, model, config, stage='cv', fold_num=None, verbose=True)
             optimizer=optimizer,
             user_positive_items=user_positive_items,
             device=device,
-            stage=stage,
-            fold_num=fold_num,
             verbose=verbose)
 
         return trained_model

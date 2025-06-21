@@ -20,13 +20,13 @@ def init_wandb(config, offline=False):
             'shrink': getattr(config, 'shrink', None),
 
             # Community suppression parameters
-            'use_dropout': config.use_dropout,
+            'use_suppression': config.use_suppression,
             'community_suppression': config.community_suppression,
             'users_top_percent': config.users_top_percent,
             'items_top_percent': config.items_top_percent,
-            'users_dec_perc_drop': config.users_dec_perc_drop,
-            'items_dec_perc_drop': config.items_dec_perc_drop,
-            'drop_only_power_nodes': config.drop_only_power_nodes,
+            'users_dec_perc_suppr': config.users_dec_perc_suppr,
+            'items_dec_perc_suppr': config.items_dec_perc_suppr,
+            'suppress_power_nodes_first': config.suppress_power_nodes_first,
 
             # Evaluation parameters
             'evaluate_top_k': getattr(config, 'evaluate_top_k', [10, 20, 50, 100]),
@@ -45,7 +45,7 @@ def init_wandb(config, offline=False):
         wandb.init(
             project="CommunitySuppression",
             config=wandb_config,
-            name=f"{config.model_name}_{config.dataset_name}_dropout_{config.use_dropout}",
+            name=f"{config.model_name}_{config.dataset_name}_dropout_{config.use_suppression}",
             tags=[config.model_name, config.dataset_name, "cross-validation"]
         )
 

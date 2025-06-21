@@ -1018,7 +1018,7 @@ from scipy.sparse import csr_matrix, coo_matrix
 import pandas as pd
 
 
-def evaluate_model_vectorized(model, dataset, config, stage='cv', k_values=[10, 20, 50, 100]):
+def evaluate_model_vectorized(model, dataset, config, k_values=[10, 20, 50, 100]):
     """
     Memory-efficient vectorized evaluation using sparse representations.
     """
@@ -1033,10 +1033,6 @@ def evaluate_model_vectorized(model, dataset, config, stage='cv', k_values=[10, 
 
     encoded_to_genres = load_genre_mapping(dataset)
 
-    if stage == 'full_train':
-        dataset.train_df = dataset.train_val_df
-        dataset.val_df = dataset.test_df
-
     # Prepare sparse data structures
     train_user_items = dataset.train_df.groupby('user_encoded')['item_encoded'].apply(list).to_dict()
     user_test_items = dataset.val_df.groupby('user_encoded')['item_encoded'].apply(list).to_dict()
@@ -1049,7 +1045,7 @@ def evaluate_model_vectorized(model, dataset, config, stage='cv', k_values=[10, 
     relevance_sparse = create_sparse_relevance_matrix(valid_user_ids, user_test_items, dataset.num_items)
 
     # Process evaluation in batches to manage memory
-    batch_size = min(1000, len(valid_user_ids))  # Adaptive batch size
+    batch_size = min(2048, len(valid_user_ids))  # Adaptive batch size
     results = {}
 
     for k_val in k_values:
@@ -1136,6 +1132,7 @@ def get_batch_user_scores(model, dataset, config, batch_user_ids, train_user_ite
             batch_user_emb = user_emb[batch_user_indices]
 
             # Compute scores: (batch_size, num_items)
+            # batch_scores = model.predict(batch_user_indices, item_indices=None).cpu().numpy()
             batch_scores = torch.matmul(batch_user_emb, item_emb.T).cpu().numpy()
 
         elif config.model_name == 'MultiVAE':

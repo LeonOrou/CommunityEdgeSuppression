@@ -10,11 +10,11 @@ class Config:
         self.dataset_name = None
         self.users_top_percent = None
         self.items_top_percent = None
-        self.users_dec_perc_drop = None
-        self.items_dec_perc_drop = None
+        self.users_dec_perc_suppr = None
+        self.items_dec_perc_suppr = None
         self.community_suppression = None
-        self.drop_only_power_nodes = None
-        self.use_dropout = None
+        self.suppress_power_nodes_first = None
+        self.use_suppression = None
         self.evaluate_top_k = [10, 20, 50, 100]
 
         # Will be set during initialization
@@ -44,6 +44,8 @@ class Config:
     def update_from_args(self, args):
         """Update config from command line arguments."""
         for key, value in vars(args).items():
+            value = True if value == "True" else value
+            value = False if value == "False" else value
             setattr(self, key, value)
 
     def setup_model_config(self):
@@ -51,7 +53,7 @@ class Config:
         if self.model_name == 'LightGCN':
             self.batch_size = 512
             self.learning_rate = 5e-3
-            self.epochs = 150  # because it's different for each model
+            self.epochs = 160  # because it's different for each model
             self.n_layers = 3
             self.embedding_dim = 128
             self.num_folds = 5
