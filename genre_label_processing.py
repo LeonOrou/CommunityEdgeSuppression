@@ -5,8 +5,49 @@ import os
 import json
 from collections import Counter, defaultdict
 
+genre_mapping = {
+        "0": "unknown",
+        "1": "Action",
+        "2": "Adventure",
+        "3": "Animation",
+        "4": "Children's",
+        "5": "Comedy",
+        "6": "Crime",
+        "7": "Documentary",
+        "8": "Drama",
+        "9": "Fantasy",
+        "10": "Film-Noir",
+        "11": "Horror",
+        "12": "Musical",
+        "13": "Mystery",
+        "14": "Romance",
+        "15": "Sci-Fi",
+        "16": "Thriller",
+        "17": "War",
+        "18": "Western",
+        "(no genres listed)": 0,
+        "Action": 1,
+        "Adventure": 2,
+        "Animation": 3,
+        "Children's": 4,
+        "Comedy": 5,
+        "Crime": 6,
+        "Documentary": 7,
+        "Drama": 8,
+        "Fantasy": 9,
+        "Film-Noir": 10,
+        "Horror": 11,
+        "Musical": 12,
+        "Mystery": 13,
+        "Romance": 14,
+        "Sci-Fi": 15,
+        "Thriller": 16,
+        "War": 17,
+        "Western": 18,
+        "IMAX": 19
+    }
 
-def save_ml100k_genre_labels(file_path, dataset_name='ml-100k', keep_labels=False):
+def save_ml100k_genre_labels(file_path, genre_mapping, dataset_name='ml-100k', keep_labels=False, use_three_genres=False):
     """
     Load genre labels from a file and return them as a dictionary.
 
@@ -16,32 +57,52 @@ def save_ml100k_genre_labels(file_path, dataset_name='ml-100k', keep_labels=Fals
     Returns:
         dict: A dictionary where keys are item IDs and values are lists of genre labels.
     """
+
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"File not found: {file_path}")
 
     genre_labels = {}
-    with open(file_path, 'r') as f:
-        # if keep_labels:
-        #     for line in f:
-        #         parts = line.strip().split('|')
-        #         item_name = parts[1]
-        #         genres_txt = parts[-1]
-        #         genre_labels[item_name] = genres_txt.split('|')
 
-        for line in f:
-            parts = line.strip().split('|')
-            item_id = int(parts[0])
-            # The last 19 parts are genre labels
-            # they are 0 or 1 indicating whether the item belongs to that genre
-            genres = parts[-19:]
-            # Convert to a list of genre labels with the label being the ith position
-            genres = [i for i, label in enumerate(genres) if label == '1']
-            # if len(genres) > 3:
-            #     genres = genres[:3]
-            genre_labels[item_id] = genres
+    if keep_labels:
+        # format {movie_string: [genre1, genre2, ...]}
+        with open(file_path, 'r') as f:
+            for line in f:
+                parts = line.strip().split('|')
+                item_name = parts[1]
+                genres = parts[-19:]
+                genre_id_list = [str(i) for i, label in enumerate(genres) if label == '1']
+                genre_labels[item_name] = [genre_mapping[genre] for genre in genre_id_list if genre in genre_mapping]
+    elif use_three_genres:
+        item_genres_labels = json.load(open(f'dataset/{dataset_name}/saved/item_genre_labels_{dataset_name}_labelsTrue_top3.json', ))
+
+        with open(file_path, 'r') as f:
+            for line in f:
+                parts = line.strip().split('|')
+                if parts[0] == 'movieId':
+                    continue
+                item_id = int(parts[0])
+                item_name = parts[1]
+                genre_labels_list = item_genres_labels[item_name]
+                if len(genre_labels_list) > 3:  #sanity check
+                    print(f"Item {item_name} has more than 3 genres: {genre_labels_list}. Truncating to first 3 genres.")
+                #get label ids from genre labels
+                genre_labels[item_id] = [genre_mapping[genre] for genre in genre_labels_list if genre in genre_mapping]
+    else:
+        with open(file_path, 'r') as f:
+            for line in f:
+                parts = line.strip().split('|')
+                item_id = int(parts[0])
+                # The last 19 parts are genre labels
+                # they are 0 or 1 indicating whether the item belongs to that genre
+                genres = parts[-19:]
+                # Convert to a list of genre labels with the label being the ith position
+                genres = [i for i, label in enumerate(genres) if label == '1']
+                # if len(genres) > 3:
+                #     genres = genres[:3]
+                genre_labels[item_id] = genres
 
     # Save the genre labels to a local JSON file
-    output_file = f'dataset/{dataset_name}/saved/item_genre_labels_{dataset_name}.json'
+    output_file = f'dataset/{dataset_name}/saved/item_genre_labels_{dataset_name}_labels{keep_labels}.json'
     with open(output_file, 'w') as json_file:
         json.dump(genre_labels, json_file, indent=4)
     return genre_labels
@@ -77,7 +138,7 @@ def save_lfm_genre_labels(input_file="dataset/lastfm/user_taggedartists.dat", da
     with open(f'dataset/{dataset_name}/saved/item_genre_labels_{dataset_name}.json', 'w', encoding='utf-8') as f:
         json.dump(dict(item_genres), f)
 
-def save_ml1m_genre_labels(file_path, dataset_name='ml-1m', keep_labels=False, use_three_genres=True):
+def save_ml1m_genre_labels(file_path, genre_mapping, dataset_name='ml-1m', keep_labels=False, use_three_genres=True):
     """
     Load genre labels from a file and return them as a dictionary.
 
@@ -87,31 +148,9 @@ def save_ml1m_genre_labels(file_path, dataset_name='ml-1m', keep_labels=False, u
     Returns:
         dict: A dictionary where keys are item IDs and values are lists of genre labels.
     """
+
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"File not found: {file_path}")
-
-    genre_mapping = {
-        "(no genres listed)": 0,
-        "Action": 1,
-        "Adventure": 2,
-        "Animation": 3,
-        "Children's": 4,
-        "Comedy": 5,
-        "Crime": 6,
-        "Documentary": 7,
-        "Drama": 8,
-        "Fantasy": 9,
-        "Film-Noir": 10,
-        "Horror": 11,
-        "Musical": 12,
-        "Mystery": 13,
-        "Romance": 14,
-        "Sci-Fi": 15,
-        "Thriller": 16,
-        "War": 17,
-        "Western": 18,
-        "IMAX": 19
-    }
 
     genre_labels = {}
     if keep_labels:
@@ -151,7 +190,7 @@ def save_ml1m_genre_labels(file_path, dataset_name='ml-1m', keep_labels=False, u
     return genre_labels
 
 
-# save_ml100k_genre_labels('dataset/ml-100k/u.item')
+# save_ml100k_genre_labels('dataset/ml-100k/u.item', genre_mapping=genre_mapping, use_three_genres=True)
 # save_lfm_genre_labels('dataset/lastfm/user_taggedartists.dat')
-save_ml1m_genre_labels('dataset/ml-1m/movies.dat', keep_labels=False, use_three_genres=True)
+# save_ml1m_genre_labels('dataset/ml-1m/movies.dat', genre_mapping=genre_mapping, use_three_genres=True)
 
