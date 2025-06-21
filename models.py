@@ -74,9 +74,9 @@ class LightGCN(nn.Module):
         :param item_indices: Tensor of item indices.
         :return: Predicted scores for the user-item pairs.
         """
-        user_emb = self.user_embedding(user_indices)
-        item_emb = self.item_embedding(item_indices)
-        return (user_emb * item_emb).sum(dim=1)
+        user_emb = self.user_embedding(user_indices) if user_indices is not None else self.user_embedding.weight
+        item_emb = self.item_embedding(item_indices) if item_indices is not None else self.item_embedding.weight
+        return user_emb @ item_emb.T
 
 
 def calculate_bpr_loss(user_emb, pos_item_emb, neg_item_emb):
@@ -127,18 +127,19 @@ class ItemKNN:
 
         # TFIDF each row of a sparse amtrix
         rating_matrix = sp.coo_matrix(rating_matrix)
-        N = float(rating_matrix.shape[0])
+        N = float(rating_matrix.shape[1])
 
         # calculate IDF
         idf = np.log(N / (1 + np.bincount(rating_matrix.col)))
 
         # calculate TF
-        tf = rating_matrix.data / np.bincount(rating_matrix.col)[rating_matrix.col]
+        user_totals = np.bincount(rating_matrix.row, weights=rating_matrix.data)
+        tf = rating_matrix.data / user_totals[rating_matrix.row]
 
         # apply TF-IDF adjustment
         rating_matrix.data = tf * idf[rating_matrix.col]
 
-        return rating_matrix.tocsr().T
+        return rating_matrix.tocsr()
 
     def okapi_BM25(self, rating_matrix, K1=1.2, B=0.75):
         assert B > 0 and B < 1, "okapi_BM_25: B must be in (0,1)"
@@ -260,7 +261,7 @@ class ItemKNN:
 
         # Apply BM25 weighting
         # self.bm25_matrix = self.okapi_BM25(self.user_item_matrix.T)
-        self.tf_idf_matrix = self.TF_IDF(self.user_item_matrix.T)
+        self.tf_idf_matrix = self.TF_IDF(self.user_item_matrix)
 
         # Compute weighted cosine similarity
         self.similarity_matrix = self.cosine_sim(self.tf_idf_matrix)
