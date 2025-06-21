@@ -685,6 +685,5 @@ def save_combined_summary(all_results, best_results, run_id, dataset, args):
     print(f"✓ Finished search")
 
 
-if __name__ == "__main__":
-    hyperparameter_search()
+hyperparameter_search()
 
