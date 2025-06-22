@@ -29,13 +29,13 @@ def plot_community_bias(user_biases, item_biases, save_path=None, dataset_name='
     plt.figure(figsize=(10, 8), dpi=100)
 
     # Create boxplot with enhanced styling
-    box_plot = plt.boxplot([user_biases, item_biases],
-                           labels=['User Biases', 'Item Biases'],
+    box_plot = plt.boxplot(user_biases,
+                           labels=['User Biases'],
                            patch_artist=True,  # Enable filling of boxes
                            widths=0.4,
                            capprops=dict(linewidth=1.5))
     # Customize box colors
-    colors = ['lightblue', 'lightcoral']
+    colors = ['lightblue']
     for patch, color in zip(box_plot['boxes'], colors):
         patch.set_facecolor(color)
         patch.set_alpha(0.7)
@@ -43,14 +43,6 @@ def plot_community_bias(user_biases, item_biases, save_path=None, dataset_name='
     # Customize other elements
     for element in ['whiskers', 'fliers', 'medians', 'caps']:
         plt.setp(box_plot[element], color='black', linewidth=1.5)
-
-    # Enhanced title and labels with larger, more readable fonts
-    if dataset_name == "lastfm":
-        dataset_plt_name = "Last.FM"
-    elif dataset_name == "ml-100k":
-        dataset_plt_name = "MovieLens-100K"
-    elif dataset_name == "ml-1m":
-        dataset_plt_name = "MovieLens-1M"
 
     # plt.title(f'Community Biases in {dataset_plt_name}',
     #           fontsize=18, fontweight='bold', pad=20)

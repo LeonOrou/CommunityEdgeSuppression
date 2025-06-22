@@ -224,11 +224,13 @@ def train_multivae(model, dataset, config, optimizer, device, verbose=True):
     train_sparse_matrix, val_sparse_matrix = prepare_multivae_sparse_matrices(dataset)
 
     num_users = train_sparse_matrix.shape[0]
+    train_adj_tens = torch.tensor(dataset.train_df[['user_encoded', 'item_encoded', 'rating']].values, device=config.device)
+
     model.train()
 
     for epoch in range(config.epochs):
         if config.use_suppression:
-            current_edge_weight = community_edge_suppression(torch.tensor(dataset.train_df.values, device=device), config).cpu().numpy()
+            current_edge_weight = community_edge_suppression(train_adj_tens, config).cpu().numpy()
 
             train_sparse_matrix = csr_matrix(
                 (current_edge_weight, (dataset.train_df['user_encoded'].values, dataset.train_df['item_encoded'].values)),

@@ -396,7 +396,6 @@ def get_community_bias(item_communities_each_user_dist=None, user_communities_ea
     :return: tuple of torch.tensors, community bias for users and items
     """
     user_bias, item_bias = None, None
-    epsilon = 1e-6  # small value to avoid division by zero
 
     if item_communities_each_user_dist is not None:
         uniform_distribution_users = torch.full_like(item_communities_each_user_dist, 1.0 / item_communities_each_user_dist.size(1))
@@ -520,8 +519,8 @@ def calculate_simpson_index_recommendations(recommended_items, encoded_to_genres
             # Normalize by number of genres to avoid bias towards items with more genres
             weight = 1.0 / len(genres)
             for genre in genres:
-                genre_counts[genre] += 1 * weight
-                total_genre_assignments += 1 * weight
+                genre_counts[genre] += 1
+                total_genre_assignments += 1
 
     if total_genre_assignments == 0:
         return 0.0
@@ -1232,7 +1231,7 @@ def process_batch_metrics(batch_scores, batch_relevance, batch_user_ids, user_te
             # Community bias calculation
             if hasattr(config, 'item_labels_matrix_mask'):
                 user_community_dist = calculate_user_community_distribution_efficient(
-                    user_top_k, config.item_labels_matrix_mask, config.device
+                    user_top_k, config.item_labels_matrix_mask, dataset.device
                 )
                 results[k_val]['user_community_distributions'].append(user_community_dist)
 
@@ -1403,33 +1402,33 @@ def calculate_user_additional_metrics_efficient(top_k_items, encoded_to_genres, 
 
 def calculate_user_community_distribution_efficient(recommended_items, item_labels_matrix_mask, device):
     """
-    Calculate community distribution for a user efficiently using sparse operations.
+    Calculate community distribution for recommended items, weighted by item's community count.
+
+    Args:
+        recommended_items: numpy array of recommended item IDs
+        item_labels_matrix_mask: boolean matrix (nr_items, nr_communities)
+                                where True means item i belongs to community j
+
+    Returns:
+        numpy array: distribution over communities
     """
-    if len(recommended_items) == 0:
-        n_communities = item_labels_matrix_mask.shape[1]
-        return torch.ones(n_communities, device=device) / n_communities
+    # Get mask for recommended items only
+    rec_mask = item_labels_matrix_mask[recommended_items]
 
-    # Convert to tensor and filter valid items
-    recommended_items = torch.tensor(recommended_items, device=device)
-    valid_items = recommended_items[recommended_items < item_labels_matrix_mask.shape[0]]
+    # Count communities per item (number of True values per row)
+    communities_per_item = rec_mask.sum(axis=1)
 
-    if len(valid_items) == 0:
-        n_communities = item_labels_matrix_mask.shape[1]
-        return torch.ones(n_communities, device=device) / n_communities
+    # Weight each community membership by 1/communities_per_item
+    # Use broadcasting to divide each row by its community count
+    weights = 1.0 / communities_per_item[:, np.newaxis]
+    weighted_mask = rec_mask * weights
 
-    # Get community memberships efficiently
-    item_community_memberships = item_labels_matrix_mask[valid_items]
-    community_counts = torch.sum(item_community_memberships, dim=0).float()
+    # Sum across all items to get final distribution
+    community_sum = weighted_mask.sum(axis=0)
+    community_distribution = community_sum / community_sum.sum() if community_sum.sum() > 0 else np.zeros(
+        item_labels_matrix_mask.shape[1])
 
-    # Normalize
-    total_count = torch.sum(community_counts)
-    if total_count > 0:
-        community_distribution = community_counts / total_count
-    else:
-        n_communities = item_labels_matrix_mask.shape[1]
-        community_distribution = torch.ones(n_communities, device=device) / n_communities
-
-    return community_distribution
+    return torch.tensor(community_distribution, device=device, dtype=torch.float32)
 
 
 def aggregate_batch_results(results, k_values, dataset):

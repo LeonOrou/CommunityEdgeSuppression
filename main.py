@@ -24,19 +24,21 @@ warnings.filterwarnings('ignore')
 def main():
     set_seed(21)  # For reproducibility
     parser = ArgumentParser()
-    parser.add_argument("--model_name", type=str, default='LightGCN')
+    parser.add_argument("--model_name", type=str, default='MultiVAE')
     parser.add_argument("--dataset_name", type=str, default='ml-100k')
     parser.add_argument("--users_top_percent", type=float, default=0.05)
     parser.add_argument("--items_top_percent", type=float, default=0.05)
-    parser.add_argument("--users_dec_perc_suppr", type=float, default=0.4)
+    parser.add_argument("--users_dec_perc_suppr", type=float, default=0.3)
     parser.add_argument("--items_dec_perc_suppr", type=float, default=0.0)
     parser.add_argument("--community_suppression", type=float, default=0.5)
-    parser.add_argument("--suppress_power_nodes_first", type=str, default='False')
-    parser.add_argument("--use_suppression", type=str, default='True')
+    parser.add_argument("--suppress_power_nodes_first", type=str, default='True')
+    parser.add_argument("--use_suppression", type=str, default='False')
+    # False: 0.4907      0.4827      0.4386      0.3752, cv folds
+    # True:  0.4881      0.4795      0.4364      0.3722, cv folds, perc suppression 0.3, strength 0.5
     config = Config()
     config.update_from_args(parser.parse_args())
     config.setup_model_config()
-    init_wandb(config, offline=False)
+    init_wandb(config, offline=True)
 
     dataset = RecommendationDataset(name=config.dataset_name, data_path=f'dataset/{config.dataset_name}')
     dataset.prepare_data()
@@ -68,9 +70,9 @@ def main():
 
     get_biased_connectivity_data(config, adj_tens)
 
-    # user_biases, item_biases = get_community_bias(item_communities_each_user_dist=config.item_community_connectivity_matrix_distribution,
-    #                    user_communities_each_item_dist=config.user_community_connectivity_matrix_distribution)
-    # plot_community_bias(user_biases, item_biases, save_path=f'dataset/{config.dataset_name}/images/', dataset_name=config.dataset_name)
+    user_biases, item_biases = get_community_bias(item_communities_each_user_dist=config.item_community_connectivity_matrix_distribution,
+                       user_communities_each_item_dist=config.user_community_connectivity_matrix_distribution)
+    plot_community_bias(user_biases, item_biases, save_path=f'dataset/{config.dataset_name}/images/', dataset_name=config.dataset_name)
 
     cv_results = []
     train_time_start = time.time()
@@ -81,6 +83,7 @@ def main():
         model = get_model(config=config, dataset=dataset)
 
         dataset.get_fold_i(i=fold)  # sets train_df and val_df for this fold
+        config.train_mask = dataset.train_mask
 
         model = train_model(dataset=dataset, model=model, config=config, fold_num=fold + 1,)
 
@@ -108,23 +111,6 @@ def main():
 
         log_metrics_to_wandb(cv_summary, config, stage='cv_avg')
         print_metric_results(cv_summary, "CROSS-VALIDATION SUMMARY (5-fold average)")
-
-    # Train final model on all data and evaluate on test set
-    # print("\n" + "=" * 85)
-    # print("FINAL MODEL EVALUATION ON TEST SET")
-    # print("=" * 85)
-    #
-    # print("Training final model on full dataset...")
-    #
-    # model = get_model(config=config, dataset=dataset)
-    #
-    # model = train_model(dataset=dataset, model=model, config=config, stage='full_train', fold_num=None,)
-    #
-    # test_metrics = evaluate_model_vectorized(
-    #     model=model, dataset=dataset, config=config,
-    #     k_values=config.evaluate_top_k, stage='full_train')
-    #
-    # log_metrics_to_wandb(test_metrics, config, stage='test')
 
     train_time_end = time.time()
     print(f"\nTraining time: {n_folds} folds, model {config.model_name}, on {config.dataset_name}: {(train_time_end - train_time_start)/60:.0f} minutes")

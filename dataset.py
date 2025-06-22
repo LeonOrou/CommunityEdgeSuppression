@@ -107,7 +107,7 @@ class RecommendationDataset:
         self.complete_df = None  # Filtered and encoded dataframe
         self.train_df = None
         self.val_df = None
-        self.test_df = None
+        self.train_mask = None
         self.n_folds = 5  # Default number of folds for cross-validation
 
         # Encoding and metadata
@@ -321,6 +321,7 @@ class RecommendationDataset:
         val_mask = fold_assignments == i
 
         self.val_df = df[val_mask].copy()
+        self.train_mask = ~val_mask
         self.train_df = df[~val_mask].copy()
 
     def prepare_data(self):

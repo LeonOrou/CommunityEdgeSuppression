@@ -27,7 +27,7 @@ def get_community_labels(config, adj_np, save_path='dataset/ml-100k/saved', get_
     adj_csr = sp.csr_matrix((adj_np[:, 2].astype(float), (adj_np[:, 0].astype(int), adj_np[:, 1].astype(int))))
 
     if config.dataset_name == 'ml-100k':
-        resolution = 1.6  # 1.6 results in 19 communities = number of genres
+        resolution = 1.4  # 1.6 results in 19 communities = number of genres
     elif config.dataset_name == 'ml-1m':
         resolution = 1.6
     else:  # config.dataset_name == 'lastfm':
