@@ -36,7 +36,7 @@ def community_edge_suppression(adj_tens, config):
     :param power_items_idx: torch.tensor vector, adj_tens indices of power items
     :param biased_user_edges_mask: torch.tensor bool vector, adj_tens indices of biased user edges, i.e. edges they most interact with / in-community
     :param biased_item_edges_mask: torch.tensor bool vector, adj_tens indices of biased item edges, i.e. edges they most interact with / in-community
-    :param users_dec_perc_suppr: float [0, 1], dropout percentage of adj_tens for biased user edges
+    :param users_dec_perc_suppress: float [0, 1], dropout percentage of adj_tens for biased user edges
     :param items_dec_perc_suppr: float [0, 1], dropout percentage of adj_tens for biased item edges
     :param community_suppression: float [0, 1]: float, strength of community dropout: [0, 1]; 0 means normal dropout, 1 only biased / in-community
     :param suppress_power_nodes_first: bool, whether to drop edges from power nodes or not
@@ -45,59 +45,80 @@ def community_edge_suppression(adj_tens, config):
 
     power_users_idx = config.power_users_ids
     power_items_idx = config.power_items_ids
-    biased_user_edges_mask = config.biased_user_edges_mask
-    biased_item_edges_mask = config.biased_item_edges_mask
-    drop_only_power_nodes = config.suppress_power_nodes_first
+    biased_user_edges_mask = config.biased_user_edges_mask[config.train_mask]  # mask current CV fold
+    biased_item_edges_mask = config.biased_item_edges_mask[config.train_mask]
+    suppress_power_nodes_first = config.suppress_power_nodes_first
     community_suppression = config.community_suppression
-    users_dec_perc_drop = config.users_dec_perc_suppr
-    items_dec_perc_drop = config.items_dec_perc_suppr
+    users_dec_perc_suppress = config.users_dec_perc_suppr
+    items_dec_perc_suppress = config.items_dec_perc_suppr
 
     adj_tens = adj_tens.clone()
     device = adj_tens.device
 
     suppress_mask = torch.zeros(adj_tens.shape[0], dtype=torch.bool, device=adj_tens.device)
 
-    if users_dec_perc_drop > 0.0:
-        user_edge_mask = torch.zeros(adj_tens.shape[0], dtype=torch.bool, device=device)
-        if drop_only_power_nodes:
-            for user_idx in power_users_idx:  # TODO: we could also precompute this and give as argument instead of power_users_idx
-                user_edge_mask |= (adj_tens[:, 0] == user_idx)
-        else:  # all users, not only power users
-            user_edge_mask = torch.nonzero(user_edge_mask).squeeze(1)  # ~ to get ALL edges, not just power users
+    if users_dec_perc_suppress > 0.0:
+        total_user_suppress_count = int(adj_tens.shape[0] * users_dec_perc_suppress)
 
-        user_edge_indices = torch.nonzero(user_edge_mask).squeeze(1)
-        total_user_drop_count = int(adj_tens.shape[0] * users_dec_perc_drop)  # TODO: discuss from what the users_dec_perc_suppr says to drop from; all edges, biased edges, power edges
+        in_com_user_indices = torch.nonzero(biased_user_edges_mask).flatten()
 
-        in_com_user_indices = user_edge_indices[biased_user_edges_mask[user_edge_indices]]
+        in_com_user_suppress_count = min(int(total_user_suppress_count), in_com_user_indices.numel())
 
-        in_com_user_drop_count = min(int(total_user_drop_count), in_com_user_indices.numel())
+        if in_com_user_suppress_count > 0 and in_com_user_indices.numel() > 0:
+            if suppress_power_nodes_first:
+                # Create mask for power user edges
+                user_edges_mask = torch.zeros(adj_tens.shape[0], dtype=torch.bool, device=device)
+                for user_idx in power_users_idx:
+                    user_edges_mask[adj_tens[:, 0] == user_idx] = True
 
-        if in_com_user_drop_count > 0 and in_com_user_indices.numel() > 0:
-            perm = torch.randperm(in_com_user_indices.numel(), device=device)[:in_com_user_drop_count]
-            suppress_mask[in_com_user_indices[perm]] = True
+                # Find power user edges within biased edges
+                power_user_biased_edges = user_edges_mask & biased_user_edges_mask
+                power_user_biased_count = torch.sum(power_user_biased_edges)
 
-    if items_dec_perc_drop > 0.0:
+                # Start with power user edges
+                selected_edges = power_user_biased_edges.clone()
+
+                still_to_drop = in_com_user_suppress_count - power_user_biased_count
+
+                if still_to_drop > 0:
+                    # Find remaining biased edges (not power users)
+                    remaining_biased_edges = biased_user_edges_mask & ~power_user_biased_edges
+                    remaining_indices = torch.nonzero(remaining_biased_edges).flatten()
+
+                    if remaining_indices.numel() > 0:
+                        # Randomly select from remaining biased edges
+                        num_to_select = min(still_to_drop, remaining_indices.numel())
+                        perm = torch.randperm(remaining_indices.numel(), device=device)[:num_to_select]
+                        selected_remaining = remaining_indices[perm]
+                        selected_edges[selected_remaining] = True
+
+                suppress_mask[selected_edges] = True
+            else:
+                perm = torch.randperm(in_com_user_indices.numel(), device=device)[:in_com_user_suppress_count]
+                suppress_mask[in_com_user_indices[perm]] = True
+
+    if items_dec_perc_suppress > 0.0:
         # Find all edges connected to power items
         item_edge_mask = torch.zeros(adj_tens.shape[0], dtype=torch.bool, device=device)
-        if drop_only_power_nodes:
+        if suppress_power_nodes_first:
             for item_idx in power_items_idx:
                 item_edge_mask |= (adj_tens[:, 1] == item_idx)
-        else:  # all items, not only power items
-            item_edge_mask = torch.nonzero(item_edge_mask).squeeze(1)  # ~ to get ALL edges, not just power users
+        else:
+            item_edge_mask = torch.nonzero(~item_edge_mask).squeeze(1)
 
         item_edge_indices = torch.nonzero(item_edge_mask).squeeze(1)
 
-        total_item_drop_count = int(adj_tens.shape[0] * items_dec_perc_drop)  # TODO: discuss from what the users_dec_perc_suppr says to drop from; all edges, biased edges, power edges
+        total_item_suppress_count = int(adj_tens.shape[0] * items_dec_perc_suppress)  # TODO: discuss from what the users_dec_perc_suppress says to drop from; all edges, biased edges, power edges
 
         in_com_item_indices = item_edge_indices[biased_item_edges_mask[item_edge_indices]]
 
-        in_com_item_drop_count = min(int(total_item_drop_count), in_com_item_indices.numel())
+        in_com_item_suppress_count = min(int(total_item_suppress_count), in_com_item_indices.numel())
 
-        if in_com_item_drop_count > 0 and in_com_item_indices.numel() > 0:
-            perm = torch.randperm(in_com_item_indices.numel(), device=device)[:in_com_item_drop_count]
+        if in_com_item_suppress_count > 0 and in_com_item_indices.numel() > 0:
+            perm = torch.randperm(in_com_item_indices.numel(), device=device)[:in_com_item_suppress_count]
             suppress_mask[in_com_item_indices[perm]] = True  # TODO: handle cases where the dropped edges would overlap
 
-    edge_weights_new = torch.ones(adj_tens.shape[0], dtype=torch.float32, device=device)
+    edge_weights_new = torch.ones(adj_tens.shape[0], device=device)
     edge_weights_new[suppress_mask] = community_suppression
     return edge_weights_new
 
@@ -341,8 +362,29 @@ def initialize_wandb(config):
     return wandb.init(
         project="RecSys_PowerNodeEdgeDropout",
         name=f"{config.model_name}_{config.dataset_name}_users_top_{config.items_dec_perc_suppr}_items_top_{config.items_dec_perc_suppr}com_suppression_{config.community_suppression}",
-        config=wandb_config
-    )
+        config=wandb_config)
+
+
+def calculate_community_connectivity_dist(labels_matrix_mask, config):
+    # divide each item by the number of items in the row to get the distribution of communities for each item
+    item_community_memberships = torch.tensor(labels_matrix_mask, dtype=torch.float32, device=config.device)
+    community_distribution = item_community_memberships / torch.sum(item_community_memberships, dim=-1, keepdim=True)
+    community_distribution = torch.nan_to_num(community_distribution, nan=0.0)
+    return community_distribution
+
+    community_counts = torch.sum(item_community_memberships, dim=0)
+
+    # Normalize
+    total_count = torch.sum(community_counts)
+    if total_count > 0:
+        community_distribution = community_counts / total_count
+    else:
+        n_communities = labels_matrix_mask.shape[1]
+        community_distribution = torch.ones(n_communities) / n_communities
+
+    # replace nans with zeros
+    community_distribution = torch.nan_to_num(community_distribution, nan=0.0)
+    return community_distribution
 
 
 def get_biased_connectivity_data(config, adj_tens):
@@ -350,19 +392,21 @@ def get_biased_connectivity_data(config, adj_tens):
         adj_tens=adj_tens,
         user_com_labels=config.user_com_labels,
         item_com_labels=config.item_com_labels)
+    user_labels_Leiden_matrix_mask = np.loadtxt(f'dataset/{config.dataset_name}/saved/user_labels_matrix_mask.csv',
+                                                delimiter=',')
+    item_labels_Leiden_matrix_mask = np.loadtxt(f'dataset/{config.dataset_name}/saved/item_labels_matrix_mask.csv',
+                                                delimiter=',')
 
     config.user_community_connectivity_matrix = user_community_connectivity_matrix
     config.item_community_connectivity_matrix = item_community_connectivity_matrix
 
     config.user_community_connectivity_matrix_distribution = user_community_connectivity_matrix / torch.sum(
-        user_community_connectivity_matrix, dim=1, keepdim=True)
+        user_community_connectivity_matrix, dim=-1, keepdim=True)
     config.item_community_connectivity_matrix_distribution = item_community_connectivity_matrix / torch.sum(
-        item_community_connectivity_matrix, dim=1, keepdim=True)
+        item_community_connectivity_matrix, dim=-1, keepdim=True)
 
-    user_labels_Leiden_matrix_mask = np.loadtxt(f'dataset/{config.dataset_name}/saved/user_labels_matrix_mask.csv',
-                                                delimiter=',')
-    item_labels_Leiden_matrix_mask = np.loadtxt(f'dataset/{config.dataset_name}/saved/item_labels_matrix_mask.csv',
-                                                delimiter=',')
+    # config.user_community_connectivity_matrix_distribution = calculate_community_connectivity_dist(user_labels_Leiden_matrix_mask, config)
+    # config.item_community_connectivity_matrix_distribution = calculate_community_connectivity_dist(item_labels_Leiden_matrix_mask, config)
 
     (config.biased_user_edges_mask,
      config.biased_item_edges_mask) = get_biased_edges_mask(
