@@ -146,6 +146,10 @@ class RecommendationDataset:
         else:
             raise ValueError(f"Unknown dataset: {self.name}")
 
+        self.raw_df = self.raw_df.drop_duplicates(subset=['user_id', 'item_id']).reset_index(drop=True)
+        # we shuffle later with indices
+        self.raw_df = self.raw_df.sample(frac=1, random_state=42).reset_index(drop=True)
+
         self._compute_statistics()
         return self
 
@@ -160,8 +164,10 @@ class RecommendationDataset:
             self.raw_df = pd.read_csv(ratings_file, sep='::',
                                       names=['user_id', 'item_id', 'rating'],
                                       usecols=[0, 1, 2], header=0)
-        # we shuffle later with indices
-        self.raw_df = self.raw_df.sample(frac=1, random_state=42).reset_index(drop=True)
+        elif self.name == 'ml-20m':
+            ratings_file = os.path.join(self.data_path, 'ratings.csv')
+            self.raw_df = pd.read_csv(ratings_file, usecols=['user_id', 'item_id', 'rating'],
+                                      names=['user_id', 'item_id', 'rating'], header=0)
 
     def _load_lfm(self):
         if self.name == 'lastfm':
@@ -185,7 +191,7 @@ class RecommendationDataset:
         across train/validation/test splits
         """
         ratings_df = self.raw_df.copy()
-        min_interactions = 5 if self.name.startswith('ml-') else 10
+        min_interactions = 5 if self.name.startswith('ml-') else 5  # for lastfm, minimum interactions per user/item
         min_rating = 4 if self.name.startswith('ml-') else 2  # for lastfm, rating is number of listening events
 
         user_counts = ratings_df['user_id'].value_counts()
@@ -347,7 +353,7 @@ class RecommendationDataset:
 
     def _create_graph_structures(self, rating_weights=None):
         """Create graph structures for graph-based models"""
-        self.complete_edge_index, self.complete_edge_weight = self.create_bipartite_graph(rating_weights)
+        self.complete_edge_index, self.complete_edge_weight = self.create_bipartite_graph(df=self.complete_df, edge_weights=rating_weights)
 
     def _build_interaction_mappings(self):
         """Build user-item interaction mappings"""
@@ -468,9 +474,9 @@ class RecommendationDataset:
             self.complete_edge_weight = self.complete_edge_weight.to(device)
         return self
 
-    def create_bipartite_graph(self, edge_weights=None):
+    def create_bipartite_graph(self, df, edge_weights=None, device='cpu'):
         """Create bipartite graph with edge weights based on ratings"""
-        df = self.complete_df
+        # df = self.complete_df
         users = df['user_encoded'].values
         items = df['item_encoded'].values + self.num_users  # Offset items by num_users
         if edge_weights is None:
@@ -487,7 +493,7 @@ class RecommendationDataset:
             dtype=torch.float
         )
 
-        return edge_index, edge_weight
+        return edge_index.to(device), edge_weight.to(device)
 
     def get_node_degrees(self):
         """Get degrees of users and items in the graph"""

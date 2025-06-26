@@ -3,8 +3,6 @@ from collections import defaultdict
 
 from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 
-import wandb
-from wandb_logging import log_metrics_to_wandb
 from evaluation import evaluate_current_model_ndcg, evaluate_current_model_ndcg_vectorized
 from dataset import RecommendationDataset, sample_negative_items, prepare_adj_tensor, prepare_training_data
 from models import calculate_bpr_loss
@@ -48,8 +46,8 @@ def train_itemknn(model, dataset, config, verbose=True):
     if len(dataset.val_df) > 0:
         from evaluation import evaluate_current_model_ndcg
         validation_ndcg = evaluate_current_model_ndcg(model, dataset, model_type='ItemKNN', k=10)
-        print(f"Validation NDCG@10: {validation_ndcg:.4f}"
-              f"Training time: {training_time:.2f} seconds"
+        print(f"Validation NDCG@10: {validation_ndcg:.4f}, \n"
+              f"Training time: {training_time:.2f} seconds, \n"
               f"Average neighbors per item: {calculate_avg_neighbors(model.similarity_matrix):.2f}")
     return model
 
@@ -61,6 +59,7 @@ def calculate_similarity_sparsity(similarity_matrix):
     sparsity = 1 - (non_zero_elements / total_elements)
     return sparsity
 
+
 def prepare_multivae_sparse_matrices(dataset):
     train_matrix = create_sparse_user_item_matrix(
         dataset.train_df, dataset.num_users, dataset.num_items)
@@ -69,6 +68,7 @@ def prepare_multivae_sparse_matrices(dataset):
         dataset.val_df, dataset.num_users, dataset.num_items)
 
     return train_matrix, val_matrix
+
 
 def create_sparse_user_item_matrix(data_df, num_users, num_items):
     matrix = csr_matrix(
@@ -84,6 +84,9 @@ def sparse_to_dense_batch(sparse_matrix, user_indices, device):
 
 def multivae_loss(recon_batch, rating_weights, mu, logvar, anneal=1.0):
     BCE = -torch.mean(torch.sum(torch.nn.functional.log_softmax(recon_batch, 1) * rating_weights, dim=1))
+    # recon_sigmoid = torch.sigmoid(recon_batch)
+    # BCE = -torch.mean(torch.sum(rating_weights * torch.log(recon_sigmoid + 1e-8) +
+    #                            (1-rating_weights) * torch.log(1-recon_sigmoid + 1e-8), dim=1))
     KLD = -0.5 * torch.mean(torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=1))
 
     return BCE + anneal * KLD
@@ -113,7 +116,7 @@ def train_multivae_epoch_sparse(model, train_sparse_matrix, optimizer, batch_siz
 
     # KL annealing schedule
     anneal_cap = getattr(config, 'anneal_cap', 0.4)
-    kl_weight = min(anneal_cap, 1.0 * epoch / config.total_anneal_steps)
+    kl_weight = min(anneal_cap, 1.0 * (epoch + 1) / config.total_anneal_steps)
 
     # Create user indices for batching
     user_indices = np.random.permutation(num_users)
@@ -267,8 +270,7 @@ def train_multivae(model, dataset, config, optimizer, device, verbose=True):
     return model
 
 
-def train_lightgcn(model, dataset, config, optimizer, user_positive_items,
-                   device, verbose=True):
+def train_lightgcn(model, dataset, config, optimizer, user_positive_items, device, verbose=True):
     """
     General LightGCN training function that handles the complete training loop.
 
@@ -277,11 +279,8 @@ def train_lightgcn(model, dataset, config, optimizer, user_positive_items,
         dataset: Dataset object containing train/val/test data
         config: Configuration object with hyperparameters
         optimizer: PyTorch optimizer
-        scheduler: Learning rate scheduler
         user_positive_items: Dict mapping users to their positive items
         device: Training device (cuda/cpu)
-        stage: 'cv' for cross-validation, 'full_train' for final training
-        fold_num: Current fold number for logging (None for final training)
         verbose: Whether to print training progress
 
     Returns:
@@ -306,27 +305,30 @@ def train_lightgcn(model, dataset, config, optimizer, user_positive_items,
     best_model_state = None
 
     # Pre-convert training data to GPU or CPU based on size
-    if len(dataset.train_df) < 200000:
+    if len(dataset.train_df) < 400000:
         all_train_users, all_train_items, train_indices = prepare_training_data(
             dataset.train_df, device=device)
     else:
+        dataset.device = 'cpu'
         all_train_users, all_train_items, train_indices = prepare_training_data(
             dataset.train_df, device='cpu')
 
-    num_train = len(train_indices)
     adj_tens = prepare_adj_tensor(dataset)
+    dataset.train_edge_index, dataset.training_edge_weight = dataset.create_bipartite_graph(df=dataset.train_df, device=device)
+
     model.train()
+
+    # config.train_mask = np.concatenate(config.train_mask)  # Ensure train_mask is bidirectional
+    # dataset.train_mask = config.train_mask
 
     for epoch in range(config.epochs):
         if config.use_suppression:
-            edge_weights_modified = community_edge_suppression(adj_tens, config)
+            edge_weights_modified = community_edge_suppression(adj_tens[config.train_mask], config)
             # bidirectional edges for LightGCN
             edge_weights_modified = torch.concatenate((edge_weights_modified, edge_weights_modified))
-            current_edge_weight = edge_weights_modified.to(device)
+            dataset.current_edge_weight = edge_weights_modified.to(device)
         else:
-            current_edge_weight = dataset.complete_edge_weight
-
-        dataset.current_edge_weight = current_edge_weight
+            dataset.current_edge_weight = dataset.training_edge_weight.to(device)
 
         # Training step
         epoch_loss = train_lightgcn_epoch(
@@ -376,8 +378,8 @@ def train_lightgcn_epoch(model, dataset, config, optimizer, all_train_users, all
     train_indices_shuffled = train_indices[perm]
 
     # Process in big batches of 200k to manage memory
-    for start_idx in range(0, num_train, 200000):
-        biggi_batch_indices = train_indices_shuffled[start_idx:start_idx + 200000]
+    for start_idx in range(0, num_train, 400000):
+        biggi_batch_indices = train_indices_shuffled[start_idx:start_idx + 400000]
         biggi_train_users = all_train_users[biggi_batch_indices].to(device)
         biggi_train_items = all_train_items[biggi_batch_indices].to(device)
         biggi_batch_indices = biggi_batch_indices.to(device)
@@ -394,13 +396,14 @@ def train_lightgcn_epoch(model, dataset, config, optimizer, all_train_users, all
             batch_neg_items = dataset.sample_negative_items(user_ids=batch_users)
 
             # Forward pass
-            user_emb, item_emb = model(dataset.complete_edge_index, dataset.current_edge_weight)
+            # user_emb, item_emb = model(dataset.complete_edge_index, dataset.current_edge_weight)
+            user_emb, item_emb = model(dataset.train_edge_index, dataset.current_edge_weight)
             batch_user_emb = user_emb[batch_users.long()]
             batch_pos_item_emb = item_emb[batch_pos_items.long()]
             batch_neg_item_emb = item_emb[batch_neg_items.long()]
 
             # Calculate loss
-            bpr_loss = calculate_bpr_loss(batch_user_emb, batch_pos_item_emb, batch_neg_item_emb)
+            bpr_loss = calculate_bpr_loss(batch_user_emb, batch_pos_item_emb, batch_neg_item_emb, dataset.current_edge_weight[batch_pos_items])
 
             # Add L2 regularization
             l2_reg = config.reg * (
@@ -465,7 +468,7 @@ def calculate_avg_neighbors(similarity_matrix):
     return neighbors_per_item.mean()
 
 
-def train_model_itemknn(dataset, model, config, stage='cv', fold_num=None, verbose=True):
+def train_model_itemknn(dataset, model, config, stage='cv', verbose=True):
     """
     Main training function for ItemKNN that sets up the training environment and calls train_itemknn.
 
@@ -474,7 +477,6 @@ def train_model_itemknn(dataset, model, config, stage='cv', fold_num=None, verbo
         model: ItemKNN model to train
         config: Configuration object
         stage: 'cv' for cross-validation, 'full_train' for final training
-        fold_num: Current fold number for logging (None for final training)
         verbose: Whether to print training progress
 
     Returns:
@@ -493,14 +495,13 @@ def train_model_itemknn(dataset, model, config, stage='cv', fold_num=None, verbo
         dataset=dataset,
         config=config,
         stage=stage,
-        fold_num=fold_num,
         verbose=verbose
     )
 
     return trained_model
 
 
-def train_model(dataset, model, config, fold_num=None, verbose=True):
+def train_model(dataset, model, config, verbose=True):
     """
     Main training function that sets up the training environment and calls train_lightgcn.
 
@@ -508,7 +509,6 @@ def train_model(dataset, model, config, fold_num=None, verbose=True):
         dataset: Dataset object
         model: Model to train
         config: Configuration object
-        fold_num: Current fold number for logging (None for final training)
         verbose: Whether to print training progress
 
     Returns:
@@ -522,7 +522,6 @@ def train_model(dataset, model, config, fold_num=None, verbose=True):
             model=model,
             dataset=dataset,
             config=config,
-            fold_num=fold_num,
             verbose=verbose
         )
         return trained_model
@@ -562,6 +561,3 @@ def train_model(dataset, model, config, fold_num=None, verbose=True):
             verbose=verbose)
 
         return trained_model
-
-
-

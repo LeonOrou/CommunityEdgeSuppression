@@ -21,7 +21,6 @@ class LightGCN(nn.Module):
         self.user_embedding = nn.Embedding(num_users, embedding_dim)
         self.item_embedding = nn.Embedding(num_items, embedding_dim)
 
-        # Initialize embeddings with Xavier uniform
         nn.init.normal_(self.user_embedding.weight, std=0.1)
         nn.init.normal_(self.item_embedding.weight, std=0.1)
 
@@ -67,7 +66,7 @@ class LightGCN(nn.Module):
 
         return out
 
-    def predict(self, user_indices, item_indices):
+    def predict(self, user_indices=None, item_indices=None):
         """
         Predict scores for given user-item pairs.
         :param user_indices: Tensor of user indices.
@@ -76,16 +75,17 @@ class LightGCN(nn.Module):
         """
         user_emb = self.user_embedding(user_indices) if user_indices is not None else self.user_embedding.weight
         item_emb = self.item_embedding(item_indices) if item_indices is not None else self.item_embedding.weight
-        return user_emb @ item_emb.T
+        return torch.matmul(user_emb, item_emb.T)
 
 
-def calculate_bpr_loss(user_emb, pos_item_emb, neg_item_emb):
+def calculate_bpr_loss(user_emb, pos_item_emb, neg_item_emb, pos_ratings):
     """Bayesian Personalized Ranking (BPR) loss"""
     pos_scores = (user_emb * pos_item_emb).sum(dim=1)
     neg_scores = (user_emb * neg_item_emb).sum(dim=1)
-    loss = torch.mean(torch.nn.functional.softplus(neg_scores - pos_scores))
+    loss = torch.nn.functional.softplus(neg_scores - pos_scores)
+    weighted_loss = loss * pos_ratings
 
-    return loss
+    return torch.mean(weighted_loss)
 
 
 import numpy as np
@@ -421,7 +421,8 @@ class MultiVAE(nn.Module):
         return self.decode(z), mu, logvar
 
     def encode(self, input):
-        h = F.normalize(input)
+        # h = F.normalize(input)
+        h = input
         h = self.drop(h)
 
         for i, layer in enumerate(self.q_layers):
@@ -471,13 +472,6 @@ class MultiVAE(nn.Module):
 
             # Normal Initialization for Biases
             layer.bias.data.normal_(0.0, 0.001)
-
-
-def multivae_loss(recon_batch, rating_weights, mu, logvar, anneal=1.0):
-    BCE = -torch.mean(torch.sum(torch.nn.functional.log_softmax(recon_batch, 1) * rating_weights, dim=1))
-    KLD = -0.5 * torch.mean(torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=1))
-
-    return BCE + anneal * KLD
 
 
 def get_model(dataset, config):

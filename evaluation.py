@@ -25,10 +25,6 @@ def evaluate_model(model, dataset, config, stage='cv', k_values=[10, 20, 50, 100
 
     encoded_to_genres = load_genre_mapping(dataset)
 
-    if stage == 'full_train':
-        dataset.train_df = dataset.train_val_df
-        dataset.val_df = dataset.test_df
-
     train_user_items = dataset.train_df.groupby('user_encoded')['item_encoded'].apply(list).to_dict()
 
     # Initialize metric storage for each k_values
@@ -59,7 +55,7 @@ def evaluate_model(model, dataset, config, stage='cv', k_values=[10, 20, 50, 100
     with torch.no_grad():
         if config.model_name == 'LightGCN':
             # LightGCN evaluation
-            user_emb, item_emb = model(dataset.complete_edge_index, dataset.current_edge_weight)
+            user_emb, item_emb = model(dataset.complete_edge_index, dataset.complete_edge_weight)
 
             for user_id, true_items in user_test_items.items():
                 if user_id >= dataset.num_users:
@@ -230,7 +226,7 @@ def _calculate_final_results(k_values, metrics_by_k, item_recommendation_freq_by
         else:
             gini_index = 0.0
 
-        popularity_calibration = calculate_popularity_calibration(
+        relative_label_entropy = calculate_relative_label_entropy(
             all_global_recommendations_by_k[k_val], dataset
         )
 
@@ -261,7 +257,7 @@ def _calculate_final_results(k_values, metrics_by_k, item_recommendation_freq_by
             'normalized_genre_entropy': np.mean(
                 normalized_genre_entropy_scores) if normalized_genre_entropy_scores else 0.0,
             'unique_genres_count': np.mean(unique_genres_count_scores) if unique_genres_count_scores else 0.0,
-            'popularity_calibration': popularity_calibration,
+            'relative_label_entropy': relative_label_entropy,
             'user_community_bias': user_community_bias
         }
 
@@ -283,13 +279,13 @@ def evaluate_current_model_ndcg(model, dataset, model_type='LightGCN', k=10):
 
     with torch.no_grad():
         if model_type == 'LightGCN':
+            # dataset.val_edge_index, dataset.val_edge_weight = dataset.create_bipartite_graph(df=dataset.val_df)
             user_emb, item_emb = model(dataset.complete_edge_index, dataset.complete_edge_weight)
-
             for user_id, true_items in user_val_items.items():
                 if user_id >= dataset.num_users:
                     continue
 
-                user_embedding = user_emb[user_id:user_id + 1]
+                user_embedding = user_emb[user_id]
                 scores = torch.matmul(user_embedding, item_emb.T).squeeze().cpu().numpy()
 
                 # Exclude items that the user interacted with during training
@@ -868,7 +864,7 @@ def calculate_additional_metrics(top_k_items, encoded_to_genres, dataset, all_re
 
     # Popularity Calibration (if global recommendations provided)
     if all_recommended_items_global is not None:
-        metrics['popularity_calibration'] = calculate_popularity_calibration(all_recommended_items_global, dataset)
+        metrics['relative_label_entropy'] = calculate_relative_label_entropy(all_recommended_items_global, dataset)
 
     return metrics
 
@@ -1124,7 +1120,7 @@ def get_batch_user_scores(model, dataset, config, batch_user_ids, train_user_ite
 
     with torch.no_grad():
         if config.model_name == 'LightGCN':
-            user_emb, item_emb = model(dataset.complete_edge_index, dataset.current_edge_weight)
+            user_emb, item_emb = model(dataset.complete_edge_index, dataset.complete_edge_weight)
 
             # Get embeddings for batch users only
             batch_user_indices = torch.tensor(batch_user_ids, device=user_emb.device)
@@ -1136,8 +1132,8 @@ def get_batch_user_scores(model, dataset, config, batch_user_ids, train_user_ite
 
         elif config.model_name == 'MultiVAE':
             train_matrix = csr_matrix(
-                (dataset.train_df['rating'].values,
-                 (dataset.train_df['user_encoded'].values, dataset.train_df['item_encoded'].values)),
+                (dataset.val_df['rating'].values,
+                 (dataset.val_df['user_encoded'].values, dataset.val_df['item_encoded'].values)),
                 shape=(dataset.num_users, dataset.num_items),
                 dtype=np.float32)
 
@@ -1452,7 +1448,7 @@ def aggregate_batch_results(results, k_values, dataset):
             gini_index = 0.0
 
         # Popularity calibration
-        popularity_calibration = calculate_popularity_calibration_sparse(
+        relative_label_entropy = calculate_relative_label_entropy(
             metrics['all_global_recommendations'], dataset
         )
 
@@ -1481,14 +1477,14 @@ def aggregate_batch_results(results, k_values, dataset):
                 'normalized_genre_entropy_scores'] else 0.0,
             'unique_genres_count': np.mean(metrics['unique_genres_count_scores']) if metrics[
                 'unique_genres_count_scores'] else 0.0,
-            'popularity_calibration': popularity_calibration,
+            'relative_label_entropy': relative_label_entropy,
             'user_community_bias': user_community_bias
         }
 
     return final_results
 
 
-def calculate_popularity_calibration_sparse(all_recommended_items, dataset, num_bins=10):
+def calculate_relative_label_entropy(all_recommended_items, dataset):
     """
     Calculate popularity calibration - measures how well the recommendation popularity
     distribution matches the catalog popularity distribution using KL divergence.
@@ -1525,6 +1521,7 @@ def calculate_popularity_calibration_sparse(all_recommended_items, dataset, num_
         return 0.0  # Perfect calibration if all items have same popularity
 
     # Use equal-width bins across the popularity range
+    num_bins = len(dataset.val_df)  # Use number of validation items as number of bins
     bins = np.linspace(min_pop, max_pop, num_bins + 1)
 
     # Calculate normalized histograms (probability distributions)

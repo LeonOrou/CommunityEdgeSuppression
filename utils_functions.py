@@ -42,23 +42,24 @@ def community_edge_suppression(adj_tens, config):
     :param suppress_power_nodes_first: bool, whether to drop edges from power nodes or not
     :return: adj_tens: torch.tensor, modified adjacency tensor without dropped edges (dropped via mask)
     """
+    adj_tens = adj_tens.clone()
+    device = adj_tens.device
 
-    power_users_idx = config.power_users_ids
-    power_items_idx = config.power_items_ids
+    power_users_idx = config.power_users_ids.to(device)
+    power_items_idx = config.power_items_ids.to(device)
     biased_user_edges_mask = config.biased_user_edges_mask[config.train_mask]  # mask current CV fold
     biased_item_edges_mask = config.biased_item_edges_mask[config.train_mask]
+    # biased_user_edges_mask = config.biased_user_edges_mask.to(device)
+    # biased_item_edges_mask = config.biased_item_edges_mask.to(device)
     suppress_power_nodes_first = config.suppress_power_nodes_first
     community_suppression = config.community_suppression
     users_dec_perc_suppress = config.users_dec_perc_suppr
     items_dec_perc_suppress = config.items_dec_perc_suppr
 
-    adj_tens = adj_tens.clone()
-    device = adj_tens.device
-
     suppress_mask = torch.zeros(adj_tens.shape[0], dtype=torch.bool, device=adj_tens.device)
 
     if users_dec_perc_suppress > 0.0:
-        total_user_suppress_count = int(adj_tens.shape[0] * users_dec_perc_suppress)
+        total_user_suppress_count = int(len(config.train_mask) * users_dec_perc_suppress)
 
         in_com_user_indices = torch.nonzero(biased_user_edges_mask).flatten()
 
@@ -431,6 +432,8 @@ def get_community_data(config, adj_np):
         adj_np=adj_np,
         save_path=f'dataset/{config.dataset_name}/saved',
         get_probs=True)
+    config.user_com_labels.reshape(-1, 1)  # ensure shape is (n_users, 1)
+    config.item_com_labels.reshape(-1, 1)  # ensure shape is (n_items, 1)
 
     config.item_labels_matrix_mask = torch.tensor(np.loadtxt(f'dataset/{config.dataset_name}/saved/item_labels_matrix_mask.csv',
                                                         delimiter=','), dtype=torch.long, device=config.device)
