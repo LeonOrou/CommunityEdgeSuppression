@@ -44,9 +44,9 @@ def plot_community_bias(user_biases, save_path='images/community_biases.png',
                           patch_artist=True,
                           widths=0.7,
                           capprops=dict(linewidth=1.5),)
-    #
+
     # # Customize box colors
-    colors = ['white', 'white', 'white']
+    colors = ['lightblue', 'lightgreen', 'lightcoral']
     for patch, color in zip(box_plot['boxes'], colors):
         patch.set_facecolor(color)
         patch.set_alpha(0.7)
@@ -58,7 +58,7 @@ def plot_community_bias(user_biases, save_path='images/community_biases.png',
         plt.setp(box_plot[element], color='black', linewidth=1.5)
 
     for i, avg in enumerate(averages):
-        ax.text(i + 1, 0.05, f'μ = {avg:.4f}',
+        ax.text(i + 1, -0.05, f'μ = {avg:.4f}',
                 ha='center', va='top', fontsize=18, fontweight='bold',
                 bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8))
 
@@ -71,7 +71,7 @@ def plot_community_bias(user_biases, save_path='images/community_biases.png',
     ax.tick_params(axis='y', which='major', labelsize=22)
 
     # Set y-axis limits with some padding
-    ax.set_ylim(-0.05, 1.05)  # Increased upper limit for annotations
+    ax.set_ylim(-0.1, 1.05)  # Increased upper limit for annotations
 
     # Enhanced grid
     ax.grid(True, linestyle='-', alpha=0.3, linewidth=0.5)
