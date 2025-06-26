@@ -52,7 +52,7 @@ class Config:
         """Setup model-specific configurations."""
         if self.model_name == 'LightGCN':
             self.batch_size = 1024
-            self.learning_rate = 5e-3
+            self.learning_rate = 1e-2
             self.epochs = 200  # because it's different for each model
             self.n_layers = 3
             self.embedding_dim = 128
