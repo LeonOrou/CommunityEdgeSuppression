@@ -27,11 +27,17 @@ def get_community_labels(config, adj_np, save_path='dataset/ml-100k/saved', get_
     adj_csr = sp.csr_matrix((adj_np[:, 2].astype(float), (adj_np[:, 0].astype(int), adj_np[:, 1].astype(int))))
 
     if config.dataset_name == 'ml-100k':
-        resolution = 1.4  # 1.6 results in 19 communities = number of genres
+        resolution = 1.635
     elif config.dataset_name == 'ml-1m':
-        resolution = 1.6
+        resolution = 1.5625
     else:  # config.dataset_name == 'lastfm':
-        resolution = 1.6
+        resolution = 1.71
+
+    # for i in [1.3, 1.35, 1.4, 1.45, 1.5, 1.55, 1.56, 1.5625, 1.565, 1.5675, 1.57, 1.58, 1.59, 1.6, 1.62, 1.635, 1.65, 1.7, 1.71, 1.72, 1.73, 1.74, 1.75, 1.8, 1.85, 1.9, 1.95, 2.0]:
+    #     detect_obj = Leiden(resolution=i, return_aggregate=False, sort_clusters=True)
+    #     detect_obj.fit(adj_csr, force_bipartite=force_bipartite)
+    #     info = f'Resolution: {i}, Number of user clusters: {detect_obj.probs_row_.shape[1]}, Number of item clusters: {detect_obj.probs_col_.shape[1]}, Modularity float: {detect_obj.log}'
+    #     print(info)
 
     detect_obj = Leiden(resolution=resolution, return_aggregate=False, sort_clusters=True)
     detect_obj.fit(adj_csr, force_bipartite=force_bipartite)
@@ -70,8 +76,8 @@ def get_community_labels(config, adj_np, save_path='dataset/ml-100k/saved', get_
                                                                   alpha=0.05)
 
     # Replace -1 with another value (e.g., 0 or a special flag like -99)
-    user_labels = np.where(user_probs_sorted[:, 0] < user_community_thresholds, -1, user_labels)
-    item_labels = np.where(item_probs_sorted[:, 0] < item_community_thresholds, -1, item_labels)
+    # user_labels = np.where(user_probs_sorted[:, 0] < user_community_thresholds, -1, user_labels)
+    # item_labels = np.where(item_probs_sorted[:, 0] < item_community_thresholds, -1, item_labels)
 
     user_labels_sorted_matrix = np.full((user_labels.shape[0], user_probs.shape[1]), fill_value=-1, dtype=np.int64)
     item_labels_sorted_matrix = np.full((item_labels.shape[0], item_probs.shape[1]), fill_value=-1, dtype=np.int64)
@@ -80,8 +86,13 @@ def get_community_labels(config, adj_np, save_path='dataset/ml-100k/saved', get_
     item_labels_matrix_mask = np.zeros(item_labels_sorted_matrix.shape, dtype=np.int64)
 
     for i in range(0, user_probs.shape[1]):
+    # for i in range(1):  # we dont use multiple memberships anymore as soft clustering is bullshit
         user_labels_i = np.where(user_probs_sorted[:, i] > user_community_thresholds, user_probs_argsorted[:, i], -1)
         item_labels_i = np.where(item_probs_sorted[:, i] > item_community_thresholds, item_probs_argsorted[:, i], -1)
+        ### testing only one label
+        # user_labels_i = user_labels
+        # item_labels_i = item_labels
+        ###
 
         if np.all(user_labels_i == -1) and np.all(item_labels_i == -1):
             break
@@ -306,12 +317,17 @@ def get_user_item_community_connectivity_matrices(adj_tens, user_com_labels, ite
     user_communities_each_item = torch.zeros((nr_items, nr_user_communities), device=device)
 
     # Get number of columns in community label matrices
+    ### testing one label with unsqueeze()
+    # user_com_labels.unsqueeze(dim=1)
+    # item_com_labels.unsqueeze(dim=1)
     user_com_cols = user_com_labels.size(1)
     item_com_cols = item_com_labels.size(1)
+    ###
 
     # Process each user community column
     for col in range(user_com_cols):
         user_communities = user_com_labels[users, col]
+        # user_communities = user_com_labels[users]
         valid_mask = user_communities >= 0  # Skip -1 values (no community assignment)
 
         if not valid_mask.any():
@@ -339,6 +355,7 @@ def get_user_item_community_connectivity_matrices(adj_tens, user_com_labels, ite
     # Process each item community column
     for col in range(item_com_cols):
         item_communities = item_com_labels[items, col]
+        # item_communities = item_com_labels[items]
         valid_mask = item_communities >= 0  # Skip -1 values (no community assignment)
 
         if not valid_mask.any():

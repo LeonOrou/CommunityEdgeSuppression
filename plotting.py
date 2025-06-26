@@ -7,63 +7,80 @@ import torch
 import torch_geometric
 
 
-def plot_community_bias(user_biases, item_biases, save_path=None, dataset_name=''):
+def plot_community_bias(user_biases, save_path='images/community_biases.png',
+                        dataset_names=['Ml-100K', 'Ml-1M', 'LastFM']):
     """
-    Plot the community biases for users and items with enhanced formatting.
+    Plot the community biases for users and items with enhanced formatting and average display.
 
-    :param user_biases: torch.tensor, community bias for users
-    :param item_biases: torch.tensor, community bias for items
+    :param user_biases: list of torch.tensors, community bias for users and each dataset
     :param save_path: str or None, path to save the figure
-    :param dataset_name: str, name of the dataset for saving figures
+    :param dataset_names: list of str, names of the datasets
     """
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import torch
 
-    if isinstance(user_biases, torch.Tensor):
-        user_biases = user_biases.cpu().numpy()
-        item_biases = item_biases.cpu().numpy()
+    # Process and clean the data
+    processed_biases = []
+    averages = []
 
-    # Remove nans from users who don't have any community (all below threshold) => results in division by zero
-    user_biases = user_biases[~np.isnan(user_biases)]
-    item_biases = item_biases[~np.isnan(item_biases)]
+    for i, user_bias in enumerate(user_biases):
+        if isinstance(user_bias, torch.Tensor):
+            bias_array = user_bias.cpu().numpy()
+        else:
+            bias_array = user_bias
+
+        # Remove nans from users who don't have any community (all below threshold)
+        clean_bias = bias_array[~np.isnan(bias_array)]
+        processed_biases.append(clean_bias)
+        averages.append(np.mean(clean_bias))
 
     # Create figure with better size and DPI for clarity
-    plt.figure(figsize=(10, 8), dpi=100)
+    fig, ax = plt.subplots(figsize=(12, 12), dpi=100)
 
     # Create boxplot with enhanced styling
-    box_plot = plt.boxplot(user_biases,
-                           labels=['User Biases'],
-                           patch_artist=True,  # Enable filling of boxes
-                           widths=0.4,
-                           capprops=dict(linewidth=1.5))
-    # Customize box colors
-    colors = ['lightblue']
+    box_plot = ax.boxplot(processed_biases,
+                          labels=dataset_names,
+                          patch_artist=True,
+                          widths=0.7,
+                          capprops=dict(linewidth=1.5),)
+    #
+    # # Customize box colors
+    colors = ['white', 'white', 'white']
     for patch, color in zip(box_plot['boxes'], colors):
         patch.set_facecolor(color)
         patch.set_alpha(0.7)
+    # set mean line orange colour
+    plt.setp(box_plot['means'], color='orange', linewidth=2)
 
     # Customize other elements
     for element in ['whiskers', 'fliers', 'medians', 'caps']:
         plt.setp(box_plot[element], color='black', linewidth=1.5)
 
-    # plt.title(f'Community Biases in {dataset_plt_name}',
-    #           fontsize=18, fontweight='bold', pad=20)
-    plt.ylabel('Bias [0, 1]', fontsize=22)
+    for i, avg in enumerate(averages):
+        ax.text(i + 1, 0.05, f'μ = {avg:.4f}',
+                ha='center', va='top', fontsize=18, fontweight='bold',
+                bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8))
+
+    # Main plot styling
+    ax.set_ylabel('Bias [0, 1]', fontsize=22)
+    ax.set_xlabel('Datasets', fontsize=22)
 
     # Improve tick labels
-    plt.tick_params(axis='x', which='major', labelsize=22, pad=10)
-    plt.tick_params(axis='y', which='major', labelsize=22)
+    ax.tick_params(axis='x', which='major', labelsize=22, pad=10)
+    ax.tick_params(axis='y', which='major', labelsize=22)
 
     # Set y-axis limits with some padding
-    plt.ylim(-0.05, 1.05)
+    ax.set_ylim(-0.05, 1.05)  # Increased upper limit for annotations
 
     # Enhanced grid
-    plt.grid(True, linestyle='-', alpha=0.3, linewidth=0.5)
+    ax.grid(True, linestyle='-', alpha=0.3, linewidth=0.5)
 
     # Add some spacing around the plot
     plt.tight_layout(pad=2)
 
     if save_path:
-        plt.savefig(f"images/{dataset_name}_community_bias.png",
-                    dpi=300, bbox_inches='tight', facecolor='white')
+        plt.savefig(save_path, dpi=300, bbox_inches='tight', facecolor='white')
     plt.show()
 
 
