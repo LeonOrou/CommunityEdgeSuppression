@@ -253,9 +253,7 @@ def visualize_wandb_metrics():
     return df
 
 
-if __name__ == "__main__":
-
-    df = visualize_wandb_metrics()
-    # Also save the data for further analysis
-    df.to_csv('wandb_metrics_summary.csv', index=False)
+df = visualize_wandb_metrics()
+# Also save the data for further analysis
+df.to_csv('wandb_metrics_summary.csv', index=False)
 
