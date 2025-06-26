@@ -412,18 +412,18 @@ def hyperparameter_search():
     # Define hyperparameter spaces
     hyperparams = {
         'LightGCN': {
-            'embedding_dim': [128],
-            'n_layers': [3],
+            'embedding_dim': [64, 128, 256],
+            'n_layers': [3, 4],
             'batch_size': [512]
         },
         'ItemKNN': {
-            'topk': [125],
-            'shrink': [50]
+            'topk': [125, 50, 100, 150, 200],
+            'shrink': [50, 25, 75, 100]
         },
         'MultiVAE': {
-            'hidden_dimension': [800],
-            'latent_dimension': [200],
-            'anneal_cap': [0.6, 0.7, 0.8, 0.9, 1],
+            'hidden_dimension': [600, 800, 1000],
+            'latent_dimension': [200, 400],
+            'anneal_cap': [0.2, 0.3, 0.4],
             'batch_size': [2048]  # Larger batches for efficiency
         }
     }

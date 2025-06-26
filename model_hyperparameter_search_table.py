@@ -1,165 +1,173 @@
-import os
-import wandb
-import pandas as pd
-from datetime import datetime
-import re
 import json
 import glob
-from tabulate import tabulate
-import yaml
+import pandas as pd
+from typing import Dict, List, Tuple
 
 
-def get_hyperparameter_results():
-    print("Extracting runs from local wandb/ folder...")
-    runs = []
-    run_folders = glob.glob(os.path.join("wandb", "run-*"))
-    print(f"Found {len(run_folders)} total local runs")
-    for folder in run_folders:
-        config_path = os.path.join(folder, "files/config.yaml")
-        summary_path = os.path.join(folder, "files/wandb-summary.json")
-        if not os.path.exists(config_path) or not os.path.exists(summary_path):
+def parse_log_file(filepath: str) -> Tuple[Dict, float]:
+    """
+    Parse a log file and extract hyperparameters and cv_avg NDCG@10.
+
+    Args:
+        filepath: Path to the log file
+
+    Returns:
+        Tuple of (hyperparameters dict, ndcg@10 value)
+    """
+    hyperparams = {}
+    cv_avg_ndcg = None
+
+    with open(filepath, 'r') as f:
+        lines = f.readlines()
+
+    for line_num, line in enumerate(lines):
+        try:
+            # Skip empty lines
+            line = line.strip()
+            if not line:
+                continue
+
+            # Parse the JSON directly - each line should be valid JSON
+            data = json.loads(line)
+
+            # Extract hyperparameters from experiment_config (first line)
+            if data.get('event') == 'experiment_config':
+                hyperparams = {
+                    'model_name': data.get('model_name'),
+                    'shrink': data.get('shrink'),
+                    'item_knn_topk': data.get('item_knn_topk'),
+                    'hidden_dimension': data.get('hidden_dimension'),
+                    'latent_dimension': data.get('latent_dimension'),
+                    'anneal_cap': data.get('anneal_cap'),
+                    'embedding_dim': data.get('embedding_dim'),
+                    'n_layers': data.get('n_layers')
+                }
+
+            # Extract cv_avg NDCG@10 (last metrics_report entry)
+            elif data.get('event') == 'metrics_report' and data.get('stage') == 'cv_avg':
+                cv_avg_ndcg = data['metrics']['top@10']['ndcg']
+
+        except json.JSONDecodeError as e:
+            # Skip lines that are not valid JSON (like the dataset statistics line)
+            if line_num == 1:  # Second line is often dataset statistics
+                continue
+            print(f"JSON decode error in {filepath} at line {line_num + 1}: {e}")
             continue
-        with open(config_path, "r") as f:
-            config = yaml.safe_load(f)
-        with open(summary_path, "r") as f:
-            summary = json.load(f)
-        # Use file modification time as created_at timestamp
-        created_at = datetime.fromtimestamp(os.path.getmtime(config_path))
-        run = {"config": config, "summary": summary, "created_at": created_at}
-        runs.append(run)
+        except Exception as e:
+            print(f"Error parsing line {line_num + 1} in {filepath}: {e}")
+            continue
 
-    # Store runs by model
-    model_runs = {
-        'LightGCN': [],
-        'ItemKNN': [],
-        'MultiVAE': []
+    return hyperparams, cv_avg_ndcg
+
+
+def find_optimal_hyperparameters(dataset: str = "ml-100k") -> pd.DataFrame:
+    """
+    Find optimal hyperparameters for each model based on highest NDCG@10.
+
+    Args:
+        dataset: Dataset name (default: "ml-100k")
+
+    Returns:
+        DataFrame with optimal hyperparameters for each model
+    """
+    # Define models and their specific hyperparameters
+    model_hyperparams = {
+        'ItemKNN': ['shrink', 'item_knn_topk'],
+        'MultiVAE': ['hidden_dimension', 'latent_dimension', 'anneal_cap'],
+        'LightGCN': ['embedding_dim', 'n_layers']
     }
 
-    # Process each run
-    for run in runs:
-        config = run["config"]
-        model_name = config.get('model')['value']
-        if model_name not in model_runs:
-            continue
+    # Store results for each model
+    model_results = {model: [] for model in model_hyperparams}
 
-        # Extract the metrics
-        summary = dict(run["summary"])
-        test_ndcg = None
-        item_coverage = None
-        gini_index = None
-        avg_popularity = None
+    # Find all log files matching the pattern
+    log_pattern = f"logs/{dataset}_*_????_??????.log"
+    log_files = glob.glob(log_pattern)
 
-        for key in summary:
-            key_lower = key.lower()
-            if 'test_ndcg@10' in key_lower:
-                test_ndcg = summary[key]
-            elif 'test_itemcoverage@10' in key_lower:
-                item_coverage = summary[key]
-            elif 'test_giniindex@10' in key_lower:
-                gini_index = summary[key]
-            elif 'test_averagepopularity@10' in key_lower:
-                avg_popularity = summary[key]
+    print(f"Found {len(log_files)} log files for dataset {dataset}")
 
-        if test_ndcg is None:
-            continue
+    # Process each log file
+    for log_file in log_files:
+        hyperparams, ndcg = parse_log_file(log_file)
 
-        # Extract parameters based on model type
-        params = {
-            'test_ndcg': test_ndcg,
-            'test_item_coverage': item_coverage,
-            'test_gini_index': gini_index,
-            'test_avg_popularity': avg_popularity
-        }
+        if hyperparams.get('model_name') and ndcg is not None:
+            model_name = hyperparams['model_name']
+            if model_name in model_results:
+                # Extract only relevant hyperparameters for this model
+                relevant_params = {
+                    param: hyperparams.get(param)
+                    for param in model_hyperparams[model_name]
+                    if hyperparams.get(param) is not None
+                }
+                relevant_params['ndcg@10'] = ndcg
+                relevant_params['log_file'] = log_file
+                model_results[model_name].append(relevant_params)
 
-        # Common parameters
-        common_keys = ['learning_rate', 'embedding_size', 'scheduler']
-        for key in common_keys:
-            if key in config:
-                params[key] = config.get(key)['value']
+    # Find optimal hyperparameters for each model
+    optimal_results = []
 
-        # Model-specific parameters
-        if model_name == 'LightGCN':
-            if 'n_layers' in config:
-                params['n_layers'] = config.get('n_layers')['value']
-        elif model_name == 'ItemKNN':
-            if 'k_values' in config:
-                params['k_values'] = config.get('k_values')['value']
-            if 'shrink' in config:
-                params['shrink'] = config.get('shrink')['value']
-        elif model_name == 'MultiVAE':
-            for key in ['hidden_dimension', 'latent_dimension', 'dropout_prob', 'anneal_cap']:
-                if key in config:
-                    params[key] = config.get(key)['value']
+    for model, results in model_results.items():
+        if results:
+            # Sort by NDCG@10 in descending order and get the best
+            best_result = max(results, key=lambda x: x['ndcg@10'])
 
-        # Add timestamp and run info
-        params['created_at'] = run["created_at"]
-        model_runs[model_name].append(params)
+            # Create row for the table
+            row = {'Model': model}
+            row.update({k: v for k, v in best_result.items() if k not in ['log_file', 'ndcg@10']})
+            row['Best NDCG@10'] = best_result['ndcg@10']
+            row['Log File'] = best_result['log_file'].split('/')[-1]  # Just filename
 
-    # Process results for each model
-    results = {}
-    for model_name, runs in model_runs.items():
-        if not runs:
-            continue
+            optimal_results.append(row)
 
-        # Convert to DataFrame
-        df = pd.DataFrame(runs)
+    # Create DataFrame
+    df = pd.DataFrame(optimal_results)
 
-        # Define parameter columns to identify unique configurations
-        if model_name == 'LightGCN':
-            param_cols = ['learning_rate', 'embedding_size', 'n_layers']
-        elif model_name == 'ItemKNN':
-            param_cols = ['k_values', 'shrink']
-        else:  # MultiVAE
-            param_cols = ['hidden_dimension', 'latent_dimension', 'dropout_prob', 'anneal_cap']
+    # Reorder columns for better readability
+    column_order = ['Model']
+    for model, params in model_hyperparams.items():
+        column_order.extend(params)
+    column_order.extend(['Best NDCG@10', 'Log File'])
 
-        # Keep only columns that exist in the dataframe
-        param_cols = [col for col in param_cols if col in df.columns]
+    # Only keep columns that exist in the DataFrame
+    column_order = [col for col in column_order if col in df.columns]
+    df = df[column_order]
 
-        # Keep newest run for each unique parameter combination
-        df = df.sort_values('created_at', ascending=False)
-        df = df.drop_duplicates(subset=param_cols, keep='first')
-
-        # Sort by test NDCG in descending order
-        df = df.sort_values('test_ndcg', ascending=False)
-
-        results[model_name] = df
-
-    return results
+    return df
 
 
-def display_results(results):
-    for model_name, df in results.items():
-        if df.empty:
-            print(f"No results for {model_name}")
-            continue
+def main():
+    """
+    Main function to extract and display optimal hyperparameters.
+    """
+    # Extract optimal hyperparameters
+    optimal_df = find_optimal_hyperparameters("ml-100k")
 
-        print(f"\n{model_name} Results (top 10):")
+    # Display results
+    print("\nOptimal Hyperparameters for ml-100k Dataset (based on NDCG@10):")
+    print("=" * 100)
+    print(optimal_df.to_string(index=False))
 
-        # Select columns to display based on the model type
-        if model_name == 'LightGCN':
-            display_cols = ['n_layers', 'embedding_size', 'learning_rate', 'scheduler',
-                            'test_ndcg', 'test_item_coverage', 'test_gini_index', 'test_avg_popularity']
-        elif model_name == 'ItemKNN':
-            display_cols = ['k_values', 'shrink', 'test_ndcg', 'test_item_coverage', 'test_gini_index', 'test_avg_popularity']
-        else:  # MultiVAE
-            display_cols = ['hidden_dimension', 'latent_dimension', 'dropout_prob',
-                            'anneal_cap', 'test_ndcg', 'test_item_coverage', 'test_gini_index', 'test_avg_popularity']
+    # Save to CSV
+    output_file = "optimal_hyperparameters_ml-100k.csv"
+    optimal_df.to_csv(output_file, index=False)
+    print(f"\nResults saved to: {output_file}")
 
-        # Only include columns that exist in the dataframe
-        display_cols = [col for col in display_cols if col in df.columns]
+    # Display summary statistics
+    print("\nSummary Statistics:")
+    for _, row in optimal_df.iterrows():
+        model = row['Model']
+        ndcg = row['Best NDCG@10']
+        print(f"- {model}: Best NDCG@10 = {ndcg:.6f}")
 
-        # Display top 10 results
-        print(tabulate(df[display_cols].head(10), headers='keys', tablefmt='github', floatfmt=".4f"))
-
-        # Save to CSV
-        timestamp = datetime.now().strftime("%Y%m%d_%H%n_categories%S")
-        # Create directory if it doesn't exist
-        os.makedirs("results", exist_ok=True)
-        filename = f"results/{model_name}_results_{timestamp}.csv"
-        df.to_csv(filename, index=False)
-        print(f"Results saved to {filename}")
+        # Display hyperparameters
+        if model == 'ItemKNN':
+            print(f"  Hyperparameters: shrink={row.get('shrink')}, item_knn_topk={row.get('item_knn_topk')}")
+        elif model == 'MultiVAE':
+            print(f"  Hyperparameters: hidden_dimension={row.get('hidden_dimension')}, "
+                  f"latent_dimension={row.get('latent_dimension')}, anneal_cap={row.get('anneal_cap')}")
+        elif model == 'LightGCN':
+            print(f"  Hyperparameters: embedding_dim={row.get('embedding_dim')}, n_layers={row.get('n_layers')}")
 
 
-results = get_hyperparameter_results()
-display_results(results)
-
+if __name__ == "__main__":
+    main()

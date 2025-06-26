@@ -51,9 +51,9 @@ class Config:
     def setup_model_config(self):
         """Setup model-specific configurations."""
         if self.model_name == 'LightGCN':
-            self.batch_size = 512
+            self.batch_size = 1024
             self.learning_rate = 5e-3
-            self.epochs = 160  # because it's different for each model
+            self.epochs = 200  # because it's different for each model
             self.n_layers = 3
             self.embedding_dim = 128
             self.num_folds = 5
@@ -65,8 +65,8 @@ class Config:
             self.shrink = 50
             self.feature_weighting = 'tf-idf'
         elif self.model_name == 'MultiVAE':
-            self.learning_rate = 1e-2
-            self.epochs = 160
+            self.learning_rate = 5e-3
+            self.epochs = 200
             self.batch_size = 2048
             self.patience = 10
             self.hidden_dimension = 800
