@@ -63,7 +63,8 @@ def community_edge_suppression(adj_tens, config):
 
         in_com_user_indices = torch.nonzero(biased_user_edges_mask).flatten()
 
-        in_com_user_suppress_count = min(int(total_user_suppress_count), in_com_user_indices.numel())
+        # in_com_user_suppress_count = min(int(total_user_suppress_count), in_com_user_indices.numel())
+        in_com_user_suppress_count = int(in_com_user_indices)  # count from number of biased edges, not total edges
 
         if in_com_user_suppress_count > 0 and in_com_user_indices.numel() > 0:
             if suppress_power_nodes_first:
@@ -120,7 +121,7 @@ def community_edge_suppression(adj_tens, config):
             suppress_mask[in_com_item_indices[perm]] = True  # TODO: handle cases where the dropped edges would overlap
 
     edge_weights_new = torch.ones(adj_tens.shape[0], device=device)
-    edge_weights_new[suppress_mask] = community_suppression
+    edge_weights_new[suppress_mask] = 1 - community_suppression
     return edge_weights_new
 
 

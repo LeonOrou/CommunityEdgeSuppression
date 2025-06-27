@@ -19,24 +19,24 @@ warnings.filterwarnings('ignore')
 def main():
     set_seed(21)  # For reproducibility
     parser = ArgumentParser()
-    parser.add_argument("--model_name", type=str, default='MultiVAE', choices=['LightGCN', 'ItemKNN', 'MultiVAE'],)
+    parser.add_argument("--model_name", type=str, default='LightGCN', choices=['LightGCN', 'ItemKNN', 'MultiVAE'],)
     parser.add_argument("--dataset_name", type=str, default='ml-100k', choices=['ml-100k', 'ml-1m', 'lastfm'])
     parser.add_argument("--users_top_percent", type=float, default=0.05)
     parser.add_argument("--items_top_percent", type=float, default=0.05)
     parser.add_argument("--users_dec_perc_suppr", type=float, default=0.5)
     parser.add_argument("--items_dec_perc_suppr", type=float, default=0.0)
-    parser.add_argument("--community_suppression", type=float, default=0.5)
+    parser.add_argument("--community_suppression", type=float, default=0.5)  # high value is high suppression
     parser.add_argument("--suppress_power_nodes_first", type=str, default='True')
     parser.add_argument("--use_suppression", type=str, default='False')
 
     # Add model-specific hyperparameters
-    parser.add_argument("--embedding_dim", type=int, default=128, help="LightGCN: Embedding dimension")
+    parser.add_argument("--embedding_dim", type=int, default=64, help="LightGCN: Embedding dimension")
     parser.add_argument("--n_layers", type=int, default=3, help="LightGCN: Number of layers")
     parser.add_argument("--item_knn_topk", type=int, default=125, help="ItemKNN: Top K neighbors")
     parser.add_argument("--shrink", type=int, default=50, help="ItemKNN: Shrinkage parameter")
-    parser.add_argument("--hidden_dimension", type=int, default=800, help="MultiVAE: Hidden layer dimension")
+    parser.add_argument("--hidden_dimension", type=int, default=600, help="MultiVAE: Hidden layer dimension")
     parser.add_argument("--latent_dimension", type=int, default=200, help="MultiVAE: Latent dimension")
-    parser.add_argument("--anneal_cap", type=float, default=0.4, help="MultiVAE: Anneal cap")
+    parser.add_argument("--anneal_cap", type=float, default=0.2, help="MultiVAE: Anneal cap")
 
     # False: 0.4907      0.4827      0.4386      0.3752, cv folds
     # True:  0.4881      0.4795      0.4364      0.3722, cv folds, perc suppression 0.3, strength 0.5
@@ -82,11 +82,11 @@ def main():
     # # save user biases locally
     # np.save(f'dataset/{config.dataset_name}/user_biases.npy', user_biases.cpu().numpy())
     # load all user biases from all datasets
-    user_biases_lastfm = np.load(f'dataset/lastfm/user_biases.npy')
-    user_biases_ml100k = np.load(f'dataset/ml-100k/user_biases.npy')
-    user_biases_ml1m = np.load(f'dataset/ml-1m/user_biases.npy')
-    user_biases = [user_biases_lastfm, user_biases_ml100k, user_biases_ml1m]
-    plot_community_bias(user_biases, dataset_names=['LastFM', 'Ml-100K', 'Ml-1M'])
+    # user_biases_lastfm = np.load(f'dataset/lastfm/user_biases.npy')
+    # user_biases_ml100k = np.load(f'dataset/ml-100k/user_biases.npy')
+    # user_biases_ml1m = np.load(f'dataset/ml-1m/user_biases.npy')
+    # user_biases = [user_biases_lastfm, user_biases_ml100k, user_biases_ml1m]
+    # plot_community_bias(user_biases, dataset_names=['LastFM', 'Ml-100K', 'Ml-1M'])
 
     cv_results = []
     train_time_start = time.time()

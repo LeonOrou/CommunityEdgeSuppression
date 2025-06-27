@@ -183,7 +183,7 @@ def check_multivae_early_stopping(val_ndcg, best_val_ndcg, patience_counter, pat
     return False, best_val_ndcg, patience_counter, best_model_state, best_epoch
 
 
-def train_multivae(model, dataset, config, optimizer, device, verbose=True):
+def train_multivae(model, dataset, config, device, verbose=True):
     """
     General MultiVAE training function that handles the complete training loop with sparse matrices.
 
@@ -191,7 +191,6 @@ def train_multivae(model, dataset, config, optimizer, device, verbose=True):
         model: The MultiVAE model to train
         dataset: Dataset object containing train/val/test data
         config: Configuration object with hyperparameters
-        optimizer: PyTorch optimizer
         device: Training device (cuda/cpu)
         verbose: Whether to print training progress
 
@@ -208,10 +207,14 @@ def train_multivae(model, dataset, config, optimizer, device, verbose=True):
     #     min_lr=1e-5,  # Don't go below this
     #     threshold=0.005  # Minimum improvement to count
     # )
+    optimizer = torch.optim.AdamW(model.parameters(),
+                                 lr=config.learning_rate,
+                                 weight_decay=getattr(config, 'weight_decay', 0.0))
+
     scheduler = CosineAnnealingWarmRestarts(
         optimizer,
-        T_0=10,  # First restart after x epochs
-        T_mult=2,  # Double cycle length after each restart
+        T_0=40,  # First restart after x epochs
+        T_mult=1,  # Double cycle length after each restart
         eta_min=1e-5  # Minimum learning rate
     )
 
@@ -270,7 +273,7 @@ def train_multivae(model, dataset, config, optimizer, device, verbose=True):
     return model
 
 
-def train_lightgcn(model, dataset, config, optimizer, user_positive_items, device, verbose=True):
+def train_lightgcn(model, dataset, config, user_positive_items, device, verbose=True):
     """
     General LightGCN training function that handles the complete training loop.
 
@@ -288,10 +291,14 @@ def train_lightgcn(model, dataset, config, optimizer, user_positive_items, devic
     """
     print(f"Starting LightGCN training...")
 
+    optimizer = torch.optim.Adam(model.parameters(),
+                                 lr=config.learning_rate,
+                                 weight_decay=getattr(config, 'weight_decay', 0.0))
+
     scheduler = CosineAnnealingWarmRestarts(
         optimizer,
-        T_0=15,  # First restart after 15 epochs
-        T_mult=2,  # Double cycle length after each restart
+        T_0=30,  # First restart after 15 epochs
+        T_mult=1,  # Double cycle length after each restart
         eta_min=1e-5  # Minimum learning rate
     )
 
@@ -305,7 +312,7 @@ def train_lightgcn(model, dataset, config, optimizer, user_positive_items, devic
     best_model_state = None
 
     # Pre-convert training data to GPU or CPU based on size
-    if len(dataset.train_df) < 400000:
+    if len(dataset.train_df) < 800000:
         all_train_users, all_train_items, train_indices = prepare_training_data(
             dataset.train_df, device=device)
     else:
@@ -378,8 +385,8 @@ def train_lightgcn_epoch(model, dataset, config, optimizer, all_train_users, all
     train_indices_shuffled = train_indices[perm]
 
     # Process in big batches of 200k to manage memory
-    for start_idx in range(0, num_train, 400000):
-        biggi_batch_indices = train_indices_shuffled[start_idx:start_idx + 400000]
+    for start_idx in range(0, num_train, 800000):
+        biggi_batch_indices = train_indices_shuffled[start_idx:start_idx + 800000]
         biggi_train_users = all_train_users[biggi_batch_indices].to(device)
         biggi_train_items = all_train_items[biggi_batch_indices].to(device)
         biggi_batch_indices = biggi_batch_indices.to(device)
@@ -526,17 +533,11 @@ def train_model(dataset, model, config, verbose=True):
         )
         return trained_model
 
-    # Setup optimizer and scheduler
-    optimizer = torch.optim.Adam(model.parameters(),
-                                 lr=config.learning_rate,
-                                 weight_decay=getattr(config, 'weight_decay', 0.0))
-
     if config.model_name == 'MultiVAE':
         trained_model = train_multivae(
             model=model,
             dataset=dataset,
             config=config,
-            optimizer=optimizer,
             device=device,
             verbose=verbose
         )
@@ -555,7 +556,6 @@ def train_model(dataset, model, config, verbose=True):
             model=model,
             dataset=dataset,
             config=config,
-            optimizer=optimizer,
             user_positive_items=user_positive_items,
             device=device,
             verbose=verbose)

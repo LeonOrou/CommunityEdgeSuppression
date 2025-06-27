@@ -1,11 +1,8 @@
-import pickle
 import numpy as np
 import torch
 import torch_geometric
 import scipy.sparse as sp
-import matplotlib.pyplot as plt
-from sknetwork.clustering import Leiden, Louvain
-from argparse import ArgumentParser
+from sknetwork.clustering import Leiden
 import os
 from scipy.stats import binom
 
@@ -134,7 +131,7 @@ def get_community_labels(config, adj_np, save_path='dataset/ml-100k/saved', get_
     return torch.tensor(user_labels_sorted_matrix, dtype=torch.int64, device=device), torch.tensor(item_labels_sorted_matrix, dtype=torch.int64, device=device)
 
 
-def binomial_significance_threshold(n_interactions, n_categories, alpha=0.05):
+def binomial_significance_threshold(n_interactions, n_categories=18, alpha=0.05):
     """
     Returns the smallest count T (clamped to n_interactions) such that
     P(X >= T) <= alpha/n_categories, and its proportion T/n_interactions <= 1.
@@ -146,8 +143,8 @@ def binomial_significance_threshold(n_interactions, n_categories, alpha=0.05):
     # find k_values with P(X > k_values) ≤ alpha_per_test, so T=k_values+1 may exceed n -> clamp next
     raw_thresh = binom.isf(alpha_per_test, n_arr, p) + 1
     thresh = np.minimum(raw_thresh, n_arr)           # clamp to max trials
-    props = thresh / n_arr                           # now guaranteed ≤ 1
-
+    props = thresh / n_arr                           # to normalize ≤ 1
+    # props = thresh
     if np.isscalar(n_interactions):
         return float(props[0])
     return props
@@ -398,6 +395,13 @@ def get_biased_edges_mask(config, adj_tens, user_com_labels_mask, item_com_label
     users_com_connectivity_mask = user_community_connectivity_matrix_distribution > torch.tensor(user_community_thresholds, device=config.device).unsqueeze(1)
     items_com_connectivity_mask = item_community_connectivity_matrix_distribution > torch.tensor(item_community_thresholds, device=config.device).unsqueeze(1)
 
+    # get indices of highest value in each row of the connectivity matrices
+    # highest_row_indices = torch.argmax(user_community_connectivity_matrix_distribution, dim=1)[:, 0]
+    # highest_item_row_indices = torch.argmax(item_community_connectivity_matrix_distribution, dim=1)[:, 0]
+    # users_com_connectivity_mask = np.zeros(user_community_connectivity_matrix_distribution.shape, dtype=np.int64)
+    # items_com_connectivity_mask = np.zeros(item_community_connectivity_matrix_distribution.shape, dtype=np.int64)
+    # # TODO set values to 1 where the highest value is above the threshold
+
     # get indices where in user/item com masks at least one community is above threshold
     users_com_labels_mask_rows = torch.any(user_com_labels_mask > 0, dim=1)
     items_com_labels_mask_rows = torch.any(item_com_labels_mask > 0, dim=1)
@@ -419,7 +423,6 @@ def get_biased_edges_mask(config, adj_tens, user_com_labels_mask, item_com_label
     user_com_mask_nonzero_idx = user_label_mask.nonzero(as_tuple=True)[0]
     item_com_mask_nonzero_idx = idx_item_label_mask.nonzero(as_tuple=True)[0]
 
-    # get indices where rows of biased_item_nodes_user_com_con and biased_user_nodes_communities both have at least one True value at the same position
     true_user_indices = torch.any(biased_user_nodes_item_com_con & biased_item_nodes_communities, dim=1)
     true_item_indices = torch.any(biased_item_nodes_user_com_con & biased_user_nodes_communities, dim=1)
 

@@ -226,7 +226,7 @@ def _calculate_final_results(k_values, metrics_by_k, item_recommendation_freq_by
         else:
             gini_index = 0.0
 
-        relative_label_entropy = calculate_relative_label_entropy(
+        pop_miscalibration = popularity_miscalibration(
             all_global_recommendations_by_k[k_val], dataset
         )
 
@@ -257,7 +257,7 @@ def _calculate_final_results(k_values, metrics_by_k, item_recommendation_freq_by
             'normalized_genre_entropy': np.mean(
                 normalized_genre_entropy_scores) if normalized_genre_entropy_scores else 0.0,
             'unique_genres_count': np.mean(unique_genres_count_scores) if unique_genres_count_scores else 0.0,
-            'relative_label_entropy': relative_label_entropy,
+            'pop_miscalibration': pop_miscalibration,
             'user_community_bias': user_community_bias
         }
 
@@ -864,7 +864,7 @@ def calculate_additional_metrics(top_k_items, encoded_to_genres, dataset, all_re
 
     # Popularity Calibration (if global recommendations provided)
     if all_recommended_items_global is not None:
-        metrics['relative_label_entropy'] = calculate_relative_label_entropy(all_recommended_items_global, dataset)
+        metrics['pop_miscalibration'] = popularity_miscalibration(all_recommended_items_global, dataset)
 
     return metrics
 
@@ -1132,8 +1132,8 @@ def get_batch_user_scores(model, dataset, config, batch_user_ids, train_user_ite
 
         elif config.model_name == 'MultiVAE':
             train_matrix = csr_matrix(
-                (dataset.val_df['rating'].values,
-                 (dataset.val_df['user_encoded'].values, dataset.val_df['item_encoded'].values)),
+                (dataset.train_df['rating'].values,
+                 (dataset.train_df['user_encoded'].values, dataset.train_df['item_encoded'].values)),
                 shape=(dataset.num_users, dataset.num_items),
                 dtype=np.float32)
 
@@ -1448,7 +1448,7 @@ def aggregate_batch_results(results, k_values, dataset):
             gini_index = 0.0
 
         # Popularity calibration
-        relative_label_entropy = calculate_relative_label_entropy(
+        pop_miscalibration = popularity_miscalibration(
             metrics['all_global_recommendations'], dataset
         )
 
@@ -1477,14 +1477,14 @@ def aggregate_batch_results(results, k_values, dataset):
                 'normalized_genre_entropy_scores'] else 0.0,
             'unique_genres_count': np.mean(metrics['unique_genres_count_scores']) if metrics[
                 'unique_genres_count_scores'] else 0.0,
-            'relative_label_entropy': relative_label_entropy,
+            'pop_miscalibration': pop_miscalibration,
             'user_community_bias': user_community_bias
         }
 
     return final_results
 
 
-def calculate_relative_label_entropy(all_recommended_items, dataset):
+def popularity_miscalibration(all_recommended_items, dataset):
     """
     Calculate popularity calibration - measures how well the recommendation popularity
     distribution matches the catalog popularity distribution using KL divergence.

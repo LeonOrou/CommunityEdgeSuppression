@@ -6,6 +6,7 @@ class Config:
     """Central configuration class to store all parameters."""
 
     def __init__(self):
+        self.latent_dimension = None
         self.model_name = None
         self.dataset_name = None
         self.users_top_percent = None
@@ -55,25 +56,46 @@ class Config:
             self.learning_rate = 1e-2
             self.epochs = 200  # because it's different for each model
             self.n_layers = 3
-            self.embedding_dim = 128
+            self.embedding_dim = 64
             self.num_folds = 5
             self.reg = 1e-4
-            # self.weight_decay = 1
+            # self.weight_decay = 1e-4  # already in L2 regularization loss
             self.patience = 10
         elif self.model_name == 'ItemKNN':
-            self.item_knn_topk = 125
-            self.shrink = 50
+            if self.dataset_name == 'ml-100k':
+                self.item_knn_topk = 200
+                self.shrink = 10
+            elif self.dataset_name == 'ml-1m':
+                self.item_knn_topk = 50
+                self.shrink = 10
+            elif self.dataset_name == 'lastfm':
+                self.item_knn_topk = 200
+                self.shrink = 10
+            else:
+                self.item_knn_topk = 125
+                self.shrink = 30
             self.feature_weighting = 'tf-idf'
         elif self.model_name == 'MultiVAE':
             self.learning_rate = 5e-3
             self.epochs = 200
             self.batch_size = 2048
             self.patience = 10
-            self.hidden_dimension = 800
-            self.latent_dimension = 200
+            if self.dataset_name == 'ml-100k':
+                self.hidden_dimension = 800
+                self.latent_dimension = 200
+                self.anneal_cap = 0.3
+            elif self.dataset_name == 'ml-1m':
+                self.hidden_dimension = 600
+                self.latent_dimension = 200
+                self.anneal_cap = 0.3
+            elif self.dataset_name == 'lastfm':
+                # still check
+                self.hidden_dimension = 600
+                self.latent_dimension = 200
+                self.anneal_cap = 0.3
             self.dropout_prob = 0.5
-            self.anneal_cap = 0.4
-            self.total_anneal_steps = 200
+            self.total_anneal_steps = 100
+            # self.weight_decay = 1e-2
 
     def setup_device(self, try_gpu=True):
         """Setup computation device."""
