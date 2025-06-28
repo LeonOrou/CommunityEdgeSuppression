@@ -109,6 +109,13 @@ def get_community_labels(config, adj_np, save_path='dataset/ml-100k/saved', get_
     item_col_drop = np.any(item_labels_matrix_mask != 0, axis=0)
     user_labels_matrix_mask = user_labels_matrix_mask[:, user_col_drop]
     item_labels_matrix_mask = item_labels_matrix_mask[:, item_col_drop]
+    ### keeping only first label for each user/item
+    user_labels_matrix_mask = np.zeros(user_labels_matrix_mask.shape, dtype=np.int64)
+    item_labels_matrix_mask = np.zeros(item_labels_matrix_mask.shape, dtype=np.int64)
+    # make only 1 at mask for highest probability label
+    user_labels_matrix_mask[np.arange(user_labels_matrix_mask.shape[0]), user_labels_sorted_matrix[:, 0]] = 1
+    item_labels_matrix_mask[np.arange(item_labels_matrix_mask.shape[0]), item_labels_sorted_matrix[:, 0]] = 1
+
     user_probs = user_probs[:, user_col_drop]
     item_probs = item_probs[:, item_col_drop]
 
@@ -395,12 +402,13 @@ def get_biased_edges_mask(config, adj_tens, user_com_labels_mask, item_com_label
     users_com_connectivity_mask = user_community_connectivity_matrix_distribution > torch.tensor(user_community_thresholds, device=config.device).unsqueeze(1)
     items_com_connectivity_mask = item_community_connectivity_matrix_distribution > torch.tensor(item_community_thresholds, device=config.device).unsqueeze(1)
 
-    # get indices of highest value in each row of the connectivity matrices
-    # highest_row_indices = torch.argmax(user_community_connectivity_matrix_distribution, dim=1)[:, 0]
-    # highest_item_row_indices = torch.argmax(item_community_connectivity_matrix_distribution, dim=1)[:, 0]
-    # users_com_connectivity_mask = np.zeros(user_community_connectivity_matrix_distribution.shape, dtype=np.int64)
-    # items_com_connectivity_mask = np.zeros(item_community_connectivity_matrix_distribution.shape, dtype=np.int64)
-    # # TODO set values to 1 where the highest value is above the threshold
+    ### uncomment to use only the highest community connectivity for each user/item
+    # highest_row_indices = torch.argmax(user_community_connectivity_matrix_distribution, dim=1)
+    # highest_item_row_indices = torch.argmax(item_community_connectivity_matrix_distribution, dim=1)
+    # users_com_connectivity_mask = torch.zeros(user_community_connectivity_matrix_distribution.shape, dtype=torch.bool, device=config.device)
+    # items_com_connectivity_mask = torch.zeros(item_community_connectivity_matrix_distribution.shape, dtype=torch.bool, device=config.device)
+    # users_com_connectivity_mask[torch.arange(user_community_connectivity_matrix_distribution.shape[0]), highest_row_indices] = 1
+    # items_com_connectivity_mask[torch.arange(item_community_connectivity_matrix_distribution.shape[0]), highest_item_row_indices] = 1
 
     # get indices where in user/item com masks at least one community is above threshold
     users_com_labels_mask_rows = torch.any(user_com_labels_mask > 0, dim=1)
