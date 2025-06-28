@@ -1561,7 +1561,7 @@ def evaluate_current_model_ndcg_vectorized(model, dataset, model_type='LightGCN'
     relevance_sparse = create_sparse_relevance_matrix(valid_user_ids, user_val_items, dataset.num_items)
 
     # Process in batches
-    batch_size = min(1000, len(valid_user_ids))
+    batch_size = min(1024, len(valid_user_ids))
     all_ndcg_scores = []
 
     config_mock = type('Config', (), {'model_name': model_type})()
