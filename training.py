@@ -164,7 +164,7 @@ def check_early_stopping(val_ndcg, best_val_ndcg, patience_counter, patience, mi
         patience_counter += 1
 
     # Check if learning has plateaued
-    if len(val_history) >= 5:
+    if len(val_history) >= 5 and epoch > min_stop_epochs:
         recent_std = np.std(val_history[-5:])
         if recent_std < 0.0001 and patience_counter >= patience // 2:
             if verbose:
@@ -211,7 +211,7 @@ def train_multivae(model, dataset, config, device, verbose=True):
 
     scheduler = CosineAnnealingWarmRestarts(
         optimizer,
-        T_0=20,  # First restart after x epochs
+        T_0=35,  # First restart after x epochs
         T_mult=2,  # Double cycle length after each restart
         eta_min=1e-5  # Minimum learning rate
     )
@@ -297,7 +297,7 @@ def train_lightgcn(model, dataset, config, user_positive_items, device, verbose=
         optimizer,
         T_0=30,  # First restart after 15 epochs
         T_mult=1,  # Double cycle length after each restart
-        eta_min=1e-4  # Minimum learning rate
+        eta_min=1e-5  # Minimum learning rate
     )
 
     # Training parameters
@@ -336,6 +336,8 @@ def train_lightgcn(model, dataset, config, user_positive_items, device, verbose=
         # track time and result between vectorized and non-vectorized versions
         # val_ndcg = evaluate_current_model_ndcg(model, dataset, model_type='LightGCN', k=10)
         val_ndcg = evaluate_current_model_ndcg_vectorized(model, dataset, model_type='LightGCN', k=10)
+        val_history.append(val_ndcg)
+        scheduler.step()
 
         # Evaluation and logging
         if epoch == 0 or (epoch + 1) % 10 == 0 or epoch == config.epochs - 1:
@@ -373,32 +375,35 @@ def train_lightgcn_epoch(model, dataset, config, optimizer, all_train_users, all
     perm = torch.randperm(num_train)
     train_indices_shuffled = train_indices[perm]
 
+    all_train_users = all_train_users.long()
+    all_train_items = all_train_items.long()
+
     for i in range(0, num_train, batch_size):
-        batch_indices = train_indices_shuffled[i:i + batch_size]
+        batch_end = min(i + batch_size, num_train)
+        batch_indices = train_indices_shuffled[i:batch_end]
         if len(batch_indices) == 0:
             continue
 
-        batch_users = all_train_users[i:i + batch_size]
-        batch_pos_items = all_train_items[i:i + batch_size]
-
+        batch_users = all_train_users[batch_indices]
+        batch_pos_items = all_train_items[batch_indices]
         batch_neg_items = dataset.sample_negative_items(user_ids=batch_users)
 
         # Forward pass
-        # user_emb, item_emb = model(dataset.complete_edge_index, dataset.current_edge_weight)
         user_emb, item_emb = model(dataset.train_edge_index, dataset.current_edge_weight)
-        batch_user_emb = user_emb[batch_users.long()]
-        batch_pos_item_emb = item_emb[batch_pos_items.long()]
-        batch_neg_item_emb = item_emb[batch_neg_items.long()]
+
+        batch_user_emb = user_emb[batch_users]
+        batch_pos_item_emb = item_emb[batch_pos_items]
+        batch_neg_item_emb = item_emb[batch_neg_items]
 
         # Calculate loss
         bpr_loss = calculate_bpr_loss(batch_user_emb, batch_pos_item_emb, batch_neg_item_emb, dataset.current_edge_weight[batch_pos_items])
 
         # Add L2 regularization
         l2_reg = config.reg * (
-                batch_user_emb.norm(2).pow(2) +
-                batch_pos_item_emb.norm(2).pow(2) +
-                batch_neg_item_emb.norm(2).pow(2)
-        ) / batch_size
+                torch.sum(batch_user_emb * batch_user_emb) +
+                torch.sum(batch_pos_item_emb * batch_pos_item_emb) +
+                torch.sum(batch_neg_item_emb * batch_neg_item_emb)
+        ) / len(batch_indices)
 
         loss = bpr_loss + l2_reg
 

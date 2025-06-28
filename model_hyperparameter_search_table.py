@@ -177,14 +177,14 @@ def display_results(dataset: str = "ml-100k") -> None:
             print(df.to_string(index=False))
 
             # Save individual model results
-            output_file = f"top10_hyperparameters_{model}_ml-100k.csv"
+            output_file = f"logs/{dataset} model hyperparameter search/top10_hyperparameters_{model}_ml-100k.csv"
             df.to_csv(output_file, index=False)
             print(f"\n{model} results saved to: {output_file}")
 
     # Create and save combined table
     combined_df = create_combined_table(top_results)
     if not combined_df.empty:
-        combined_output = "top10_hyperparameters_all_models_ml-100k.csv"
+        combined_output = f"logs/{dataset} model hyperparameter search/top10_hyperparameters_all_models_ml-100k.csv"
         combined_df.to_csv(combined_output, index=False)
         print(f"\nCombined results saved to: {combined_output}")
 
@@ -213,5 +213,5 @@ def display_results(dataset: str = "ml-100k") -> None:
                         f"  Hyperparameters: embedding_dim={best_row['embedding_dim']}, n_layers={best_row['n_layers']}")
 
 
-display_results(dataset='ml-1m')
+display_results(dataset='ml-1m')  # Change to 'lastfm', 'ml-100k' or 'ml-1m' as needed
 

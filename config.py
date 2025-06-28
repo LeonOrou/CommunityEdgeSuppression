@@ -87,12 +87,12 @@ class Config:
             elif self.dataset_name == 'ml-1m':
                 self.hidden_dimension = 600
                 self.latent_dimension = 200
-                self.anneal_cap = 0.3
+                self.anneal_cap = 0.4
             elif self.dataset_name == 'lastfm':
                 # still check
                 self.hidden_dimension = 600
                 self.latent_dimension = 200
-                self.anneal_cap = 0.3
+                self.anneal_cap = 0.4
             self.dropout_prob = 0.5
             self.total_anneal_steps = 100
             # self.weight_decay = 1e-2
