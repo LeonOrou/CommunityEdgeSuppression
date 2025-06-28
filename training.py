@@ -1,8 +1,6 @@
 import time
 from collections import defaultdict
-
 from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
-
 from evaluation import evaluate_current_model_ndcg, evaluate_current_model_ndcg_vectorized
 from dataset import RecommendationDataset, sample_negative_items, prepare_adj_tensor, prepare_training_data
 from models import calculate_bpr_loss
@@ -145,8 +143,8 @@ def train_multivae_epoch_sparse(model, train_sparse_matrix, optimizer, batch_siz
     return avg_loss, kl_weight
 
 
-def check_multivae_early_stopping(val_ndcg, best_val_ndcg, patience_counter, patience,
-                                  val_history, model, best_model_state, epoch, best_epoch, verbose):
+def check_early_stopping(val_ndcg, best_val_ndcg, patience_counter, patience, min_stop_epochs,
+                         val_history, model, best_model_state, epoch, best_epoch, verbose):
     """Check early stopping conditions for MultiVAE and update best model."""
 
     # Check for improvement
@@ -174,7 +172,7 @@ def check_multivae_early_stopping(val_ndcg, best_val_ndcg, patience_counter, pat
             return True, best_val_ndcg, patience_counter, best_model_state, best_epoch
 
     # Check patience limit
-    if patience_counter >= patience and epoch > 100:
+    if patience_counter >= patience and epoch > min_stop_epochs:
         if verbose:
             print(f"  Early stopping at epoch {epoch} - no improvement for {patience} checks")
             print(f"  Best epoch was {best_epoch} with NDCG@10: {best_val_ndcg:.4f}")
@@ -213,8 +211,8 @@ def train_multivae(model, dataset, config, device, verbose=True):
 
     scheduler = CosineAnnealingWarmRestarts(
         optimizer,
-        T_0=40,  # First restart after x epochs
-        T_mult=1,  # Double cycle length after each restart
+        T_0=20,  # First restart after x epochs
+        T_mult=2,  # Double cycle length after each restart
         eta_min=1e-5  # Minimum learning rate
     )
 
@@ -224,6 +222,7 @@ def train_multivae(model, dataset, config, device, verbose=True):
     patience_counter = 0
     val_history = []
     best_epoch = 0
+    min_stop_epochs = 100
     best_model_state = None
 
     # Prepare sparse user-item matrices for MultiVAE
@@ -246,13 +245,12 @@ def train_multivae(model, dataset, config, device, verbose=True):
             model, train_sparse_matrix, optimizer, batch_size,
             epoch, config, device)
 
-        val_ndcg = evaluate_current_model_ndcg(model, dataset, model_type='MultiVAE', k=10)
+        val_ndcg = evaluate_current_model_ndcg_vectorized(model, dataset, model_type='MultiVAE', k=10)
+        val_history.append(val_ndcg)
         scheduler.step()
 
         # Evaluation and logging
         if epoch == 0 or (epoch+1) % 10 == 0 or epoch == config.epochs - 1:
-
-            val_history.append(val_ndcg)
             current_lr = optimizer.param_groups[0]['lr']
 
             if verbose:
@@ -260,8 +258,8 @@ def train_multivae(model, dataset, config, device, verbose=True):
                       f'current LR: {current_lr:.6f}, Val NDCG@10: {val_ndcg:.4f}')
 
         # Early stopping logic
-        should_stop, best_val_ndcg, patience_counter, best_model_state, best_epoch = check_multivae_early_stopping(
-            val_ndcg, best_val_ndcg, patience_counter, patience, val_history,
+        should_stop, best_val_ndcg, patience_counter, best_model_state, best_epoch = check_early_stopping(
+            val_ndcg, best_val_ndcg, patience_counter, patience, min_stop_epochs, val_history,
             model, best_model_state, epoch, best_epoch, verbose)
 
         if should_stop:
@@ -299,34 +297,30 @@ def train_lightgcn(model, dataset, config, user_positive_items, device, verbose=
         optimizer,
         T_0=30,  # First restart after 15 epochs
         T_mult=1,  # Double cycle length after each restart
-        eta_min=1e-5  # Minimum learning rate
+        eta_min=1e-4  # Minimum learning rate
     )
 
     # Training parameters
     batch_size = config.batch_size
     best_val_ndcg = 0
-    patience = config.patience if hasattr(config, 'patience') else 50
+    patience = config.patience if hasattr(config, 'patience') else 20
     patience_counter = 0
     val_history = []
     best_epoch = 0
     best_model_state = None
 
-    # Pre-convert training data to GPU or CPU based on size
-    if len(dataset.train_df) < 800000:
-        all_train_users, all_train_items, train_indices = prepare_training_data(
-            dataset.train_df, device=device)
-    else:
-        dataset.device = 'cpu'
-        all_train_users, all_train_items, train_indices = prepare_training_data(
-            dataset.train_df, device='cpu')
+    # Pre-convert training data to GPU
+    all_train_users, all_train_items, train_indices = prepare_training_data(
+        dataset.train_df, device=device)
 
+    min_stop_epochs = 40
     adj_tens = prepare_adj_tensor(dataset)
     dataset.train_edge_index, dataset.training_edge_weight = dataset.create_bipartite_graph(df=dataset.train_df, device=device)
 
     model.train()
 
-    # config.train_mask = np.concatenate(config.train_mask)  # Ensure train_mask is bidirectional
-    # dataset.train_mask = config.train_mask
+    if not config.use_suppression:
+        dataset.current_edge_weight = dataset.training_edge_weight.to(device)
 
     for epoch in range(config.epochs):
         if config.use_suppression:
@@ -334,23 +328,18 @@ def train_lightgcn(model, dataset, config, user_positive_items, device, verbose=
             # bidirectional edges for LightGCN
             edge_weights_modified = torch.concatenate((edge_weights_modified, edge_weights_modified))
             dataset.current_edge_weight = edge_weights_modified.to(device)
-        else:
-            dataset.current_edge_weight = dataset.training_edge_weight.to(device)
 
         # Training step
         epoch_loss = train_lightgcn_epoch(
             model, dataset, config, optimizer, all_train_users, all_train_items,
-            train_indices, user_positive_items, batch_size, device
-        )
-        scheduler.step()
+            train_indices, user_positive_items, batch_size, device)
+        # track time and result between vectorized and non-vectorized versions
+        # val_ndcg = evaluate_current_model_ndcg(model, dataset, model_type='LightGCN', k=10)
+        val_ndcg = evaluate_current_model_ndcg_vectorized(model, dataset, model_type='LightGCN', k=10)
 
         # Evaluation and logging
-        if epoch == 0 or (epoch + 1) % 10 == 0 or epoch + 1 == config.epochs:
+        if epoch == 0 or (epoch + 1) % 10 == 0 or epoch == config.epochs - 1:
 
-            # val_ndcg = evaluate_current_model_ndcg_vectorized(model, dataset, k=10)
-            val_ndcg = evaluate_current_model_ndcg(model, dataset, k=10)
-
-            val_history.append(val_ndcg)
             current_lr = optimizer.param_groups[0]['lr']
 
             if verbose:
@@ -360,7 +349,7 @@ def train_lightgcn(model, dataset, config, user_positive_items, device, verbose=
 
         # Early stopping logic
         should_stop, best_val_ndcg, patience_counter, best_model_state, best_epoch = check_early_stopping(
-            val_ndcg, best_val_ndcg, patience_counter, patience, val_history,
+            val_ndcg, best_val_ndcg, patience_counter, patience, min_stop_epochs, val_history,
             model, best_model_state, epoch, best_epoch, verbose)
 
         if should_stop:
@@ -384,89 +373,44 @@ def train_lightgcn_epoch(model, dataset, config, optimizer, all_train_users, all
     perm = torch.randperm(num_train)
     train_indices_shuffled = train_indices[perm]
 
-    # Process in big batches of 200k to manage memory
-    for start_idx in range(0, num_train, 800000):
-        biggi_batch_indices = train_indices_shuffled[start_idx:start_idx + 800000]
-        biggi_train_users = all_train_users[biggi_batch_indices].to(device)
-        biggi_train_items = all_train_items[biggi_batch_indices].to(device)
-        biggi_batch_indices = biggi_batch_indices.to(device)
+    for i in range(0, num_train, batch_size):
+        batch_indices = train_indices_shuffled[i:i + batch_size]
+        if len(batch_indices) == 0:
+            continue
 
-        # Process smaller batches within the big batch
-        for i in range(0, len(biggi_batch_indices), batch_size):
-            batch_indices = biggi_batch_indices[i:i + batch_size]
-            if len(batch_indices) == 0:
-                continue
+        batch_users = all_train_users[i:i + batch_size]
+        batch_pos_items = all_train_items[i:i + batch_size]
 
-            batch_users = biggi_train_users[i:i + batch_size]
-            batch_pos_items = biggi_train_items[i:i + batch_size]
+        batch_neg_items = dataset.sample_negative_items(user_ids=batch_users)
 
-            batch_neg_items = dataset.sample_negative_items(user_ids=batch_users)
+        # Forward pass
+        # user_emb, item_emb = model(dataset.complete_edge_index, dataset.current_edge_weight)
+        user_emb, item_emb = model(dataset.train_edge_index, dataset.current_edge_weight)
+        batch_user_emb = user_emb[batch_users.long()]
+        batch_pos_item_emb = item_emb[batch_pos_items.long()]
+        batch_neg_item_emb = item_emb[batch_neg_items.long()]
 
-            # Forward pass
-            # user_emb, item_emb = model(dataset.complete_edge_index, dataset.current_edge_weight)
-            user_emb, item_emb = model(dataset.train_edge_index, dataset.current_edge_weight)
-            batch_user_emb = user_emb[batch_users.long()]
-            batch_pos_item_emb = item_emb[batch_pos_items.long()]
-            batch_neg_item_emb = item_emb[batch_neg_items.long()]
+        # Calculate loss
+        bpr_loss = calculate_bpr_loss(batch_user_emb, batch_pos_item_emb, batch_neg_item_emb, dataset.current_edge_weight[batch_pos_items])
 
-            # Calculate loss
-            bpr_loss = calculate_bpr_loss(batch_user_emb, batch_pos_item_emb, batch_neg_item_emb, dataset.current_edge_weight[batch_pos_items])
+        # Add L2 regularization
+        l2_reg = config.reg * (
+                batch_user_emb.norm(2).pow(2) +
+                batch_pos_item_emb.norm(2).pow(2) +
+                batch_neg_item_emb.norm(2).pow(2)
+        ) / batch_size
 
-            # Add L2 regularization
-            l2_reg = config.reg * (
-                    batch_user_emb.norm(2).pow(2) +
-                    batch_pos_item_emb.norm(2).pow(2) +
-                    batch_neg_item_emb.norm(2).pow(2)
-            ) / batch_size
+        loss = bpr_loss + l2_reg
 
-            loss = bpr_loss + l2_reg
+        # Backward pass
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
 
-            # Backward pass
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-            total_loss += loss.item()
-            num_batches += 1
+        total_loss += loss.item()
+        num_batches += 1
 
     return total_loss / max(num_batches, 1)
-
-
-def check_early_stopping(val_ndcg, best_val_ndcg, patience_counter, patience,
-                         val_history, model, best_model_state, epoch, best_epoch, verbose):
-    """Check early stopping conditions and update best model."""
-
-    # Check for improvement
-    if val_ndcg > best_val_ndcg:
-        improvement = (val_ndcg - best_val_ndcg) / best_val_ndcg if best_val_ndcg > 0 else 1.0
-
-        # Only update best if improvement is significant (> 0.1%)
-        if improvement > 0.001 or best_val_ndcg == 0:
-            best_val_ndcg = val_ndcg
-            patience_counter = 0
-            best_model_state = model.state_dict().copy()
-            best_epoch = epoch
-        else:
-            patience_counter += 1
-    else:
-        patience_counter += 1
-
-    # Check if learning has plateaued
-    if len(val_history) >= 5:
-        recent_std = np.std(val_history[-5:])
-        if recent_std < 0.0001 and patience_counter >= patience // 2:
-            if verbose:
-                print(f"  Early stopping at epoch {epoch} - validation plateaued")
-            return True, best_val_ndcg, patience_counter, best_model_state, best_epoch
-
-    # Check patience limit
-    if patience_counter >= patience and epoch > 40:
-        if verbose:
-            print(f"  Early stopping at epoch {epoch} - no improvement for {patience} checks")
-            print(f"  Best epoch was {best_epoch} with NDCG@10: {best_val_ndcg:.4f}")
-        return True, best_val_ndcg, patience_counter, best_model_state, best_epoch
-
-    return False, best_val_ndcg, patience_counter, best_model_state, best_epoch
 
 
 def calculate_avg_neighbors(similarity_matrix):
