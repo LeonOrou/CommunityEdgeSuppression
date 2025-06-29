@@ -108,6 +108,7 @@ class RecommendationDataset:
         self.train_df = None
         self.val_df = None
         self.train_mask = None
+        self.fold_masks = None  # Masks for cross-validation folds
         self.n_folds = 5  # Default number of folds for cross-validation
 
         # Encoding and metadata
@@ -129,6 +130,12 @@ class RecommendationDataset:
         # Interaction mappings
         self.user_positive_items = defaultdict(set)  # {user_id: set(item_ids)}
         self.item_positive_users = defaultdict(set)  # {item_id: set(user_ids)}
+
+        self.ensure_true_negatives = True  # Ensure negative sampling does not include positive items
+        self.user_valid_negative_pools = {}
+        self.valid_train_indices = None
+        self.neg_cumsum = None
+        self.neg_sampling_probs = None
 
         # Statistics
         self.stats = {}
@@ -230,53 +237,83 @@ class RecommendationDataset:
         self.num_users = num_users
         self.num_items = num_items
 
-    def split_interactions_by_user(self, test_ratio=0.15):
+    def split_interactions_by_user(self, n_folds=5):
         """
-        Split interactions for each user into train_val/test.
-        Optimized version using advanced NumPy techniques.
+        Create masks for n_folds subsets of the complete_df, where each subset
+        has at least one edge from each user.
+
+        Parameters:
+        -----------
+        n_folds : int
+            Number of folds to create (default: 5)
         """
-        # Sort by user_encoded
-        df = self.complete_df.sort_values('user_encoded')
-
-        # Get unique users and their counts efficiently
-        users = df['user_encoded'].values
-        unique_users, user_counts = np.unique(users, return_counts=True)
-
-        # Pre-compute random permutations for all users at once
+        # Initialize random state for reproducibility
         rng = np.random.RandomState(42)
 
-        # Create split mask
-        split_mask = np.zeros(len(df), dtype=bool)
+        # Get the dataframe
+        df = self.complete_df.copy()
+        n_total = len(df)
 
-        # Process users in batches for better performance
-        cumsum = np.concatenate([[0], np.cumsum(user_counts)])
+        # Get unique users
+        unique_users = df['user_encoded'].unique()
+        n_users = len(unique_users)
 
-        for i, (start, end, count) in enumerate(zip(cumsum[:-1], cumsum[1:], user_counts)):
-            if count < 2:
-                continue
+        # Initialize fold masks
+        self.fold_masks = np.zeros((n_folds, n_total), dtype=bool)
 
-            # Calculate split sizes
-            n_test = max(1, int(count * test_ratio))
-            n_train_val = count - n_test
+        # Track which interactions have been assigned
+        assigned = np.zeros(n_total, dtype=bool)
 
-            if n_train_val < 1:
-                n_train_val = 1
-                n_test = count - n_train_val
+        # First, ensure each fold has at least one interaction per user
+        for fold_idx in range(n_folds):
+            # For each user, assign one random interaction to this fold
+            for user in unique_users:
+                user_mask = (df['user_encoded'].values == user) & (~assigned)
+                user_indices = np.where(user_mask)[0]
 
-            # Generate random indices for this user
-            perm = rng.permutation(count)
-            test_indices = start + perm[-n_test:]
-            split_mask[test_indices] = True
+                if len(user_indices) > 0:
+                    # Select a random interaction for this user
+                    selected_idx = rng.choice(user_indices)
+                    self.fold_masks[fold_idx, selected_idx] = True
+                    assigned[selected_idx] = True
 
-        # Split using boolean indexing
-        self.test_df = df[split_mask].copy()
-        self.train_val_df = df[~split_mask].copy()
-        self.complete_df = df.copy()
+        # Distribute remaining interactions randomly across folds
+        remaining_indices = np.where(~assigned)[0]
+        if len(remaining_indices) > 0:
+            # Shuffle remaining indices
+            rng.shuffle(remaining_indices)
+
+            # Calculate how many to assign to each fold
+            base_size = len(remaining_indices) // n_folds
+            remainder = len(remaining_indices) % n_folds
+
+            start_idx = 0
+            for fold_idx in range(n_folds):
+                # Determine size for this fold
+                fold_size = base_size + (1 if fold_idx < remainder else 0)
+
+                # Assign indices to this fold
+                end_idx = start_idx + fold_size
+                fold_indices = remaining_indices[start_idx:end_idx]
+                self.fold_masks[fold_idx, fold_indices] = True
+
+                start_idx = end_idx
+
+        # Verify that each fold has all users
+        # for fold_idx in range(n_folds):
+        #     fold_df = df[self.fold_masks[fold_idx]]
+        #     fold_users = fold_df['user_encoded'].unique()
+        #
+        #     assert len(fold_users) == n_users, f"Fold {fold_idx} missing users"
+
+        # print(f"Created {n_folds} fold masks")
+        # for fold_idx in range(n_folds):
+        #     print(f"Fold {fold_idx}: {self.fold_masks[fold_idx].sum()} interactions")
 
     def get_fold_i(self, i, n_folds=5):
         """
         Generate train and validation dataframes for fold i.
-        Ultra-optimized version using NumPy operations.
+        Uses pre-computed masks from split_interactions_by_user_item.
 
         Parameters:
         -----------
@@ -292,43 +329,41 @@ class RecommendationDataset:
         if i < 0 or i >= n_folds:
             raise ValueError(f"Fold index must be between 0 and {n_folds - 1}, got {i}")
 
-        # Sort by user_encoded if not already sorted
-        df = self.complete_df.sort_values('user_encoded')
+        # Check if fold masks exist, if not create them
+        if not hasattr(self, 'fold_masks'):
+            print(f"Fold masks not found. Creating {n_folds} fold masks...")
+            self.split_interactions_by_user_item(n_folds=n_folds)
 
-        # Get user_encoded as numpy array for faster operations
-        users = df['user_encoded'].values
+        # Get the i-th mask for validation
+        val_mask = self.fold_masks[i]
 
-        # Find boundaries between users
-        user_changes = np.concatenate([[True], users[1:] != users[:-1], [True]])
-        user_boundaries = np.where(user_changes)[0]
+        # Combine other folds for training
+        train_mask = np.zeros(len(self.complete_df), dtype=bool)
+        for fold_idx in range(n_folds):
+            if fold_idx != i:
+                train_mask |= self.fold_masks[fold_idx]
 
-        # Pre-allocate fold assignment array
-        fold_assignments = np.empty(len(df), dtype=np.int8)
+        # Create train and validation dataframes
+        self.val_df = self.complete_df[val_mask].copy()
+        self.train_df = self.complete_df[train_mask].copy()
 
-        # Vectorized fold assignment
-        for start, end in zip(user_boundaries[:-1], user_boundaries[1:]):
-            n_interactions = end - start
+        # Store masks for potential later use
+        self.train_mask = train_mask
+        self.val_mask = val_mask
 
-            if n_interactions < n_folds:
-                # Distribute interactions
-                fold_assignments[start:end] = np.arange(n_interactions) % n_folds
-            else:
-                # Standard k-fold split
-                fold_size = n_interactions // n_folds
-                remainder = n_interactions % n_folds
+        # print(f"Fold {i}: Train size = {len(self.train_df)}, Val size = {len(self.val_df)}")
 
-                # Create fold indices for this user
-                fold_indices = np.repeat(np.arange(n_folds),
-                                         [fold_size + (1 if j < remainder else 0)
-                                          for j in range(n_folds)])
-                fold_assignments[start:end] = fold_indices
-
-        # Create boolean mask and split
-        val_mask = fold_assignments == i
-
-        self.val_df = df[val_mask].copy()
-        self.train_mask = ~val_mask
-        self.train_df = df[~val_mask].copy()
+        # # Verify all users and items are in both sets
+        # train_users = self.train_df['user_encoded'].nunique()
+        # train_items = self.train_df['item_encoded'].nunique()
+        # val_users = self.val_df['user_encoded'].nunique()
+        # val_items = self.val_df['item_encoded'].nunique()
+        #
+        # total_users = self.complete_df['user_encoded'].nunique()
+        # total_items = self.complete_df['item_encoded'].nunique()
+        #
+        # print(f"Train: {train_users}/{total_users} users, {train_items}/{total_items} items")
+        # print(f"Val: {val_users}/{total_users} users, {val_items}/{total_items} items")
 
     def prepare_data(self):
         """Filter, encode, and split data"""
@@ -343,13 +378,9 @@ class RecommendationDataset:
             self.num_users = len(pd.unique(self.complete_df['user_encoded']))
             self.num_items = len(pd.unique(self.complete_df['item_encoded']))
 
-        # self.split_interactions_by_user()
-
-        self._create_graph_structures()
-
+        self.split_interactions_by_user()
         self.calculate_item_popularities()
 
-        self.to_device(self.device)
 
     def _create_graph_structures(self, rating_weights=None):
         """Create graph structures for graph-based models"""
@@ -385,14 +416,86 @@ class RecommendationDataset:
         for i, user_id in enumerate(user_ids):
             user_pos_items = self.get_user_positive_items(user_id, split='all')
 
-            neg_item = np.random.randint(0, self.num_items)
+            neg_item = torch.randint(0, self.num_items, (1,))
             attempts = 0
             while neg_item in user_pos_items and attempts < 100:
-                neg_item = np.random.randint(0, self.num_items)
+                neg_item = torch.randint(0, self.num_items, (1,))
                 attempts += 1
             neg_items[i] = neg_item
 
         return neg_items
+
+    def build_masked_negative_pools(self):
+        """Pre-compute negative pools considering train_mask"""
+        # Count item frequencies in positive interactions
+        item_counts = torch.zeros(self.num_items, device=self.device)
+        for user_id in range(self.num_users):
+            pos_items = self.get_user_positive_items(user_id, split='all')
+            for item in pos_items:
+                item_counts[item] += 1
+
+        # Create sampling probabilities (inverse popularity)
+        neg_probs = 1.0 / (item_counts + 1.0)  # Add 1 to avoid division by zero
+        neg_probs = neg_probs / neg_probs.sum()
+
+        # Store cumulative distribution
+        self.neg_sampling_probs = neg_probs
+        self.neg_cumsum = torch.cumsum(neg_probs, dim=0)
+
+    def sample_negative_items_pool(self, user_ids):
+        """Sample negative items for given users"""
+        batch_size = len(user_ids)
+
+        # Sample from distribution
+        uniform_samples = torch.rand(batch_size, device=self.device)
+        neg_items = torch.searchsorted(self.neg_cumsum, uniform_samples)
+
+        # Verify and resample if needed (vectorized)
+        for i, user_id in enumerate(user_ids):
+            user_pos_items = set(self.get_user_positive_items(user_id, split='all'))
+
+            # Resample if we hit a positive item
+            attempts = 0
+            while neg_items[i].item() in user_pos_items and attempts < 10:
+                uniform_sample = torch.rand(1, device=self.device)
+                neg_items[i] = torch.searchsorted(self.neg_cumsum, uniform_sample)
+                attempts += 1
+
+        return neg_items
+
+    def sample_negative_items_batch(self, user_ids, num_negatives=1):
+        """
+        Ultra-fast negative sampling that allows false negatives
+        with very low probability. Best for large-scale training.
+        """
+        batch_size = len(user_ids)
+
+        # if not hasattr(self, 'valid_train_indices'):
+        #     valid_train_indices = torch.where(self.train_mask)[0]
+        #     num_valid_items = len(valid_train_indices)
+
+        neg_items = torch.randint(0, self.num_items,
+                                  (batch_size, num_negatives),
+                                  device=self.device)
+
+        # If you need to ensure no positives (slower but still fast)
+        if self.ensure_true_negatives:
+            for i, user_id in enumerate(user_ids):
+                user_pos_items = set(self.get_user_positive_items(user_id, split='all'))
+                for j in range(num_negatives):
+                    if neg_items[i, j].item() in user_pos_items:
+                        # Sample from negative pool
+                        all_items = np.arange(self.num_items)
+                        mask = np.ones(self.num_items, dtype=bool)
+                        mask[list(user_pos_items)] = False
+                        neg_candidates = all_items[mask]
+                        if len(neg_candidates) > 0:
+                            neg_items[i, j] = torch.tensor(
+                                np.random.choice(neg_candidates),
+                                device=self.device
+                            )
+
+        return neg_items.squeeze() if num_negatives == 1 else neg_items
 
     def get_dataloader(self, split='train', batch_size=512, shuffle=True,
                        num_negatives=1, model_type='lightgcn'):
@@ -526,25 +629,6 @@ def sample_negative_items(user_ids, pos_item_ids, num_items, user_positive_items
 
     # Single transfer to GPU with int32
     return torch.tensor(neg_items, dtype=torch.int32, device=device)
-
-
-def sample_negatives(positive_item_ids, num_items, num_negatives=1):
-    # Create array of all possible item indices
-    all_items = np.arange(num_items)
-
-    # Get items not in positive set
-    negative_candidates = np.setdiff1d(all_items, positive_item_ids)
-
-    # Randomly sample from negative candidates
-    if len(negative_candidates) >= num_negatives:
-        negatives = np.random.choice(negative_candidates,
-                                     size=num_negatives,
-                                     replace=False)
-    else:
-        # Handle edge case where user has interacted with almost all items
-        negatives = negative_candidates
-
-    return negatives
 
 
 def prepare_adj_tensor(dataset):
