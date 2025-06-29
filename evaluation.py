@@ -513,7 +513,7 @@ def calculate_simpson_index_recommendations(recommended_items, encoded_to_genres
         if item_id in encoded_to_genres:
             genres = encoded_to_genres[item_id]
             # Normalize by number of genres to avoid bias towards items with more genres
-            weight = 1.0 / len(genres)
+            # weight = 1.0 / len(genres)
             for genre in genres:
                 genre_counts[genre] += 1
                 total_genre_assignments += 1

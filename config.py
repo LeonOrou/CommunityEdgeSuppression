@@ -39,6 +39,7 @@ class Config:
         self.reproducibility = True
         self.learning_rate = 5e-4
         self.nr_items = None
+        self.training_time = None
 
         self.setup_device()
 
@@ -52,15 +53,29 @@ class Config:
     def setup_model_config(self):
         """Setup model-specific configurations."""
         if self.model_name == 'LightGCN':
-            self.batch_size = 1024
             self.learning_rate = 5e-3
-            self.epochs = 50  # because it's different for each model
-            self.n_layers = 3
-            self.embedding_dim = 64
+            self.n_layers = 4
+            self.embedding_dim = 128
             self.num_folds = 5
             self.reg = 1e-4
-            # self.weight_decay = 1e-4  # already in L2 regularization loss
             self.patience = 10
+
+            if self.dataset_name == 'ml-100k':
+                self.batch_size = 1024
+                self.epochs = 150
+                self.n_layers = 4
+                self.embedding_dim = 128
+            elif self.dataset_name == 'ml-1m':
+                self.batch_size = 2048
+                self.epochs = 50
+                self.n_layers = 4
+                self.embedding_dim = 128
+            elif self.dataset_name == 'lastfm':
+                self.batch_size = 1024
+                self.epochs = 150
+                self.n_layers = 4
+                self.embedding_dim = 128
+
         elif self.model_name == 'ItemKNN':
             if self.dataset_name == 'ml-100k':
                 self.item_knn_topk = 200
@@ -70,11 +85,12 @@ class Config:
                 self.shrink = 10
             elif self.dataset_name == 'lastfm':
                 self.item_knn_topk = 200
-                self.shrink = 10
+                self.shrink = 1
             else:
                 self.item_knn_topk = 125
                 self.shrink = 30
             self.feature_weighting = 'tf-idf'
+
         elif self.model_name == 'MultiVAE':
             self.learning_rate = 5e-3
             self.epochs = 200
@@ -83,11 +99,11 @@ class Config:
             if self.dataset_name == 'ml-100k':
                 self.hidden_dimension = 800
                 self.latent_dimension = 200
-                self.anneal_cap = 0.3
-            elif self.dataset_name == 'ml-1m':
-                self.hidden_dimension = 600
-                self.latent_dimension = 200
                 self.anneal_cap = 0.4
+            elif self.dataset_name == 'ml-1m':
+                self.hidden_dimension = 800
+                self.latent_dimension = 200
+                self.anneal_cap = 0.3
             elif self.dataset_name == 'lastfm':
                 # still check
                 self.hidden_dimension = 600

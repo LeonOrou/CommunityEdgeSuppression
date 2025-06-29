@@ -20,7 +20,7 @@ def init_logging(config, log_level=logging.INFO):
     # Generate a unique datatime ID for the experiment run
     datetime_id = datetime.datetime.now().strftime("%m%d_%H%M%S")
     # Store the experiment_run_id in the config object for consistent use across log calls
-    config.experiment_run_id = f"{config.dataset_name}_{config.model_name}_{datetime_id}"
+    config.experiment_run_id = f"{config.dataset_name}_{config.model_name}_u{config.users_dec_perc_suppr}_s{config.community_suppression}_p{config.suppress_power_nodes_first}_{datetime_id}"
     log_filename = f"{config.experiment_run_id}.log"
     log_path = os.path.join(log_dir, log_filename)
     config.log_path = log_path  # Save log_path in config for reference
@@ -107,6 +107,7 @@ def log_metrics(validation_metrics, config, stage):
 
     # Construct the full log entry as a dictionary
     log_entry = {
+        "training_time": config.training_time,
         "event": "metrics_report",  # Type of log event
         "experiment_id": config.experiment_run_id,  # Consistent experiment ID
         "stage": stage,  # Stage of the experiment (e.g., validation, test)
