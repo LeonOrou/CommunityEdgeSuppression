@@ -12,6 +12,7 @@ from utils_functions import get_community_data, get_biased_connectivity_data, se
 from logging_system import init_logging, log_metrics
 import logging
 from training import train_model
+import torch
 
 warnings.filterwarnings('ignore')
 
@@ -19,7 +20,7 @@ warnings.filterwarnings('ignore')
 def main():
     set_seed(21)  # For reproducibility
     parser = ArgumentParser()
-    parser.add_argument("--model_name", type=str, default='LightGCN', choices=['LightGCN', 'ItemKNN', 'MultiVAE'],)
+    parser.add_argument("--model_name", type=str, default='ItemKNN', choices=['LightGCN', 'ItemKNN', 'MultiVAE'],)
     parser.add_argument("--dataset_name", type=str, default='ml-100k', choices=['ml-100k', 'ml-1m', 'lastfm'])
     parser.add_argument("--users_top_percent", type=float, default=0.05)
     parser.add_argument("--items_top_percent", type=float, default=0.05)
@@ -27,28 +28,27 @@ def main():
     parser.add_argument("--items_dec_perc_suppr", type=float, default=0.0)
     parser.add_argument("--community_suppression", type=float, default=0.5)  # high value is high suppression
     parser.add_argument("--suppress_power_nodes_first", type=str, default='True')
-    parser.add_argument("--use_suppression", type=str, default='False')
+    parser.add_argument("--use_suppression", type=str, default='True')
 
     # Add model-specific hyperparameters
-    parser.add_argument("--embedding_dim", type=int, default=64, help="LightGCN: Embedding dimension")
-    parser.add_argument("--n_layers", type=int, default=3, help="LightGCN: Number of layers")
-    parser.add_argument("--item_knn_topk", type=int, default=125, help="ItemKNN: Top K neighbors")
-    parser.add_argument("--shrink", type=int, default=50, help="ItemKNN: Shrinkage parameter")
-    parser.add_argument("--hidden_dimension", type=int, default=600, help="MultiVAE: Hidden layer dimension")
-    parser.add_argument("--latent_dimension", type=int, default=200, help="MultiVAE: Latent dimension")
-    parser.add_argument("--anneal_cap", type=float, default=0.2, help="MultiVAE: Anneal cap")
+    # parser.add_argument("--embedding_dim", type=int, default=128, help="LightGCN: Embedding dimension")
+    # parser.add_argument("--n_layers", type=int, default=4, help="LightGCN: Number of layers")
+    # parser.add_argument("--item_knn_topk", type=int, default=200, help="ItemKNN: Top K neighbors")
+    # parser.add_argument("--shrink", type=float, default=10, help="ItemKNN: Shrinkage parameter")
+    # parser.add_argument("--hidden_dimension", type=int, default=800, help="MultiVAE: Hidden layer dimension")
+    # parser.add_argument("--latent_dimension", type=int, default=200, help="MultiVAE: Latent dimension")
+    # parser.add_argument("--anneal_cap", type=float, default=0.4, help="MultiVAE: Anneal cap")
 
-    # False: 0.4907      0.4827      0.4386      0.3752, cv folds
-    # True:  0.4881      0.4795      0.4364      0.3722, cv folds, perc suppression 0.3, strength 0.5
-    # True 0.5195      0.4999      0.4386      0.3443, with rating weights in BCE
     config = Config()
     config.update_from_args(parser.parse_args())
     config.setup_model_config()
-    config.update_from_args(parser.parse_args())  # model specific hyperparameters
+    # config.update_from_args(parser.parse_args())  # model specific hyperparameters
     init_logging(config)
 
     dataset = RecommendationDataset(name=config.dataset_name, data_path=f'dataset/{config.dataset_name}')
     dataset.prepare_data()
+    if config.model_name == 'LightGCN':
+        dataset._create_graph_structures()
 
     config.user_degrees, config.item_degrees = dataset.get_node_degrees()
     print("Preparing data with consistent encoding...")
@@ -98,6 +98,8 @@ def main():
 
         dataset.get_fold_i(i=fold)  # sets train_df and val_df for this fold
         config.train_mask = dataset.train_mask
+        if config.model_name == 'LightGCN':
+            dataset.build_masked_negative_pools()
 
         model = train_model(dataset=dataset, model=model, config=config)
 
@@ -123,11 +125,12 @@ def main():
             for metric_name, values in metrics.items():
                 cv_summary[k_][metric_name] = np.mean(values)
 
-        log_metrics(cv_summary, config, stage='cv_avg')
         print_metric_results(cv_summary, "CROSS-VALIDATION SUMMARY (5-fold average)")
+        train_time_end = time.time()
+        config.training_time = (train_time_end - train_time_start) / 60
+        log_metrics(cv_summary, config, stage='cv_avg')
 
-    train_time_end = time.time()
-    print(f"\nTraining time: {n_folds} folds, model {config.model_name}, on {config.dataset_name}: {(train_time_end - train_time_start)/60:.0f} minutes")
+    print(f"\nTraining time: {n_folds} folds, model {config.model_name}, on {config.dataset_name}: {config.training_time:.0f} minutes")
 
     # Ensure all logging handlers are properly closed
     logging.shutdown()

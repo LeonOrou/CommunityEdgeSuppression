@@ -30,7 +30,7 @@ def train_itemknn(model, dataset, config, verbose=True):
 
     start_time = time.time()
 
-    # TODO: make multiple training iterations to proof community edge suppression as one-shot learning
+
     if config.use_suppression:
         current_edge_weights = community_edge_suppression(
             torch.tensor(training_interactions, device=config.device), config).cpu().numpy()
@@ -386,7 +386,7 @@ def train_lightgcn_epoch(model, dataset, config, optimizer, all_train_users, all
 
         batch_users = all_train_users[batch_indices]
         batch_pos_items = all_train_items[batch_indices]
-        batch_neg_items = dataset.sample_negative_items(user_ids=batch_users)
+        batch_neg_items = dataset.sample_negative_items_pool(user_ids=batch_users)
 
         # Forward pass
         user_emb, item_emb = model(dataset.train_edge_index, dataset.current_edge_weight)
