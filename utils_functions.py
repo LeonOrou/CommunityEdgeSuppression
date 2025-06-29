@@ -59,14 +59,10 @@ def community_edge_suppression(adj_tens, config):
     suppress_mask = torch.zeros(adj_tens.shape[0], dtype=torch.bool, device=adj_tens.device)
 
     if users_dec_perc_suppress > 0.0:
-        total_user_suppress_count = int(len(config.train_mask) * users_dec_perc_suppress)
-
         in_com_user_indices = torch.nonzero(biased_user_edges_mask).flatten()
+        total_user_suppress_count = int(len(in_com_user_indices) * users_dec_perc_suppress)
 
-        # in_com_user_suppress_count = min(int(total_user_suppress_count), in_com_user_indices.numel())
-        in_com_user_suppress_count = int(in_com_user_indices)  # count from number of biased edges, not total edges
-
-        if in_com_user_suppress_count > 0 and in_com_user_indices.numel() > 0:
+        if in_com_user_indices.numel() > 0:
             if suppress_power_nodes_first:
                 # Create mask for power user edges
                 user_edges_mask = torch.zeros(adj_tens.shape[0], dtype=torch.bool, device=device)
@@ -80,7 +76,7 @@ def community_edge_suppression(adj_tens, config):
                 # Start with power user edges
                 selected_edges = power_user_biased_edges.clone()
 
-                still_to_drop = in_com_user_suppress_count - power_user_biased_count
+                still_to_drop = total_user_suppress_count - power_user_biased_count
 
                 if still_to_drop > 0:
                     # Find remaining biased edges (not power users)
@@ -96,7 +92,7 @@ def community_edge_suppression(adj_tens, config):
 
                 suppress_mask[selected_edges] = True
             else:
-                perm = torch.randperm(in_com_user_indices.numel(), device=device)[:in_com_user_suppress_count]
+                perm = torch.randperm(in_com_user_indices.numel(), device=device)[:total_user_suppress_count]
                 suppress_mask[in_com_user_indices[perm]] = True
 
     if items_dec_perc_suppress > 0.0:
