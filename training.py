@@ -1,9 +1,10 @@
 import time
 from collections import defaultdict
 from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
+from torch_geometric.utils import structured_negative_sampling
 from evaluation import evaluate_current_model_ndcg, evaluate_current_model_ndcg_vectorized
 from dataset import RecommendationDataset, sample_negative_items, prepare_adj_tensor, prepare_training_data
-from models import calculate_bpr_loss
+from models import calculate_bpr_loss, weighted_bpr_loss
 from utils_functions import community_edge_suppression
 from scipy.sparse import csr_matrix
 import torch
@@ -29,7 +30,6 @@ def train_itemknn(model, dataset, config, verbose=True):
     training_interactions = dataset.train_df[['user_encoded', 'item_encoded', 'rating']].values
 
     start_time = time.time()
-
 
     if config.use_suppression:
         current_edge_weights = community_edge_suppression(
@@ -165,7 +165,7 @@ def check_early_stopping(val_ndcg, best_val_ndcg, patience_counter, patience, mi
 
     # Check if learning has plateaued
     if len(val_history) >= 5 and epoch > min_stop_epochs:
-        recent_std = np.std(val_history[-5:])
+        recent_std = np.std(val_history[-10:])
         if recent_std < 0.0001 and patience_counter >= patience // 2:
             if verbose:
                 print(f"  Early stopping at epoch {epoch} - validation plateaued")
@@ -313,7 +313,7 @@ def train_lightgcn(model, dataset, config, user_positive_items, device, verbose=
     all_train_users, all_train_items, train_indices = prepare_training_data(
         dataset.train_df, device=device)
 
-    min_stop_epochs = 40
+    min_stop_epochs = 50
     adj_tens = prepare_adj_tensor(dataset)
     dataset.train_edge_index, dataset.training_edge_weight = dataset.create_bipartite_graph(df=dataset.train_df, device=device)
 
@@ -329,10 +329,13 @@ def train_lightgcn(model, dataset, config, user_positive_items, device, verbose=
             edge_weights_modified = torch.concatenate((edge_weights_modified, edge_weights_modified))
             dataset.current_edge_weight = edge_weights_modified.to(device)
 
+        _, _, user_negative_items = structured_negative_sampling(edge_index=dataset.train_edge_index,
+                                                                 num_nodes=dataset.num_items,
+                                                                 contains_neg_self_loops=False)
         # Training step
         epoch_loss = train_lightgcn_epoch(
             model, dataset, config, optimizer, all_train_users, all_train_items,
-            train_indices, user_positive_items, batch_size, device)
+            train_indices, user_positive_items, user_negative_items, batch_size, device)
         # track time and result between vectorized and non-vectorized versions
         # val_ndcg = evaluate_current_model_ndcg(model, dataset, model_type='LightGCN', k=10)
         val_ndcg = evaluate_current_model_ndcg_vectorized(model, dataset, model_type='LightGCN', k=10)
@@ -365,7 +368,7 @@ def train_lightgcn(model, dataset, config, user_positive_items, device, verbose=
 
 
 def train_lightgcn_epoch(model, dataset, config, optimizer, all_train_users, all_train_items,
-                         train_indices, user_positive_items, batch_size, device):
+                         train_indices, user_positive_items, user_negative_items, batch_size, device):
     """Train for one epoch and return average loss."""
     total_loss = 0
     num_batches = 0
@@ -386,17 +389,17 @@ def train_lightgcn_epoch(model, dataset, config, optimizer, all_train_users, all
 
         batch_users = all_train_users[batch_indices]
         batch_pos_items = all_train_items[batch_indices]
-        batch_neg_items = dataset.sample_negative_items_pool(user_ids=batch_users)
+        batch_neg_items = user_negative_items[batch_indices]
 
         # Forward pass
-        user_emb, item_emb = model(dataset.train_edge_index, dataset.current_edge_weight)
+        user_emb, item_emb = model(dataset.train_edge_index)
 
         batch_user_emb = user_emb[batch_users]
         batch_pos_item_emb = item_emb[batch_pos_items]
         batch_neg_item_emb = item_emb[batch_neg_items]
 
-        # Calculate loss
-        bpr_loss = calculate_bpr_loss(batch_user_emb, batch_pos_item_emb, batch_neg_item_emb, dataset.current_edge_weight[batch_pos_items])
+        # bpr_loss = calculate_bpr_loss(batch_user_emb, batch_pos_item_emb, batch_neg_item_emb, dataset.current_edge_weight[batch_pos_items])
+        bpr_loss = weighted_bpr_loss(batch_user_emb, batch_pos_item_emb, batch_neg_item_emb, dataset.current_edge_weight[batch_pos_items])
 
         # Add L2 regularization
         l2_reg = config.reg * (
@@ -405,7 +408,7 @@ def train_lightgcn_epoch(model, dataset, config, optimizer, all_train_users, all
                 torch.sum(batch_neg_item_emb * batch_neg_item_emb)
         ) / len(batch_indices)
 
-        loss = bpr_loss + l2_reg
+        loss = bpr_loss - l2_reg
 
         # Backward pass
         optimizer.zero_grad()

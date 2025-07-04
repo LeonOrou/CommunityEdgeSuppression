@@ -1,11 +1,11 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
 from torch_geometric.utils import degree
-from sklearn.preprocessing import normalize
-from scipy.sparse import csr_matrix
+import numpy as np
 import scipy.sparse as sp
+from scipy.sparse import csr_matrix
+
 
 
 # Custom LightGCN implementation with edge weights
@@ -83,16 +83,15 @@ def calculate_bpr_loss(user_emb, pos_item_emb, neg_item_emb, pos_ratings):
     pos_scores = (user_emb * pos_item_emb).sum(dim=1)
     neg_scores = (user_emb * neg_item_emb).sum(dim=1)
     loss = torch.nn.functional.softplus(neg_scores - pos_scores)
-    weighted_loss = loss * pos_ratings
-
+    weighted_loss = loss * pos_ratings  # lower scores increase loss, add epsilon if intended to make zeros
     return torch.mean(weighted_loss)
 
 
-import numpy as np
-import scipy.sparse as sp
-from sklearn.preprocessing import normalize
-from scipy.sparse import csr_matrix, coo_matrix
-import warnings
+def weighted_bpr_loss(user_emb, pos_item_emb, neg_item_emb, weights):
+    pos_scores = (user_emb * pos_item_emb).sum(dim=1)
+    neg_scores = (user_emb * neg_item_emb).sum(dim=1)
+    loss = -torch.sum(weights * torch.log(torch.sigmoid((pos_scores - neg_scores))))
+    return loss
 
 
 class ItemKNN:
@@ -118,11 +117,43 @@ class ItemKNN:
         self.similarity_matrix = None
         self.user_item_matrix = None
 
+    def fit(self, interactions):
+        """
+        Fit the model on interaction data.
+
+        Args:
+            interactions: torch tensor of shape (nr_interactions, 3) with
+                         columns [user_id, item_id, rating_weight]
+        """
+        # Convert torch tensor to numpy
+        if isinstance(interactions, torch.Tensor):
+            interactions_np = interactions.cpu().numpy()
+        else:
+            interactions_np = interactions
+
+        # Create sparse user-item matrix
+        self.user_item_matrix = csr_matrix(
+            (interactions_np[:, 2].astype(float), (interactions_np[:, 0].astype(int), interactions_np[:, 1].astype(int))),
+            shape=(self.num_users, self.num_items)
+        )
+        # Normalize the user-item matrix
+        # self.bm25_matrix = self.okapi_BM25(self.user_item_matrix.T)
+        self.tf_idf_matrix = self.TF_IDF(self.user_item_matrix)
+
+        # Compute weighted cosine similarity
+        self.similarity_matrix = self.cosine_sim(self.tf_idf_matrix)
+
+        # For each item, keep only top-k similar items
+        self._prune_similarity_matrix()
+
     def TF_IDF(self, rating_matrix):
         """
-        Items are assumed to be on rows
-        :param dataMatrix:
-        :return:
+        Apply TF-IDF weighting to user-item matrix.
+        Users are on rows, items are on columns.
+        Items are treated as documents, users as terms.
+
+        :param rating_matrix: user-item matrix (users × items)
+        :return: TF-IDF weighted user-item matrix
         """
 
         # TFIDF each row of a sparse amtrix
@@ -239,36 +270,6 @@ class ItemKNN:
 
         return similarity.tocsr()
 
-    def fit(self, interactions):
-        """
-        Fit the model on interaction data.
-
-        Args:
-            interactions: torch tensor of shape (nr_interactions, 3) with
-                         columns [user_id, item_id, rating_weight]
-        """
-        # Convert torch tensor to numpy
-        if isinstance(interactions, torch.Tensor):
-            interactions_np = interactions.cpu().numpy()
-        else:
-            interactions_np = interactions
-
-        # Create sparse user-item matrix
-        self.user_item_matrix = csr_matrix(
-            (interactions_np[:, 2].astype(float), (interactions_np[:, 0].astype(int), interactions_np[:, 1].astype(int))),
-            shape=(self.num_users, self.num_items)
-        )
-
-        # Apply BM25 weighting
-        # self.bm25_matrix = self.okapi_BM25(self.user_item_matrix.T)
-        self.tf_idf_matrix = self.TF_IDF(self.user_item_matrix)
-
-        # Compute weighted cosine similarity
-        self.similarity_matrix = self.cosine_sim(self.tf_idf_matrix)
-
-        # For each item, keep only top-k similar items
-        self._prune_similarity_matrix()
-
     def _prune_similarity_matrix(self):
         """
         Keep only top-k similar items for each item to save memory.
@@ -316,12 +317,8 @@ class ItemKNN:
         if np.isscalar(user_ids):
             user_ids = [user_ids]
 
-        if item_ids is not None:
-            # Predict specific ratings
-            return self._predict_ratings(user_ids, item_ids)
-        else:
-            # Get top-n recommendations
-            return self._recommend_items_similarities(user_ids, n_items)
+        # Get top-n recommendations
+        return self._recommend_items_similarities(user_ids, n_items)
 
     def _predict_ratings(self, user_ids, item_ids):
         """
@@ -371,8 +368,8 @@ class ItemKNN:
         recommendations = []
 
         for user_id in user_ids:
-            # Get user's BM25-weighted ratings
             user_items = self.tf_idf_matrix.getrow(user_id)
+            # user_items = self.user_item_matrix.getrow(user_id)
             user_item_indices = user_items.nonzero()[1]
 
             # Compute scores using item-item similarities
