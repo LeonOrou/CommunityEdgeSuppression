@@ -20,13 +20,13 @@ warnings.filterwarnings('ignore')
 def main():
     set_seed(21)  # For reproducibility
     parser = ArgumentParser()
-    parser.add_argument("--model_name", type=str, default='ItemKNN', choices=['LightGCN', 'ItemKNN', 'MultiVAE'],)
+    parser.add_argument("--model_name", type=str, default='LightGCN', choices=['LightGCN', 'ItemKNN', 'MultiVAE'],)
     parser.add_argument("--dataset_name", type=str, default='ml-100k', choices=['ml-100k', 'ml-1m', 'lastfm'])
     parser.add_argument("--users_top_percent", type=float, default=0.05)
     parser.add_argument("--items_top_percent", type=float, default=0.05)
-    parser.add_argument("--users_dec_perc_suppr", type=float, default=0.5)
+    parser.add_argument("--users_dec_perc_suppr", type=float, default=0.625)
     parser.add_argument("--items_dec_perc_suppr", type=float, default=0.0)
-    parser.add_argument("--community_suppression", type=float, default=0.5)  # high value is high suppression
+    parser.add_argument("--community_suppression", type=float, default=0.8)  # high value is high suppression
     parser.add_argument("--suppress_power_nodes_first", type=str, default='True')
     parser.add_argument("--use_suppression", type=str, default='True')
 
@@ -42,7 +42,7 @@ def main():
     config = Config()
     config.update_from_args(parser.parse_args())
     config.setup_model_config()
-    # config.update_from_args(parser.parse_args())  # model specific hyperparameters
+    # config.update_from_args(parser.parse_args())  # uncomment to set model specific hyperparameters (after model config setup=
     init_logging(config)
 
     dataset = RecommendationDataset(name=config.dataset_name, data_path=f'dataset/{config.dataset_name}')
@@ -77,16 +77,16 @@ def main():
 
     get_biased_connectivity_data(config, adj_tens)
 
-    # user_biases, item_biases = get_community_bias(item_communities_each_user_dist=config.item_community_connectivity_matrix_distribution,
-    #                    user_communities_each_item_dist=config.user_community_connectivity_matrix_distribution)
-    # # save user biases locally
-    # np.save(f'dataset/{config.dataset_name}/user_biases.npy', user_biases.cpu().numpy())
+    user_biases, item_biases = get_community_bias(item_communities_each_user_dist=config.item_community_connectivity_matrix_distribution,
+                       user_communities_each_item_dist=config.user_community_connectivity_matrix_distribution)
+    # save user biases locally
+    np.save(f'dataset/{config.dataset_name}/user_biases.npy', user_biases.cpu().numpy())
     # load all user biases from all datasets
-    # user_biases_lastfm = np.load(f'dataset/lastfm/user_biases.npy')
-    # user_biases_ml100k = np.load(f'dataset/ml-100k/user_biases.npy')
-    # user_biases_ml1m = np.load(f'dataset/ml-1m/user_biases.npy')
-    # user_biases = [user_biases_lastfm, user_biases_ml100k, user_biases_ml1m]
-    # plot_community_bias(user_biases, dataset_names=['LastFM', 'Ml-100K', 'Ml-1M'])
+    user_biases_lastfm = np.load(f'dataset/lastfm/user_biases.npy')
+    user_biases_ml100k = np.load(f'dataset/ml-100k/user_biases.npy')
+    user_biases_ml1m = np.load(f'dataset/ml-1m/user_biases.npy')
+    user_biases = [user_biases_lastfm, user_biases_ml100k, user_biases_ml1m]
+    plot_community_bias(user_biases, dataset_names=['LastFM', 'Ml-100K', 'Ml-1M'])
 
     cv_results = []
     train_time_start = time.time()
@@ -98,8 +98,6 @@ def main():
 
         dataset.get_fold_i(i=fold)  # sets train_df and val_df for this fold
         config.train_mask = dataset.train_mask
-        if config.model_name == 'LightGCN':
-            dataset.build_masked_negative_pools()
 
         model = train_model(dataset=dataset, model=model, config=config)
 

@@ -62,6 +62,7 @@ def save_ml100k_genre_labels(file_path, genre_mapping, dataset_name='ml-100k', k
         raise FileNotFoundError(f"File not found: {file_path}")
 
     genre_labels = {}
+    # most_genres = 0
 
     if keep_labels:
         # format {movie_string: [genre1, genre2, ...]}
@@ -97,10 +98,13 @@ def save_ml100k_genre_labels(file_path, genre_mapping, dataset_name='ml-100k', k
                 genres = parts[-19:]
                 # Convert to a list of genre labels with the label being the ith position
                 genres = [i for i, label in enumerate(genres) if label == '1']
+                # if len(genres) > most_genres:
+                #     most_genres = len(genres)
                 # if len(genres) > 3:
                 #     genres = genres[:3]
                 genre_labels[item_id] = genres
 
+    # print(f"Most genres for an item in ml-100k: {most_genres}")
     # Save the genre labels to a local JSON file
     output_file = f'dataset/{dataset_name}/saved/item_genre_labels_{dataset_name}_labels{keep_labels}.json'
     with open(output_file, 'w') as json_file:
@@ -153,6 +157,8 @@ def save_ml1m_genre_labels(file_path, genre_mapping, dataset_name='ml-1m', keep_
         raise FileNotFoundError(f"File not found: {file_path}")
 
     genre_labels = {}
+    # most_genres = 0
+
     if keep_labels:
         with open(file_path, 'rb') as f:
             for line in f.read().splitlines():
@@ -178,11 +184,14 @@ def save_ml1m_genre_labels(file_path, genre_mapping, dataset_name='ml-1m', keep_
                     genre_labels[item_id] = genre_labels_list
                 genres_txt = parts[-1]
                 genres_txt_list = genres_txt.split('|')
+                # if len(genres_txt_list) > most_genres:
+                #     most_genres = len(genres_txt_list)
                 # if len(genres_txt_list) > 3:
                 #     genres_txt_list = genres_txt_list[:3]
                 genre_labels_list = [genre_mapping[genre] for genre in genres_txt_list]
                 genre_labels[item_id] = genre_labels_list
 
+    # print(f"Most genres for an item in ml-1m: {most_genres}")
     # Save the genre labels to a local JSON file
     output_file = f'dataset/{dataset_name}/saved/item_genre_labels_{dataset_name}_labels{keep_labels}_3genres{use_three_genres}.json'
     with open(output_file, 'w') as json_file:
@@ -190,7 +199,7 @@ def save_ml1m_genre_labels(file_path, genre_mapping, dataset_name='ml-1m', keep_
     return genre_labels
 
 
-# save_ml100k_genre_labels('dataset/ml-100k/u.item', genre_mapping=genre_mapping, use_three_genres=True)
+# save_ml100k_genre_labels('dataset/ml-100k/u.item', genre_mapping=genre_mapping, use_three_genres=False)
 # save_lfm_genre_labels('dataset/lastfm/user_taggedartists.dat')
-# save_ml1m_genre_labels('dataset/ml-1m/movies.dat', genre_mapping=genre_mapping, use_three_genres=True)
+# save_ml1m_genre_labels('dataset/ml-1m/movies.dat', genre_mapping=genre_mapping, use_three_genres=False)
 

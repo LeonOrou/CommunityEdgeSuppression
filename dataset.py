@@ -410,151 +410,6 @@ class RecommendationDataset:
         elif split == 'all':
             return self.user_positive_items.get(user_id, set())
 
-    def sample_negative_items(self, user_ids):
-        """Sample negative items for given users"""
-        neg_items = torch.zeros(len(user_ids), dtype=torch.int64, device=self.device)
-        for i, user_id in enumerate(user_ids):
-            user_pos_items = self.get_user_positive_items(user_id, split='all')
-
-            neg_item = torch.randint(0, self.num_items, (1,))
-            attempts = 0
-            while neg_item in user_pos_items and attempts < 100:
-                neg_item = torch.randint(0, self.num_items, (1,))
-                attempts += 1
-            neg_items[i] = neg_item
-
-        return neg_items
-
-    def build_masked_negative_pools(self):
-        """Pre-compute negative pools considering train_mask"""
-        # Count item frequencies in positive interactions
-        item_counts = torch.zeros(self.num_items, device=self.device)
-        for user_id in range(self.num_users):
-            pos_items = self.get_user_positive_items(user_id, split='all')
-            for item in pos_items:
-                item_counts[item] += 1
-
-        # Create sampling probabilities (inverse popularity)
-        neg_probs = 1.0 / (item_counts + 1.0)  # Add 1 to avoid division by zero
-        neg_probs = neg_probs / neg_probs.sum()
-
-        # Store cumulative distribution
-        self.neg_sampling_probs = neg_probs
-        self.neg_cumsum = torch.cumsum(neg_probs, dim=0)
-
-    def sample_negative_items_pool(self, user_ids):
-        """Sample negative items for given users"""
-        batch_size = len(user_ids)
-
-        # Sample from distribution
-        uniform_samples = torch.rand(batch_size, device=self.device)
-        neg_items = torch.searchsorted(self.neg_cumsum, uniform_samples)
-
-        # Verify and resample if needed (vectorized)
-        for i, user_id in enumerate(user_ids):
-            user_pos_items = set(self.get_user_positive_items(user_id, split='all'))
-
-            # Resample if we hit a positive item
-            attempts = 0
-            while neg_items[i].item() in user_pos_items and attempts < 10:
-                uniform_sample = torch.rand(1, device=self.device)
-                neg_items[i] = torch.searchsorted(self.neg_cumsum, uniform_sample)
-                attempts += 1
-
-        return neg_items
-
-    def sample_negative_items_batch(self, user_ids, num_negatives=1):
-        """
-        Ultra-fast negative sampling that allows false negatives
-        with very low probability. Best for large-scale training.
-        """
-        batch_size = len(user_ids)
-
-        # if not hasattr(self, 'valid_train_indices'):
-        #     valid_train_indices = torch.where(self.train_mask)[0]
-        #     num_valid_items = len(valid_train_indices)
-
-        neg_items = torch.randint(0, self.num_items,
-                                  (batch_size, num_negatives),
-                                  device=self.device)
-
-        # If you need to ensure no positives (slower but still fast)
-        if self.ensure_true_negatives:
-            for i, user_id in enumerate(user_ids):
-                user_pos_items = set(self.get_user_positive_items(user_id, split='all'))
-                for j in range(num_negatives):
-                    if neg_items[i, j].item() in user_pos_items:
-                        # Sample from negative pool
-                        all_items = np.arange(self.num_items)
-                        mask = np.ones(self.num_items, dtype=bool)
-                        mask[list(user_pos_items)] = False
-                        neg_candidates = all_items[mask]
-                        if len(neg_candidates) > 0:
-                            neg_items[i, j] = torch.tensor(
-                                np.random.choice(neg_candidates),
-                                device=self.device
-                            )
-
-        return neg_items.squeeze() if num_negatives == 1 else neg_items
-
-    def get_dataloader(self, split='train', batch_size=512, shuffle=True,
-                       num_negatives=1, model_type='lightgcn'):
-        """Get dataloader for specific split and model type"""
-        if model_type in ['lightgcn', 'itemknn']:
-            return self._get_pairwise_dataloader(split, batch_size, shuffle, num_negatives)
-        elif model_type == 'multivae':
-            return self._get_pointwise_dataloader(split, batch_size, shuffle)
-
-    def _get_pairwise_dataloader(self, split, batch_size, shuffle, num_negatives):
-        """Get dataloader for pairwise models (LightGCN, ItemKNN)"""
-        df = getattr(self, f'{split}_df')
-
-        if shuffle:
-            df = df.sample(frac=1)
-
-        for i in range(0, len(df), batch_size):
-            batch = df.iloc[i:i + batch_size]
-
-            users = batch['user_encoded'].values
-            pos_items = batch['item_encoded'].values
-            neg_items = self.sample_negative_items(users, num_negatives)
-
-            yield {
-                'users': torch.tensor(users, dtype=torch.long),
-                'pos_items': torch.tensor(pos_items, dtype=torch.long),
-                'neg_items': torch.tensor(neg_items, dtype=torch.long),
-                'batch_size': len(batch)
-            }
-
-    def _get_pointwise_dataloader(self, split, batch_size, shuffle):
-        """Get dataloader for pointwise models (MultiVAE)"""
-        # Create user-item interaction matrix for VAE
-        df = getattr(self, f'{split}_df')
-
-        # Create sparse matrix representation
-        from scipy.sparse import csr_matrix
-
-        rows = df['user_encoded'].values
-        cols = df['item_encoded'].values
-        data = np.ones(len(df))  # Binary for MultiVAE
-
-        interaction_matrix = csr_matrix((data, (rows, cols)),
-                                        shape=(self.num_users, self.num_items))
-
-        user_ids = np.arange(self.num_users)
-        if shuffle:
-            np.random.shuffle(user_ids)
-
-        for i in range(0, len(user_ids), batch_size):
-            batch_users = user_ids[i:i + batch_size]
-            batch_matrix = interaction_matrix[batch_users].toarray()
-
-            yield {
-                'users': torch.tensor(batch_users, dtype=torch.long),
-                'interactions': torch.tensor(batch_matrix, dtype=torch.float32),
-                'batch_size': len(batch_users)
-            }
-
     def _compute_statistics(self):
         """Compute dataset statistics"""
         if self.complete_df is not None:
@@ -607,6 +462,21 @@ class RecommendationDataset:
         return user_degrees, item_degrees
 
 
+def prepare_adj_tensor(dataset):
+    """Prepare adjacency tensor from dataset in the format (user_id, item_id, rating)"""
+    df = dataset.complete_df
+    adj_tens = torch.tensor(
+        np.column_stack([
+            df['user_encoded'].values,
+            df['item_encoded'].values,
+            df['rating'].values
+        ]),
+        dtype=torch.int64,
+        device=dataset.device
+    )
+    return adj_tens
+
+
 def sample_negative_items(user_ids, pos_item_ids, num_items, user_positive_items, device):
     batch_size = len(user_ids)
     neg_items = np.zeros(batch_size, dtype=np.int32)  # Use int32
@@ -629,21 +499,6 @@ def sample_negative_items(user_ids, pos_item_ids, num_items, user_positive_items
 
     # Single transfer to GPU with int32
     return torch.tensor(neg_items, dtype=torch.int32, device=device)
-
-
-def prepare_adj_tensor(dataset):
-    """Prepare adjacency tensor from dataset in the format (user_id, item_id, rating)"""
-    df = dataset.complete_df
-    adj_tens = torch.tensor(
-        np.column_stack([
-            df['user_encoded'].values,
-            df['item_encoded'].values,
-            df['rating'].values
-        ]),
-        dtype=torch.int64,
-        device=dataset.device
-    )
-    return adj_tens
 
 
 def prepare_training_data(train_df, device):

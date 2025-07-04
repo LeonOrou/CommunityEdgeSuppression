@@ -96,25 +96,41 @@ def community_edge_suppression(adj_tens, config):
                 suppress_mask[in_com_user_indices[perm]] = True
 
     if items_dec_perc_suppress > 0.0:
-        # Find all edges connected to power items
-        item_edge_mask = torch.zeros(adj_tens.shape[0], dtype=torch.bool, device=device)
-        if suppress_power_nodes_first:
-            for item_idx in power_items_idx:
-                item_edge_mask |= (adj_tens[:, 1] == item_idx)
-        else:
-            item_edge_mask = torch.nonzero(~item_edge_mask).squeeze(1)
+        in_com_item_indices = torch.nonzero(biased_item_edges_mask).flatten()
+        total_item_suppress_count = int(len(in_com_item_indices) * items_dec_perc_suppress)
 
-        item_edge_indices = torch.nonzero(item_edge_mask).squeeze(1)
+        if in_com_item_indices.numel() > 0:
+            if suppress_power_nodes_first:
+                # Create mask for power user edges
+                item_edges_mask = torch.zeros(adj_tens.shape[0], dtype=torch.bool, device=device)
+                for item_idx in power_items_idx:
+                    item_edges_mask[adj_tens[:, 0] == item_idx] = True
 
-        total_item_suppress_count = int(adj_tens.shape[0] * items_dec_perc_suppress)  # TODO: discuss from what the users_dec_perc_suppress says to drop from; all edges, biased edges, power edges
+                # Find power user edges within biased edges
+                power_item_biased_edges = item_edges_mask & biased_item_edges_mask
+                power_item_biased_count = torch.sum(power_item_biased_edges)
 
-        in_com_item_indices = item_edge_indices[biased_item_edges_mask[item_edge_indices]]
+                # Start with power user edges
+                selected_edges = power_item_biased_edges.clone()
 
-        in_com_item_suppress_count = min(int(total_item_suppress_count), in_com_item_indices.numel())
+                still_to_drop = total_item_suppress_count - power_item_biased_count
 
-        if in_com_item_suppress_count > 0 and in_com_item_indices.numel() > 0:
-            perm = torch.randperm(in_com_item_indices.numel(), device=device)[:in_com_item_suppress_count]
-            suppress_mask[in_com_item_indices[perm]] = True  # TODO: handle cases where the dropped edges would overlap
+                if still_to_drop > 0:
+                    # Find remaining biased edges (not power users)
+                    remaining_biased_edges = biased_item_edges_mask & ~power_item_biased_edges
+                    remaining_indices = torch.nonzero(remaining_biased_edges).flatten()
+
+                    if remaining_indices.numel() > 0:
+                        # Randomly select from remaining biased edges
+                        num_to_select = min(still_to_drop, remaining_indices.numel())
+                        perm = torch.randperm(remaining_indices.numel(), device=device)[:num_to_select]
+                        selected_remaining = remaining_indices[perm]
+                        selected_edges[selected_remaining] = True
+
+                suppress_mask[selected_edges] = True
+            else:
+                perm = torch.randperm(in_com_item_indices.numel(), device=device)[:total_item_suppress_count]
+                suppress_mask[in_com_item_indices[perm]] = True
 
     edge_weights_new = torch.ones(adj_tens.shape[0], device=device)
     edge_weights_new[suppress_mask] = 1 - community_suppression

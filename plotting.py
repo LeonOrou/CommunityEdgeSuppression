@@ -16,9 +16,6 @@ def plot_community_bias(user_biases, save_path='images/community_biases.png',
     :param save_path: str or None, path to save the figure
     :param dataset_names: list of str, names of the datasets
     """
-    import numpy as np
-    import matplotlib.pyplot as plt
-    import torch
 
     # Process and clean the data
     processed_biases = []
@@ -63,7 +60,7 @@ def plot_community_bias(user_biases, save_path='images/community_biases.png',
                 bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8))
 
     # Main plot styling
-    ax.set_ylabel('Bias [0, 1]', fontsize=22)
+    ax.set_ylabel('Normalized Community Bias [0, 1]', fontsize=22)
     ax.set_xlabel('Datasets', fontsize=22)
 
     # Improve tick labels

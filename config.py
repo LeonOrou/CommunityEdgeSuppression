@@ -62,17 +62,17 @@ class Config:
 
             if self.dataset_name == 'ml-100k':
                 self.batch_size = 1024
-                self.epochs = 150
+                self.epochs = 200
                 self.n_layers = 4
                 self.embedding_dim = 128
             elif self.dataset_name == 'ml-1m':
                 self.batch_size = 2048
-                self.epochs = 50
+                self.epochs = 200
                 self.n_layers = 4
                 self.embedding_dim = 128
             elif self.dataset_name == 'lastfm':
                 self.batch_size = 1024
-                self.epochs = 150
+                self.epochs = 200
                 self.n_layers = 4
                 self.embedding_dim = 128
 

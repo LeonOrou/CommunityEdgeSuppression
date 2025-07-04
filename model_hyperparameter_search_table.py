@@ -86,7 +86,7 @@ def find_top_hyperparameters(dataset: str = "ml-100k", top_k: int = 10) -> Dict[
     model_results = {model: [] for model in model_hyperparams}
 
     # Find all log files matching the pattern
-    log_pattern = f"logs/{dataset} model hyperparameter search/{dataset}_*_????_??????.log"
+    log_pattern = f"logs/{dataset} model hyperparameter search/{dataset}_*.log"
     log_files = glob.glob(log_pattern)
 
     print(f"Found {len(log_files)} log files for dataset {dataset}")
@@ -213,5 +213,5 @@ def display_results(dataset: str = "ml-100k") -> None:
                         f"  Hyperparameters: embedding_dim={best_row['embedding_dim']}, n_layers={best_row['n_layers']}")
 
 
-display_results(dataset='ml-1m')  # Change to 'lastfm', 'ml-100k' or 'ml-1m' as needed
+display_results(dataset='lastfm')  # Change to 'lastfm', 'ml-100k' or 'ml-1m' as needed
 

@@ -308,7 +308,7 @@ def scrape_all_logs(
 
 
 # Example 1: Extract all metrics for all k values
-df, latex = scrape_all_logs(metric_names='user_community_bias', log_directory="logs/no suppression/", output_file='logs/no suppression/no_suppression_table.tex', k_values=[10, 20, 50, 100])
+df, latex = scrape_all_logs(metric_names='user_community_bias', log_directory="logs/no suppression/", output_file='logs/no suppression/no_suppression.tex', k_values=[10, 20, 50, 100])
 print("\nDataFrame:")
 print(df)
 print("\nLaTeX Table:")
