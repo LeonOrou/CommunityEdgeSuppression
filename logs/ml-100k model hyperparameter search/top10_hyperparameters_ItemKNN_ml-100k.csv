@@ -1,0 +1,11 @@
+Rank,shrink,item_knn_topk,NDCG@10,Log File
+1,10.0,200,0.28776147729286383,ml-100k model hyperparameter search\ml-100k_ItemKNN_0626_223213.log
+2,10.0,150,0.2852796511251313,ml-100k model hyperparameter search\ml-100k_ItemKNN_0626_222215.log
+3,20.0,200,0.2841051703357063,ml-100k model hyperparameter search\ml-100k_ItemKNN_0626_223334.log
+4,1.0,150,0.28321333283006844,ml-100k model hyperparameter search\ml-100k_ItemKNN_0628_212026.log
+5,10.0,100,0.28315553909694974,ml-100k model hyperparameter search\ml-100k_ItemKNN_0626_221156.log
+6,20.0,150,0.28261485752376664,ml-100k model hyperparameter search\ml-100k_ItemKNN_0626_222335.log
+7,0.5,150,0.28208233451469145,ml-100k model hyperparameter search\ml-100k_ItemKNN_0628_211908.log
+8,10.0,50,0.2815890589109748,ml-100k model hyperparameter search\ml-100k_ItemKNN_0626_220140.log
+9,1.0,100,0.28127323552445443,ml-100k model hyperparameter search\ml-100k_ItemKNN_0628_211753.log
+10,30.0,200,0.28109492335626296,ml-100k model hyperparameter search\ml-100k_ItemKNN_0626_223451.log

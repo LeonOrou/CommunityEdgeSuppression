@@ -1,0 +1,43 @@
+\documentclass{article}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{colortbl}
+\usepackage{xcolor}
+\usepackage{adjustbox}
+
+\begin{document}
+
+\begin{table}[htbp]
+\centering
+\caption{Experimental Results at top@10}
+\begin{adjustbox}{width=\textwidth,center}
+\begin{tabular}{llccccccccccccccc}
+\toprule
+\multicolumn{2}{l}{\textbf{ML-100K}} & NDCG & Recall & Precision & MRR & Hit Rate & Item Coverage & Gini Index & Avg. Rec. Popularity & Popularity Lift & Pop. Miscalibration & Simpson Index (Genre) & Intra-list Diversity & Norm. Genre Entropy & Unique Genres Count & User Community Bias \\
+\midrule
+\multirow{2}{*}{ItemKNN} & No & 0.2831 & 0.2326 & 0.1968 & 0.4962 & 0.8014 & 0.1701 & \textbf{0.6931} & 238.4259 & 5.6316 & 1.8623 & \textbf{0.8448} & 0.8022 & 0.9135 & 9.4524 & 0.7548 \\
+ & Yes & \cellcolor{red!40} 0.1156 & \cellcolor{red!40} 0.0788 & \cellcolor{red!40} 0.0847 & \cellcolor{red!40} 0.2695 & \cellcolor{red!40} 0.4883 & \textbf{\cellcolor{green!40} 0.4121} & \cellcolor{red!40} 0.8113 & \textbf{\cellcolor{green!40} 157.3159} & \textbf{\cellcolor{green!40} 3.7158} & \cellcolor{green!40} 1.5682 & \cellcolor{red!20} 0.8421 & \textbf{\cellcolor{green!20} 0.8108} & \textbf{\cellcolor{green!20} 0.9169} & \textbf{\cellcolor{green!20} 9.4683} & \textbf{\cellcolor{green!40} 0.5439} \\
+\cmidrule{1-17}
+\multirow{2}{*}{LightGCN} & No & \textbf{0.3419} & \textbf{0.2863} & \textbf{0.2412} & \textbf{0.5484} & \textbf{0.8548} & 0.4051 & 0.6955 & 187.0083 & 4.4171 & \textbf{1.2297} & 0.8212 & 0.7671 & 0.8980 & 8.8277 & 0.7116 \\
+ & Yes & \cellcolor{red!40} 0.2662 & \cellcolor{red!40} 0.2212 & \cellcolor{red!40} 0.1893 & \cellcolor{red!40} 0.4632 & \cellcolor{red!40} 0.7815 & \cellcolor{red!40} 0.1363 & \cellcolor{red!20} 0.7016 & \cellcolor{red!40} 234.0696 & \cellcolor{red!40} 5.5287 & \cellcolor{red!40} 1.9776 & \cellcolor{green!20} 0.8370 & \cellcolor{green!20} 0.7984 & \cellcolor{green!20} 0.9056 & \cellcolor{green!40} 9.3306 & \cellcolor{red!40} 0.8683 \\
+\midrule\midrule
+\multicolumn{2}{l}{\textbf{ML-1M}} & NDCG & Recall & Precision & MRR & Hit Rate & Item Coverage & Gini Index & Avg. Rec. Popularity & Popularity Lift & Pop. Miscalibration & Simpson Index (Genre) & Intra-list Diversity & Norm. Genre Entropy & Unique Genres Count & User Community Bias \\
+\midrule
+\multirow{2}{*}{ItemKNN} & No & 0.2988 & 0.1821 & 0.2385 & \textbf{0.5306} & 0.8324 & 0.2788 & 0.8377 & 1421.2051 & 8.3582 & 1.5424 & \textbf{0.8154} & \textbf{0.7121} & \textbf{0.8899} & \textbf{8.7793} & 0.6238 \\
+ & Yes & \cellcolor{red!40} 0.0163 & \cellcolor{red!40} 0.0054 & \cellcolor{red!40} 0.0093 & \cellcolor{red!40} 0.0702 & \cellcolor{red!40} 0.0866 & \cellcolor{red!40} 0.2451 & \cellcolor{red!40} 0.9513 & \textbf{\cellcolor{green!40} 230.9793} & \textbf{\cellcolor{green!40} 1.3584} & \cellcolor{red!40} 4.0568 & \cellcolor{red!40} 0.7184 & \cellcolor{red!40} 0.6018 & \cellcolor{red!40} 0.8144 & \cellcolor{red!40} 7.3386 & \textbf{\cellcolor{green!40} 0.5339} \\
+\cmidrule{1-17}
+\multirow{2}{*}{LightGCN} & No & \textbf{0.3070} & \textbf{0.1925} & \textbf{0.2476} & 0.5302 & \textbf{0.8466} & \textbf{0.4743} & \textbf{0.7558} & 1069.3417 & 6.2889 & \textbf{0.8252} & 0.7786 & 0.6842 & 0.8703 & 8.0068 & 0.6375 \\
+\midrule\midrule
+\multicolumn{2}{l}{\textbf{Last.FM}} & NDCG & Recall & Precision & MRR & Hit Rate & Item Coverage & Gini Index & Avg. Rec. Popularity & Popularity Lift & Pop. Miscalibration & Simpson Index (Genre) & Intra-list Diversity & Norm. Genre Entropy & Unique Genres Count & User Community Bias \\
+\midrule
+\multirow{2}{*}{ItemKNN} & No & 0.2650 & 0.2381 & 0.1830 & 0.5232 & 0.7895 & 0.4507 & 0.7904 & 203.4934 & 8.1042 & 1.3578 & 0.8410 & 0.6877 & 0.8850 & 10.7794 & 0.8196 \\
+ & Yes & \cellcolor{red!40} 0.0300 & \cellcolor{red!40} 0.0315 & \cellcolor{red!40} 0.0211 & \cellcolor{red!40} 0.0860 & \cellcolor{red!40} 0.1838 & \textbf{\cellcolor{green!40} 0.6813} & \textbf{\cellcolor{green!40} 0.4111} & \textbf{\cellcolor{green!40} 25.8964} & \textbf{\cellcolor{green!40} 1.0313} & \textbf{\cellcolor{green!40} 0.1256} & \textbf{\cellcolor{green!40} 0.9208} & \textbf{\cellcolor{green!40} 0.9090} & \textbf{\cellcolor{green!40} 0.9476} & \textbf{\cellcolor{green!40} 18.0719} & \textbf{\cellcolor{green!40} 0.5250} \\
+\cmidrule{1-17}
+\multirow{2}{*}{LightGCN} & No & \textbf{0.3346} & \textbf{0.3154} & \textbf{0.2351} & \textbf{0.6159} & \textbf{0.9041} & 0.5554 & 0.6954 & 145.4827 & 5.7939 & 0.8841 & 0.8641 & 0.7526 & 0.8960 & 12.5615 & 0.7309 \\
+ & Yes & \cellcolor{red!40} 0.2488 & \cellcolor{red!40} 0.2247 & \cellcolor{red!40} 0.1707 & \cellcolor{red!40} 0.4968 & \cellcolor{red!40} 0.7638 & \cellcolor{red!40} 0.2041 & \cellcolor{red!40} 0.7879 & \cellcolor{red!40} 232.0895 & \cellcolor{red!40} 9.2431 & \cellcolor{red!40} 1.7215 & \cellcolor{red!20} 0.8370 & \cellcolor{red!40} 0.6732 & \cellcolor{red!20} 0.8816 & \cellcolor{red!40} 10.4688 & \cellcolor{red!40} 0.8766 \\
+\bottomrule
+\end{tabular}
+\end{adjustbox}
+\end{table}
+
+\end{document}

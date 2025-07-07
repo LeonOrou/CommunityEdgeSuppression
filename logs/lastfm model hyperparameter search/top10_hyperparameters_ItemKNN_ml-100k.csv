@@ -1,0 +1,11 @@
+Rank,shrink,item_knn_topk,NDCG@10,Log File
+1,1.0,200,0.26275891787508465,lastfm model hyperparameter search\lastfm_ItemKNN_0628_204102.log
+2,0.5,200,0.26262300635358027,lastfm model hyperparameter search\lastfm_ItemKNN_0628_204344.log
+3,1.0,150,0.2618161431171416,lastfm model hyperparameter search\lastfm_ItemKNN_0628_205534.log
+4,0.5,150,0.2614327333983878,lastfm model hyperparameter search\lastfm_ItemKNN_0628_205812.log
+5,1.0,100,0.2598301018562802,lastfm model hyperparameter search\lastfm_ItemKNN_0628_205007.log
+6,0.5,100,0.25878007287456795,lastfm model hyperparameter search\lastfm_ItemKNN_0628_205257.log
+7,0.5,100,0.25878007287456795,lastfm model hyperparameter search\lastfm_ItemKNN_0628_210709.log
+8,1.0,50,0.25556198478378606,lastfm model hyperparameter search\lastfm_ItemKNN_u0.5_s0.5_pTrue_0629_174425.log
+9,5.0,200,0.2539384042529888,lastfm model hyperparameter search\lastfm_ItemKNN_0628_203125.log
+10,5.0,250,0.253805887453111,lastfm model hyperparameter search\lastfm_ItemKNN_0628_203454.log

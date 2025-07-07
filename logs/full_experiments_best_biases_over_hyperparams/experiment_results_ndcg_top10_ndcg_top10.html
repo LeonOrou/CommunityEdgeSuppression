@@ -1,0 +1,40 @@
+
+    <html>
+    <head>
+        <style>
+            table { border-collapse: collapse; width: 100%; font-size: 10px; }
+            th, td { border: 1px solid #ddd; padding: 6px; text-align: center; }
+            th { background-color: #f2f2f2; font-weight: bold; }
+            .baseline { font-weight: bold; background-color: #e6f3ff; }
+            .best { font-weight: bold; text-decoration: underline; }
+            .model-header { background-color: #d9d9d9; font-weight: bold; }
+            .dataset-header { background-color: #f0f0f0; font-weight: bold; }
+        </style>
+    </head>
+    <body>
+    <h2>Recommendation System Results: NDCG @ Top-10</h2>
+    <table>
+    <tr><th>Model</th><th>Hyperparameters</th><th class='dataset-header'>ml-100k</th><th class='dataset-header'>ml-1m</th><th class='dataset-header'>lastfm</th></tr>
+<tr><td class="model-header" rowspan="4">ItemKNN</td><td class="baseline">Baseline (Supp=False)</td><td class="baseline" style="">0.2831</td><td class="baseline" style="">0.2988</td><td class="baseline" style="">0.2650</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=0.625, CS=0.8, SPF=True</td><td>N/A</td><td>N/A</td><td class="" style="background-color: #90EE90">0.1528</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=0.625, CS=0.8, SPF=False</td><td class="" style="background-color: #90EE90">0.2065</td><td>N/A</td><td>N/A</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=0.42, CS=0.8, SPF=False</td><td>N/A</td><td class="" style="background-color: #90EE90">0.2566</td><td>N/A</td></tr>
+<tr><td class="model-header" rowspan="3">MultiVAE</td><td class="baseline">Baseline (Supp=False)</td><td class="baseline" style="">0.3016</td><td class="baseline best" style="">0.3048</td><td class="baseline" style="">0.2706</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=0.625, CS=0.8, SPF=False</td><td class="" style="background-color: #90EE90">0.2709</td><td>N/A</td><td class="" style="background-color: #90EE90">0.2505</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=1.0, CS=0.5, SPF=False</td><td>N/A</td><td class="" style="background-color: #90EE90">0.2829</td><td>N/A</td></tr>
+<tr><td class="model-header" rowspan="3">LightGCN</td><td class="baseline">Baseline (Supp=False)</td><td class="baseline best" style="">0.3420</td><td class="baseline" style="">0.2988</td><td class="baseline best" style="">0.3516</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=0.42, CS=0.8, SPF=False</td><td>N/A</td><td>N/A</td><td class="" style="background-color: #FF0000; color: white">0.3410</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=1.0, CS=0.5, SPF=True</td><td class="" style="background-color: #FF0000; color: white">0.3224</td><td class="" style="background-color: #90EE90">0.2842</td><td>N/A</td></tr>
+
+    </table>
+    <br>
+    <p><strong>Color Legend:</strong></p>
+    <p><span style="background-color: #90EE90; padding: 2px;">Light Green</span>: Improvement > 5%</p>
+    <p><span style="background-color: #008000; color: white; padding: 2px;">Green</span>: Improvement 0-5%</p>
+    <p><span style="background-color: #FFB6C1; padding: 2px;">Light Red</span>: Decline 0-5%</p>
+    <p><span style="background-color: #FF0000; color: white; padding: 2px;">Red</span>: Decline > 5%</p>
+    <p><span style="background-color: #e6f3ff; padding: 2px;">Blue Background</span>: Baseline (use_suppression=False)</p>
+    <p><strong>Bold & Underlined</strong>: Best result for dataset</p>
+    </body>
+    </html>
+    

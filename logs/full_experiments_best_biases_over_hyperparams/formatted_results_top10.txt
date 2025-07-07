@@ -1,0 +1,75 @@
+====================================================================================================
+EXPERIMENT RESULTS - Top@10 Metrics
+====================================================================================================
+
+DATASET: lastfm
+--------------------------------------------------------------------------------
+
+Model: ItemKNN
+Type         Users%   Community    PowerNodes  ndcg@10          user_community_bias@10          recall@10          precision@10          hit_rate@10          mrr@10          item_coverage@10          gini_index@10          average_rec_popularity@10          popularity_lift@10          pop_miscalibration@10          intra_list_diversity@10          normalized_genre_entropy@10          simpson_index_genre@10          unique_genres_count@10          
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+baseline     N/A      N/A          N/A         0.2650      0.8196      0.2381      0.1830      0.7895      0.5232      0.4507      0.7904      203.4934    8.1042      1.3578      0.6877      0.8850      0.8410      10.7794     
+suppression  0.625    0.8          True        0.1528      0.5625      0.1446      0.1113      0.6195      0.3334      0.7701      0.6587      134.4014    5.3526      0.7253      0.8105      0.9121      0.8838      14.2123     
+
+
+Model: LightGCN
+Type         Users%   Community    PowerNodes  ndcg@10          user_community_bias@10          recall@10          precision@10          hit_rate@10          mrr@10          item_coverage@10          gini_index@10          average_rec_popularity@10          popularity_lift@10          pop_miscalibration@10          intra_list_diversity@10          normalized_genre_entropy@10          simpson_index_genre@10          unique_genres_count@10          
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+baseline     N/A      N/A          N/A         0.3516      0.7299      0.3257      0.2397      0.8948      0.6191      0.5542      0.7022      149.7758    5.9649      0.9239      0.7505      0.8952      0.8633      12.5157     
+suppression  0.42     0.8          False       0.3410      0.7315      0.3173      0.2327      0.8899      0.6066      0.5422      0.7065      149.6367    5.9593      0.9335      0.7495      0.8954      0.8631      12.4727     
+
+
+Model: MultiVAE
+Type         Users%   Community    PowerNodes  ndcg@10          user_community_bias@10          recall@10          precision@10          hit_rate@10          mrr@10          item_coverage@10          gini_index@10          average_rec_popularity@10          popularity_lift@10          pop_miscalibration@10          intra_list_diversity@10          normalized_genre_entropy@10          simpson_index_genre@10          unique_genres_count@10          
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+baseline     N/A      N/A          N/A         0.2706      0.7536      0.2492      0.1967      0.8223      0.5393      0.5054      0.7388      179.6194    7.1534      1.1498      0.7388      0.8932      0.8597      12.2504     
+suppression  0.625    0.8          False       0.2505      0.7139      0.2366      0.1831      0.7908      0.4742      0.6196      0.6932      147.7939    5.8859      0.8728      0.7336      0.8918      0.8570      12.1528     
+
+
+DATASET: ml-100k
+--------------------------------------------------------------------------------
+
+Model: ItemKNN
+Type         Users%   Community    PowerNodes  ndcg@10          user_community_bias@10          recall@10          precision@10          hit_rate@10          mrr@10          item_coverage@10          gini_index@10          average_rec_popularity@10          popularity_lift@10          pop_miscalibration@10          intra_list_diversity@10          normalized_genre_entropy@10          simpson_index_genre@10          unique_genres_count@10          
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+baseline     N/A      N/A          N/A         0.2831      0.7548      0.2326      0.1968      0.8014      0.4962      0.1701      0.6931      238.4259    5.6316      1.8623      0.8022      0.9135      0.8448      9.4524      
+suppression  0.625    0.8          False       0.2065      0.5271      0.1645      0.1452      0.6884      0.4053      0.2378      0.8119      232.8841    5.5007      2.0756      0.8179      0.9256      0.8581      9.9827      
+
+
+Model: LightGCN
+Type         Users%   Community    PowerNodes  ndcg@10          user_community_bias@10          recall@10          precision@10          hit_rate@10          mrr@10          item_coverage@10          gini_index@10          average_rec_popularity@10          popularity_lift@10          pop_miscalibration@10          intra_list_diversity@10          normalized_genre_entropy@10          simpson_index_genre@10          unique_genres_count@10          
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+baseline     N/A      N/A          N/A         0.3420      0.6994      0.2890      0.2405      0.8569      0.5476      0.4152      0.6968      186.9030    4.4147      1.2182      0.7696      0.8983      0.8208      8.7754      
+suppression  1.0      0.5          True        0.3224      0.6920      0.2765      0.2276      0.8478      0.5239      0.4097      0.7080      180.0009    4.2516      1.2116      0.7758      0.9000      0.8236      8.9231      
+
+
+Model: MultiVAE
+Type         Users%   Community    PowerNodes  ndcg@10          user_community_bias@10          recall@10          precision@10          hit_rate@10          mrr@10          item_coverage@10          gini_index@10          average_rec_popularity@10          popularity_lift@10          pop_miscalibration@10          intra_list_diversity@10          normalized_genre_entropy@10          simpson_index_genre@10          unique_genres_count@10          
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+baseline     N/A      N/A          N/A         0.3016      0.6964      0.2460      0.2168      0.8308      0.5126      0.3736      0.7442      219.1431    5.1762      1.5026      0.7916      0.9083      0.8379      9.3296      
+suppression  0.625    0.8          False       0.2709      0.6008      0.2288      0.1951      0.8002      0.4631      0.4215      0.7468      214.0208    5.0552      1.4593      0.7987      0.9113      0.8412      9.4345      
+
+
+DATASET: ml-1m
+--------------------------------------------------------------------------------
+
+Model: ItemKNN
+Type         Users%   Community    PowerNodes  ndcg@10          user_community_bias@10          recall@10          precision@10          hit_rate@10          mrr@10          item_coverage@10          gini_index@10          average_rec_popularity@10          popularity_lift@10          pop_miscalibration@10          intra_list_diversity@10          normalized_genre_entropy@10          simpson_index_genre@10          unique_genres_count@10          
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+baseline     N/A      N/A          N/A         0.2988      0.6238      0.1821      0.2385      0.8324      0.5306      0.2788      0.8377      1421.2051   8.3582      1.5424      0.7121      0.8899      0.8154      8.7793      
+suppression  0.42     0.8          False       0.2566      0.5880      0.1593      0.2012      0.7900      0.4857      0.2200      0.8844      1640.7025   9.6491      1.8313      0.7416      0.9018      0.8373      9.5196      
+
+
+Model: LightGCN
+Type         Users%   Community    PowerNodes  ndcg@10          user_community_bias@10          recall@10          precision@10          hit_rate@10          mrr@10          item_coverage@10          gini_index@10          average_rec_popularity@10          popularity_lift@10          pop_miscalibration@10          intra_list_diversity@10          normalized_genre_entropy@10          simpson_index_genre@10          unique_genres_count@10          
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+baseline     N/A      N/A          N/A         0.2988      0.6176      0.1932      0.2405      0.8511      0.5191      0.5277      0.7424      1010.8543   5.9449      0.7529      0.6995      0.8755      0.7876      8.2149      
+suppression  1.0      0.5          True        0.2842      0.6201      0.1808      0.2305      0.8335      0.5014      0.4746      0.7793      1052.6574   6.1908      0.9464      0.6986      0.8742      0.7851      8.1122      
+
+
+Model: MultiVAE
+Type         Users%   Community    PowerNodes  ndcg@10          user_community_bias@10          recall@10          precision@10          hit_rate@10          mrr@10          item_coverage@10          gini_index@10          average_rec_popularity@10          popularity_lift@10          pop_miscalibration@10          intra_list_diversity@10          normalized_genre_entropy@10          simpson_index_genre@10          unique_genres_count@10          
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+baseline     N/A      N/A          N/A         0.3048      0.6217      0.1912      0.2479      0.8588      0.5332      0.4714      0.7915      1221.1710   7.1818      1.0216      0.7020      0.8783      0.7959      8.3934      
+suppression  1.0      0.5          False       0.2829      0.5755      0.1808      0.2286      0.8303      0.5030      0.4822      0.7953      1217.0177   7.1574      0.9651      0.6975      0.8772      0.7925      8.3286      
+

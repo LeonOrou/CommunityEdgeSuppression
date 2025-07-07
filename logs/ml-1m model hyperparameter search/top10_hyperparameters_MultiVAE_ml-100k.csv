@@ -1,0 +1,10 @@
+Rank,hidden_dimension,latent_dimension,anneal_cap,NDCG@10,Log File
+1,800,200,0.3,0.3048355262848183,ml-1m model hyperparameter search\ml-1m_MultiVAE_0628_084556.log
+2,800,200,0.4,0.3031641904183601,ml-1m model hyperparameter search\ml-1m_MultiVAE_0628_211500.log
+3,600,200,0.3,0.30258413810018536,ml-1m model hyperparameter search\ml-1m_MultiVAE_0628_070235.log
+4,800,300,0.3,0.3019009115492867,ml-1m model hyperparameter search\ml-1m_MultiVAE_0628_095720.log
+5,600,300,0.3,0.3012861935743457,ml-1m model hyperparameter search\ml-1m_MultiVAE_0628_075344.log
+6,800,300,0.2,0.30000596121035716,ml-1m model hyperparameter search\ml-1m_MultiVAE_0628_091255.log
+7,800,200,0.2,0.29831151894850005,ml-1m model hyperparameter search\ml-1m_MultiVAE_0628_082033.log
+8,600,200,0.2,0.2970515210474248,ml-1m model hyperparameter search\ml-1m_MultiVAE_0628_063657.log
+9,600,300,0.2,0.29643246770360704,ml-1m model hyperparameter search\ml-1m_MultiVAE_0628_072729.log

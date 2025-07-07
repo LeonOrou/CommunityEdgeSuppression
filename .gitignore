@@ -1,13 +1,7 @@
-data/
 # virtual environments
 .venv/
 venv_lapi/
 .gitignore
 .idea/
 __pycache__/
-wandb/
-*
-!*.py
-!*.txt
-!*.md
 

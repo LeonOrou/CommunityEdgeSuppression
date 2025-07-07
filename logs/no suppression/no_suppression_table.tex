@@ -1,0 +1,19 @@
+\begin{table}[htbp]
+\centering
+\caption{user_community_bias performance across different k values}
+\begin{tabular}{llrrrr}
+\toprule
+Dataset & Model & k=10 & k=20 & k=50 & k=100 \\
+\midrule
+lastfm & ItemKNN & 0.8196 & 0.7695 & 0.6966 & 0.6313 \\
+lastfm & LightGCN & 0.7309 & 0.6841 & 0.6170 & 0.5542 \\
+lastfm & MultiVAE & 0.7536 & 0.7042 & 0.6301 & 0.5611 \\
+ml-100k & ItemKNN & 0.7548 & 0.7138 & 0.6321 & 0.5262 \\
+ml-100k & LightGCN & 0.7116 & 0.6683 & 0.6071 & 0.5290 \\
+ml-100k & MultiVAE & 0.6964 & 0.6517 & 0.5834 & 0.5028 \\
+ml-1m & ItemKNN & 0.6238 & 0.5593 & 0.4864 & 0.4367 \\
+ml-1m & LightGCN & 0.6434 & 0.5891 & 0.5244 & 0.4770 \\
+ml-1m & MultiVAE & 0.6217 & 0.5653 & 0.5009 & 0.4570 \\
+\bottomrule
+\end{tabular}
+\end{table}

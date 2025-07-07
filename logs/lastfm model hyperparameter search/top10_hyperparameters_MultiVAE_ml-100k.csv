@@ -1,0 +1,11 @@
+Rank,hidden_dimension,latent_dimension,anneal_cap,NDCG@10,Log File
+1,600,200,0.4,0.2706141318432202,lastfm model hyperparameter search\lastfm_MultiVAE_0628_202307.log
+2,800,200,0.4,0.27054284742778956,lastfm model hyperparameter search\lastfm_MultiVAE_0628_210230.log
+3,800,200,0.4,0.26888765769003753,lastfm model hyperparameter search\lastfm_MultiVAE_0628_205234.log
+4,600,200,0.3,0.26623577304629187,lastfm model hyperparameter search\lastfm_MultiVAE_0628_201646.log
+5,1000,200,0.3,0.2642191187413214,lastfm model hyperparameter search\lastfm_MultiVAE_0629_040033.log
+6,800,200,0.3,0.26401033267935664,lastfm model hyperparameter search\lastfm_MultiVAE_0628_011608.log
+7,600,200,0.3,0.2638051505400374,lastfm model hyperparameter search\lastfm_MultiVAE_0628_004332.log
+8,800,300,0.3,0.26340357790826474,lastfm model hyperparameter search\lastfm_MultiVAE_0628_013104.log
+9,600,300,0.3,0.2625664366057457,lastfm model hyperparameter search\lastfm_MultiVAE_0628_005903.log
+10,800,200,0.2,0.2592182437919165,lastfm model hyperparameter search\lastfm_MultiVAE_0628_010646.log

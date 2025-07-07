@@ -1,0 +1,6 @@
+Rank,embedding_dim,n_layers,NDCG@10,Log File
+1,128,4,0.341868410740092,ml-100k model hyperparameter search\ml-100k_LightGCN_0629_163133.log
+2,128,3,0.34097724869684176,ml-100k model hyperparameter search\ml-100k_LightGCN_0626_233558.log
+3,64,4,0.3330412394405559,ml-100k model hyperparameter search\ml-100k_LightGCN_0626_230822.log
+4,128,4,0.33274654846631657,ml-100k model hyperparameter search\ml-100k_LightGCN_0628_225038.log
+5,64,3,0.32892116089459467,ml-100k model hyperparameter search\ml-100k_LightGCN_0626_224244.log

@@ -1,0 +1,19 @@
+\begin{table}[htbp]
+\centering
+\caption{Performance metrics at k=10}
+\begin{tabular}{llrr}
+\toprule
+Dataset & Model & ndcg & user_community_bias \\
+\midrule
+lastfm & ItemKNN & 0.1475 & 0.6723 \\
+lastfm & LightGCN & 0.3463 & 0.7307 \\
+lastfm & MultiVAE & 0.2706 & 0.7536 \\
+ml-100k & ItemKNN & 0.2390 & 0.6384 \\
+ml-100k & LightGCN & 0.3322 & 0.6957 \\
+ml-100k & MultiVAE & 0.2815 & 0.6355 \\
+ml-1m & ItemKNN & 0.1575 & 0.5788 \\
+ml-1m & LightGCN & 0.2915 & 0.6188 \\
+ml-1m & MultiVAE & 0.2952 & 0.5998 \\
+\bottomrule
+\end{tabular}
+\end{table}

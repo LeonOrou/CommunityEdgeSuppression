@@ -1,0 +1,5 @@
+Rank,embedding_dim,n_layers,NDCG@10,Log File
+1,128,4,0.3345666857397854,lastfm model hyperparameter search\lastfm_LightGCN_0628_000348.log
+2,64,4,0.33032226068346116,lastfm model hyperparameter search\lastfm_LightGCN_0627_223228.log
+3,128,3,0.32984068260682586,lastfm model hyperparameter search\lastfm_LightGCN_0627_232824.log
+4,64,3,0.32549992940575617,lastfm model hyperparameter search\lastfm_LightGCN_0627_214435.log

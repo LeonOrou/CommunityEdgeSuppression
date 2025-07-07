@@ -1,0 +1,3 @@
+Resolution: 1.635, Number of user clusters: 18, Number of item clusters: 18, Modularity float: Aggregation: 1  Clusters: 46  Increase: 0.15245936810970306
+Aggregation: 2  Clusters: 18  Increase: 0.0013122794916853309
+Aggregation: 3  Clusters: 18  Increase: 0.0

@@ -1,0 +1,75 @@
+
+    <html>
+    <head>
+        <style>
+            table { border-collapse: collapse; width: 100%; font-size: 10px; }
+            th, td { border: 1px solid #ddd; padding: 6px; text-align: center; }
+            th { background-color: #f2f2f2; font-weight: bold; }
+            .baseline { font-weight: bold; background-color: #e6f3ff; }
+            .best { font-weight: bold; text-decoration: underline; }
+            .model-header { background-color: #d9d9d9; font-weight: bold; }
+            .dataset-header { background-color: #f0f0f0; font-weight: bold; }
+        </style>
+    </head>
+    <body>
+    <h2>Recommendation System Results: USER_COMMUNITY_BIAS @ Top-10</h2>
+    <table>
+    <tr><th>Model</th><th>Hyperparameters</th><th class='dataset-header'>ml-100k</th><th class='dataset-header'>ml-1m</th><th class='dataset-header'>lastfm</th></tr>
+<tr><td class="model-header" rowspan="15">ItemKNN</td><td class="baseline">Baseline (Supp=False)</td><td class="baseline best" style="">0.7548</td><td class="baseline" style="">0.6238</td><td class="baseline best" style="">0.8196</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=1.0, CS=0.2, SPF=False</td><td class="" style="background-color: #90EE90">0.5439</td><td class="" style="background-color: #90EE90">0.5339</td><td class="" style="background-color: #90EE90">0.5250</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=1.0, CS=0.2, SPF=True</td><td class="" style="background-color: #90EE90">0.5439</td><td class="" style="background-color: #90EE90">0.5339</td><td class="" style="background-color: #90EE90">0.5250</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=0.4, CS=0.5, SPF=False</td><td class="" style="background-color: #90EE90">0.5759</td><td class="" style="background-color: #90EE90">0.5866</td><td class="" style="background-color: #90EE90">0.6938</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=0.4, CS=0.5, SPF=True</td><td class="" style="background-color: #90EE90">0.6049</td><td class="" style="background-color: #90EE90">0.6026</td><td class="" style="background-color: #90EE90">0.6768</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=0.67, CS=0.5, SPF=False</td><td class="" style="background-color: #90EE90">0.5221</td><td class="" style="background-color: #90EE90">0.6145</td><td class="" style="background-color: #90EE90">0.5505</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=0.67, CS=0.5, SPF=True</td><td class="" style="background-color: #90EE90">0.5358</td><td class="" style="background-color: #90EE90">0.6170</td><td class="" style="background-color: #90EE90">0.5373</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=1.0, CS=0.5, SPF=False</td><td class="" style="background-color: #90EE90">0.5439</td><td class="" style="background-color: #90EE90">0.5339</td><td class="" style="background-color: #90EE90">0.5250</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=1.0, CS=0.5, SPF=True</td><td class="" style="background-color: #90EE90">0.5439</td><td class="" style="background-color: #90EE90">0.5339</td><td class="" style="background-color: #90EE90">0.5250</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=0.25, CS=0.8, SPF=False</td><td class="" style="background-color: #90EE90">0.6417</td><td class="" style="background-color: #90EE90">0.5851</td><td class="" style="background-color: #90EE90">0.7511</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=0.25, CS=0.8, SPF=True</td><td class="" style="background-color: #90EE90">0.6796</td><td class="" style="background-color: #90EE90">0.6221</td><td class="" style="background-color: #90EE90">0.7387</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=0.42, CS=0.8, SPF=False</td><td class="" style="background-color: #90EE90">0.5703</td><td class="" style="background-color: #90EE90">0.5880</td><td class="" style="background-color: #90EE90">0.6853</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=0.42, CS=0.8, SPF=True</td><td class="" style="background-color: #90EE90">0.5967</td><td class="" style="background-color: #90EE90">0.6022</td><td class="" style="background-color: #90EE90">0.6678</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=0.625, CS=0.8, SPF=False</td><td class="" style="background-color: #90EE90">0.5271</td><td class="" style="background-color: #90EE90">0.6091</td><td class="" style="background-color: #90EE90">0.5755</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=0.625, CS=0.8, SPF=True</td><td class="" style="background-color: #90EE90">0.5440</td><td class="" style="background-color: #90EE90">0.6131</td><td class="" style="background-color: #90EE90">0.5625</td></tr>
+<tr><td class="model-header" rowspan="15">MultiVAE</td><td class="baseline">Baseline (Supp=False)</td><td class="baseline" style="">0.6964</td><td class="baseline" style="">0.6217</td><td class="baseline" style="">0.7536</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=1.0, CS=0.2, SPF=False</td><td class="" style="background-color: #90EE90">0.6716</td><td class="" style="background-color: #90EE90">0.6064</td><td class="" style="background-color: #90EE90">0.7440</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=1.0, CS=0.2, SPF=True</td><td class="" style="background-color: #90EE90">0.6710</td><td class="" style="background-color: #90EE90">0.6133</td><td class="" style="background-color: #90EE90">0.7474</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=0.4, CS=0.5, SPF=False</td><td class="" style="background-color: #90EE90">0.6707</td><td class="" style="background-color: #90EE90">0.6122</td><td class="" style="background-color: #90EE90">0.7419</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=0.4, CS=0.5, SPF=True</td><td class="" style="background-color: #90EE90">0.6726</td><td class="" style="background-color: #90EE90">0.6190</td><td class="" style="background-color: #90EE90">0.7458</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=0.67, CS=0.5, SPF=False</td><td class="" style="background-color: #90EE90">0.6422</td><td class="" style="background-color: #90EE90">0.5939</td><td class="" style="background-color: #90EE90">0.7369</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=0.67, CS=0.5, SPF=True</td><td class="" style="background-color: #90EE90">0.6495</td><td class="" style="background-color: #90EE90">0.5980</td><td class="" style="background-color: #90EE90">0.7360</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=1.0, CS=0.5, SPF=False</td><td class="" style="background-color: #90EE90">0.6093</td><td class="" style="background-color: #90EE90">0.5755</td><td class="" style="background-color: #90EE90">0.7239</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=1.0, CS=0.5, SPF=True</td><td class="" style="background-color: #90EE90">0.6109</td><td class="" style="background-color: #90EE90">0.5773</td><td class="" style="background-color: #90EE90">0.7254</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=0.25, CS=0.8, SPF=False</td><td class="" style="background-color: #90EE90">0.6668</td><td class="" style="background-color: #90EE90">0.6114</td><td class="" style="background-color: #90EE90">0.7408</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=0.25, CS=0.8, SPF=True</td><td class="" style="background-color: #90EE90">0.6808</td><td class="" style="background-color: #90EE90">0.6339</td><td class="" style="background-color: #90EE90">0.7452</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=0.42, CS=0.8, SPF=False</td><td class="" style="background-color: #90EE90">0.6371</td><td class="" style="background-color: #90EE90">0.5894</td><td class="" style="background-color: #90EE90">0.7315</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=0.42, CS=0.8, SPF=True</td><td class="" style="background-color: #90EE90">0.6587</td><td class="" style="background-color: #90EE90">0.6118</td><td class="" style="background-color: #90EE90">0.7323</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=0.625, CS=0.8, SPF=False</td><td class="" style="background-color: #90EE90">0.6008</td><td class="" style="background-color: #90EE90">0.5780</td><td class="" style="background-color: #90EE90">0.7139</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=0.625, CS=0.8, SPF=True</td><td class="" style="background-color: #90EE90">0.6167</td><td class="" style="background-color: #90EE90">0.5867</td><td class="" style="background-color: #90EE90">0.7149</td></tr>
+<tr><td class="model-header" rowspan="15">LightGCN</td><td class="baseline">Baseline (Supp=False)</td><td class="baseline" style="">0.6994</td><td class="baseline" style="">0.6176</td><td class="baseline" style="">0.7299</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=1.0, CS=0.2, SPF=False</td><td class="" style="background-color: #90EE90">0.6998</td><td class="" style="background-color: #90EE90">0.6343</td><td class="" style="background-color: #90EE90">0.7350</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=1.0, CS=0.2, SPF=True</td><td class="" style="background-color: #90EE90">0.6998</td><td class="" style="background-color: #90EE90">0.6343</td><td class="" style="background-color: #90EE90">0.7350</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=0.4, CS=0.5, SPF=False</td><td class="" style="background-color: #90EE90">0.6968</td><td class="" style="background-color: #90EE90">0.6328</td><td class="" style="background-color: #90EE90">0.7379</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=0.4, CS=0.5, SPF=True</td><td class="" style="background-color: #90EE90">0.6988</td><td class="" style="background-color: #90EE90">0.6285</td><td class="" style="background-color: #90EE90">0.7374</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=0.67, CS=0.5, SPF=False</td><td class="" style="background-color: #90EE90">0.7032</td><td class="" style="background-color: #90EE90">0.6296</td><td class="" style="background-color: #90EE90">0.7366</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=0.67, CS=0.5, SPF=True</td><td class="" style="background-color: #90EE90">0.6945</td><td class="" style="background-color: #90EE90">0.6259</td><td class="" style="background-color: #90EE90">0.7375</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=1.0, CS=0.5, SPF=False</td><td class="" style="background-color: #90EE90">0.6920</td><td class="" style="background-color: #90EE90">0.6201</td><td class="" style="background-color: #90EE90">0.7323</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=1.0, CS=0.5, SPF=True</td><td class="" style="background-color: #90EE90">0.6920</td><td class="" style="background-color: #90EE90">0.6201</td><td class="" style="background-color: #90EE90">0.7323</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=0.25, CS=0.8, SPF=False</td><td class="" style="background-color: #90EE90">0.6982</td><td class=" best" style="background-color: #90EE90">0.6368</td><td class="" style="background-color: #90EE90">0.7334</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=0.25, CS=0.8, SPF=True</td><td class="" style="background-color: #90EE90">0.6981</td><td class="" style="background-color: #90EE90">0.6288</td><td class="" style="background-color: #90EE90">0.7334</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=0.42, CS=0.8, SPF=False</td><td class="" style="background-color: #90EE90">0.7063</td><td class="" style="background-color: #90EE90">0.6304</td><td class="" style="background-color: #90EE90">0.7315</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=0.42, CS=0.8, SPF=True</td><td class="" style="background-color: #90EE90">0.7038</td><td class="" style="background-color: #90EE90">0.6267</td><td class="" style="background-color: #90EE90">0.7344</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=0.625, CS=0.8, SPF=False</td><td class="" style="background-color: #90EE90">0.7024</td><td class="" style="background-color: #90EE90">0.6274</td><td class="" style="background-color: #90EE90">0.7349</td></tr>
+<tr><td>Supp=True, UT=0.05, UD=0.625, CS=0.8, SPF=True</td><td class="" style="background-color: #90EE90">0.6965</td><td class="" style="background-color: #90EE90">0.6299</td><td class="" style="background-color: #90EE90">0.7378</td></tr>
+
+    </table>
+    <br>
+    <p><strong>Color Legend:</strong></p>
+    <p><span style="background-color: #90EE90; padding: 2px;">Light Green</span>: Improvement > 5%</p>
+    <p><span style="background-color: #008000; color: white; padding: 2px;">Green</span>: Improvement 0-5%</p>
+    <p><span style="background-color: #FFB6C1; padding: 2px;">Light Red</span>: Decline 0-5%</p>
+    <p><span style="background-color: #FF0000; color: white; padding: 2px;">Red</span>: Decline > 5%</p>
+    <p><span style="background-color: #e6f3ff; padding: 2px;">Blue Background</span>: Baseline (use_suppression=False)</p>
+    <p><strong>Bold & Underlined</strong>: Best result for dataset</p>
+    </body>
+    </html>
+    
