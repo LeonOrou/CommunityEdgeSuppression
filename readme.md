@@ -1,6 +1,6 @@
 # Recommendation System with Community Bias Analysis
 
-A comprehensive recommendation system framework that implements multiple collaborative filtering algorithms with built-in community bias analysis and edge suppression capabilities. This is the code of the Bachelor Thesis of Leon Orou: [paper link coming soon]
+A comprehensive recommendation system framework that implements multiple collaborative filtering algorithms with built-in community bias analysis and edge suppression capabilities. This is the code of the Bachelor Thesis of Leon Orou: [pdf link coming soon]
 
 ## Usage
 
