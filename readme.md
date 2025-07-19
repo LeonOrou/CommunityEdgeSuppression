@@ -1,6 +1,6 @@
 # Recommendation Framework with Community Edge Suppression
 
-A comprehensive recommendation system framework that implements multiple collaborative filtering algorithms with built-in community bias analysis and community edge suppression capabilities. This is the code of the Bachelor Thesis of Leon Orou, the study can be fount here: [pdf link coming soon]
+A comprehensive recommendation system framework that implements multiple collaborative filtering algorithms with built-in community bias analysis and community edge suppression capabilities. This is the code of the Bachelor Thesis of Leon Orou, the study can be fount [here](https://jkulinz-my.sharepoint.com/:b:/g/personal/k12125027_students_jku_at/EeJ1QR-L3ABNka_SjrS4c5QBLB6CEzWsbnYfJvz39J3meQ?e=202xNb).
 
 ## Usage
 
